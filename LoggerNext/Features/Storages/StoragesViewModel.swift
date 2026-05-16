@@ -1,0 +1,183 @@
+//
+//  StoragesViewModel.swift
+//  LoggerNext
+//
+
+import Foundation
+
+/// Drives the Storages screen for a given session. Holds the latest
+/// per-namespace snapshot, the user's selected namespace + record,
+/// and orchestrates `storage.list` refreshes.
+///
+/// Data flow:
+/// 1. On init / session switch: pull latest snapshots from the store.
+/// 2. Subscribe to `.storageUpdated` change broadcasts; refresh when
+///    one matches our session.
+/// 3. "Reload" UI action sends `storage.list` to the connected client.
+///    The SDK responds with a `storage` message; the existing
+///    `handleInbound` path decodes it into the store; the store
+///    broadcasts `.storageUpdated`; we re-fetch.
+@Observable
+@MainActor
+final class StoragesViewModel {
+
+    var selectedNamespace: StorageSnapshot.Namespace = .session {
+        didSet { selectedRecordId = nil }
+    }
+
+    /// Latest snapshot per namespace. Refreshed from the store after
+    /// any `.storageUpdated` broadcast for this session.
+    private(set) var snapshots: [StorageSnapshot.Namespace: StorageSnapshot] = [:]
+
+    var selectedRecordId: String?
+
+    /// Substring filter applied to the visible records — matches the
+    /// top-level row OR any nested descendant by key or value.
+    var searchTerm: String = ""
+
+    /// Periodic auto-refresh toggle. When on, the view fires a
+    /// `storage.list` every `autoRefreshInterval` seconds via a
+    /// `.task` loop that watches this property.
+    var autoRefreshEnabled: Bool = false
+
+    /// Seconds between auto-refreshes when enabled.
+    var autoRefreshInterval: TimeInterval = 2.0
+
+    let sessionId: Int64
+    private let store: LogStore
+
+    /// `nonisolated(unsafe)` so the nonisolated `deinit` can cancel
+    /// it. Task<Void, Never> is Sendable; only written from the
+    /// `@MainActor` init.
+    private nonisolated(unsafe) var subscription: Task<Void, Never>?
+
+    init(store: LogStore, sessionId: Int64) {
+        self.store = store
+        self.sessionId = sessionId
+        Task { await self.reloadFromStore() }
+        Task { await self.subscribeToChanges() }
+    }
+
+    deinit {
+        subscription?.cancel()
+    }
+
+    // MARK: - Derived state
+
+    /// Top-level records in the currently-selected namespace, sorted
+    /// alphabetically. The table displays these; the detail pane
+    /// drills into any one of them.
+    var records: [StorageRecord] {
+        guard let snap = snapshots[selectedNamespace] else { return [] }
+        return StorageRecord.parseTopLevel(snap.dataJSON)
+    }
+
+    /// Records narrowed by `searchTerm`. A top-level record matches
+    /// if any descendant key or value contains the term (case-
+    /// insensitive). Empty search term returns all records.
+    var filteredRecords: [StorageRecord] {
+        let trimmed = searchTerm.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return records }
+        let needle = trimmed.lowercased()
+        return records.filter { record in
+            record.allDescendants().contains { node in
+                node.key.lowercased().contains(needle) ||
+                (node.valueText?.lowercased().contains(needle) ?? false)
+            }
+        }
+    }
+
+    /// Record currently focused in the detail pane. Looks through
+    /// every top-level record and its descendants — selection may
+    /// point at any depth via the OutlineGroup in the detail view.
+    var selectedRecord: StorageRecord? {
+        guard let id = selectedRecordId else { return nil }
+        for top in records {
+            for record in top.allDescendants() where record.id == id {
+                return record
+            }
+        }
+        return nil
+    }
+
+    /// Total namespaces present in the latest snapshot set.
+    func recordCount(in namespace: StorageSnapshot.Namespace) -> Int {
+        guard let snap = snapshots[namespace] else { return 0 }
+        return StorageRecord.parseTopLevel(snap.dataJSON).count
+    }
+
+    /// True if at least one namespace has data.
+    var hasAnyData: Bool {
+        !snapshots.isEmpty
+    }
+
+    // MARK: - Actions
+
+    /// Send `storage.list` to the device. The response will come back
+    /// as a `storage` message and refresh `snapshots` via the
+    /// subscription. No-op if no client is connected (WSServer.send
+    /// silently drops in that case).
+    func requestRefresh(via server: WSServer) {
+        Task { await server.send(command: "storage.list") }
+    }
+
+    /// Wipe local snapshot cache. Doesn't touch the device's actual
+    /// storage; just clears what LoggerNext is displaying.
+    func clearLocalCache() {
+        snapshots.removeAll()
+        selectedRecordId = nil
+    }
+
+    /// Produce the file payload for the Export button. Includes all
+    /// three namespaces in one JSON document, matching the wire
+    /// format the SDK sends in a `storage` message — so the file is
+    /// re-ingestible later if we add storage import.
+    func exportAllAsJSON(pretty: Bool = true) -> Data? {
+        var combined: [String: Any] = [:]
+        for ns in StorageSnapshot.Namespace.allCases {
+            if let snap = snapshots[ns],
+               let data = snap.dataJSON.data(using: .utf8),
+               let parsed = try? JSONSerialization.jsonObject(with: data, options: []) {
+                combined[ns.wireKey] = parsed
+            }
+        }
+        guard !combined.isEmpty else { return nil }
+        let options: JSONSerialization.WritingOptions = pretty ? [.prettyPrinted, .sortedKeys] : [.sortedKeys]
+        return try? JSONSerialization.data(withJSONObject: combined, options: options)
+    }
+
+    // MARK: - Loading
+
+    private func reloadFromStore() async {
+        var fresh: [StorageSnapshot.Namespace: StorageSnapshot] = [:]
+        for ns in StorageSnapshot.Namespace.allCases {
+            if let snap = try? await store.latestStorageSnapshot(
+                sessionId: sessionId,
+                namespace: ns
+            ) {
+                fresh[ns] = snap
+            }
+        }
+        snapshots = fresh
+    }
+
+    private func subscribeToChanges() async {
+        let stream = await store.changes()
+        subscription = Task { [weak self] in
+            for await change in stream {
+                guard let self else { return }
+                switch change {
+                case .storageUpdated(let sid, _) where sid == self.sessionId:
+                    await self.reloadFromStore()
+                case .cleared(let sid) where sid == self.sessionId:
+                    // clearEvents() also deletes bookmarks; storage
+                    // snapshots survive intentionally so the user can
+                    // still inspect device state after a clear.
+                    break
+                default:
+                    break
+                }
+            }
+        }
+    }
+}

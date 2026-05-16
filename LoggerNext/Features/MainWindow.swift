@@ -96,7 +96,13 @@ struct MainWindow: View {
                 SessionsView()
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        // No explicit alignment — defaults to center, which is what
+        // ContentUnavailableView placeholders want. Fully-populated
+        // views (LogFeedContent, StoragesContent) fill the space via
+        // their own .frame(maxWidth/maxHeight: .infinity) modifiers
+        // with internal top-leading alignment, so they pin correctly
+        // regardless of what the parent says.
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // MARK: - Toolbar
