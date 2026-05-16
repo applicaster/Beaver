@@ -118,8 +118,25 @@ enum Schema {
             """)
         }
 
-        // Future migrations:
-        // migrator.registerMigration("v2_<change>") { db in ... }
+        migrator.registerMigration("v2_bookmarks") { db in
+            // Bookmark / pinned events. Stores a pointer to an event by
+            // (session_id, event_id). UNIQUE on event_id makes the
+            // toggle action idempotent — toggling on a bookmarked event
+            // just removes it, no duplicate rows possible.
+            try db.execute(sql: """
+                CREATE TABLE event_bookmark (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id  INTEGER NOT NULL REFERENCES session(id) ON DELETE CASCADE,
+                    event_id    INTEGER NOT NULL UNIQUE,
+                    note        TEXT,
+                    created_at  INTEGER NOT NULL
+                );
+            """)
+            try db.execute(sql: """
+                CREATE INDEX idx_bookmark_session
+                    ON event_bookmark(session_id, created_at DESC);
+            """)
+        }
 
         return migrator
     }

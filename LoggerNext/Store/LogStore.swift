@@ -20,6 +20,7 @@ public actor LogStore {
         case sessionStarted(Session)
         case sessionEnded(Session)
         case storageUpdated(sessionId: Int64, namespace: StorageSnapshot.Namespace)
+        case bookmarksChanged(sessionId: Int64)
     }
 
     public enum Source {
@@ -176,16 +177,25 @@ public actor LogStore {
         }
     }
 
-    /// Delete every event row in a session. Used by the "Clear" toolbar
-    /// button. The session row itself is kept.
+    /// Delete every event row in a session plus any bookmarks that
+    /// pointed at those events. Used by the "Clear" toolbar button.
+    /// The session row itself is kept.
     public func clearEvents(sessionId: Int64) async throws {
         try await dbQueue.write { db in
             try db.execute(
                 sql: "DELETE FROM event WHERE session_id = ?",
                 arguments: [sessionId]
             )
+            // Bookmarks reference event ids by value (no FK cascade on
+            // event.id), so wipe them alongside their events to avoid
+            // orphaned rows.
+            try db.execute(
+                sql: "DELETE FROM event_bookmark WHERE session_id = ?",
+                arguments: [sessionId]
+            )
         }
         broadcast(.cleared(sessionId: sessionId))
+        broadcast(.bookmarksChanged(sessionId: sessionId))
     }
 
     /// Append a batch of decoded events in a single transaction. Used by
@@ -314,6 +324,121 @@ public actor LogStore {
             let rows = try Row.fetchAll(db, sql: sql, arguments: StatementArguments(fullArgs))
             return rows.map(Self.makeEventRecord)
         }
+    }
+
+    // MARK: - Bookmarks
+
+    /// Add a bookmark for `eventId` in `sessionId`. If already
+    /// bookmarked, this is a no-op (the UNIQUE constraint on event_id
+    /// is honored by `INSERT OR IGNORE`).
+    public func addBookmark(
+        eventId: Int64,
+        sessionId: Int64,
+        note: String? = nil
+    ) async throws {
+        let now = Int(Date().timeIntervalSince1970 * 1000)
+        let inserted = try await dbQueue.write { db -> Int in
+            try db.execute(
+                sql: """
+                    INSERT OR IGNORE INTO event_bookmark
+                        (session_id, event_id, note, created_at)
+                    VALUES (?, ?, ?, ?)
+                """,
+                arguments: [sessionId, eventId, note, now]
+            )
+            return db.changesCount
+        }
+        print("[Bookmarks] addBookmark event=\(eventId) session=\(sessionId) inserted=\(inserted)")
+        broadcast(.bookmarksChanged(sessionId: sessionId))
+    }
+
+    /// Remove the bookmark for `eventId`. Broadcasts even if no row
+    /// was deleted (e.g., already removed) so subscribers refresh
+    /// idempotently.
+    public func removeBookmark(eventId: Int64, sessionId: Int64) async throws {
+        try await dbQueue.write { db in
+            try db.execute(
+                sql: "DELETE FROM event_bookmark WHERE event_id = ?",
+                arguments: [eventId]
+            )
+        }
+        broadcast(.bookmarksChanged(sessionId: sessionId))
+    }
+
+    /// Return the set of bookmarked event IDs in a session — used to
+    /// drive the per-row star indicator in the table.
+    public func bookmarkedEventIds(sessionId: Int64) async throws -> Set<Int64> {
+        let ids: [Int64] = try await dbQueue.read { db in
+            try Int64.fetchAll(
+                db,
+                sql: "SELECT event_id FROM event_bookmark WHERE session_id = ?",
+                arguments: [sessionId]
+            )
+        }
+        return Set(ids)
+    }
+
+    /// Bookmarks joined with their underlying events, ordered newest
+    /// bookmark first, for the bookmarks popover.
+    public func bookmarks(sessionId: Int64) async throws -> [BookmarkedEvent] {
+        let result: [BookmarkedEvent] = try await dbQueue.read { db in
+            let rows = try Row.fetchAll(
+                db,
+                sql: """
+                    SELECT b.id            AS bid,
+                           b.session_id    AS bsid,
+                           b.event_id      AS beid,
+                           b.note          AS bnote,
+                           b.created_at    AS bca,
+                           e.id            AS eid,
+                           e.session_id    AS esid,
+                           e.timestamp_ms  AS ets,
+                           e.level         AS elevel,
+                           e.subsystem     AS esub,
+                           e.category      AS ecat,
+                           e.message       AS emsg,
+                           e.data_json     AS edata,
+                           e.context_json  AS ectx
+                    FROM event_bookmark b
+                    INNER JOIN event e ON e.id = b.event_id
+                    WHERE b.session_id = ?
+                    ORDER BY b.created_at DESC
+                """,
+                arguments: [sessionId]
+            )
+            return rows.map { row in
+                let bookmark = Bookmark(
+                    id: row["bid"],
+                    sessionId: row["bsid"],
+                    eventId: row["beid"],
+                    note: row["bnote"],
+                    createdAt: Date(timeIntervalSince1970: TimeInterval(row["bca"] as Int) / 1000.0)
+                )
+                let event = EventRecord(
+                    id: row["eid"],
+                    sessionId: row["esid"],
+                    timestampMillis: UInt64(row["ets"] as Int),
+                    level: LogLevel(rawValue: row["elevel"]) ?? .info,
+                    subsystem: row["esub"],
+                    category: row["ecat"],
+                    message: row["emsg"],
+                    dataJSON: row["edata"],
+                    contextJSON: row["ectx"]
+                )
+                return BookmarkedEvent(bookmark: bookmark, event: event)
+            }
+        }
+        // Diagnostic: also count rows in event_bookmark directly so we
+        // can see if it's the INNER JOIN that's losing them.
+        let rawCount = try await dbQueue.read { db in
+            try Int.fetchOne(
+                db,
+                sql: "SELECT COUNT(*) FROM event_bookmark WHERE session_id = ?",
+                arguments: [sessionId]
+            ) ?? 0
+        }
+        print("[Bookmarks] bookmarks(session=\(sessionId)) -> joined=\(result.count) raw=\(rawCount)")
+        return result
     }
 
     // MARK: - Match navigation (Search & highlight)

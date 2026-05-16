@@ -520,3 +520,53 @@ navigation, which is a one-shot user action where latency matters.
 - One-shot user actions (Next/Previous match) bypass the debouncer to
   feel snappy.
 - Tunable in one place if 150 ms turns out to be the wrong knob value.
+
+---
+
+## D17. Command-help registry as temporary scaffold
+
+**Status:** Accepted (2026-05-16). **Scheduled for removal** when the
+SDK protocol upgrades — see PROTOCOL.md §3.2.1.
+
+**Decision.** Ship a hard-coded `CommandRegistry` mapping each known
+SDK command name to `{ syntax, description }`. On client connect,
+LoggerNext sends `cmdlist` automatically; when the SDK's response
+arrives (a log event with subsystem
+`DebugFeatures/ConsoleCommands/GeneralHandler` and a known message
+prefix), we parse out the command names and merge them with the
+registry. The command-help popover displays:
+
+- **Mapped commands** with full syntax + description, grouped by
+  prefix (Storage, Debug, Layout, General).
+- **Unmapped commands** in a separate "Unknown to LoggerNext"
+  section so the user can still discover and run them.
+
+**Why.**
+- The current SDK's `cmdlist` returns names only, no syntax. Without
+  a mapping the popover would just show a flat name list and the user
+  would have to read SDK docs to know argument shapes.
+- The mapping captures *today's* iOS SDK. Cross-platform (tvOS,
+  Android, Web) clients will likely return the same names with the
+  same syntax — but where they don't, the merge falls through and the
+  unmapped commands still work.
+- Self-deleting: when the SDK extends `cmdlist`'s response to return
+  structured `{name, syntax, description}` (proposed shape in
+  PROTOCOL.md §3.2.1), we delete `CommandRegistry.swift` and have
+  `CommandHints.merge` read syntax directly from the response.
+
+**Alternatives considered.**
+- *Names-only popover.* Simpler but unhelpful — users still need to
+  consult SDK docs for arg shapes.
+- *Embed full command spec in LoggerNext per-platform.* More accurate
+  but contradicts the "no LoggerNext-side ownership of SDK contracts"
+  principle. The registry-as-scaffold is the minimum viable
+  shortcut while the SDK catches up.
+
+**Implications.**
+- `CommandRegistry.swift` carries a prominent TODO header marking it
+  as temporary and pointing at PROTOCOL.md §3.2.1.
+- `cmdlist` is sent automatically 500 ms after `.clientConnected` so
+  the popover is pre-populated by the time the user opens it.
+- The cmdlist response event still appears in the log feed
+  (discovery is a pure side-channel; we don't suppress it). When the
+  SDK adopts a typed response message, we can stop polluting the feed.

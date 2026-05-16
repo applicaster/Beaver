@@ -42,6 +42,15 @@ final class LogFeedViewModel {
     /// Drives the "↓ N new events" pill in the filter bar.
     private(set) var unseenCount: Int = 0
 
+    /// When on, consecutive events with identical (subsystem, category,
+    /// message, level) collapse to one visible row showing ×N. Display
+    /// only — every event still lives in the store (D8).
+    var collapseRepeats: Bool = false
+
+    /// Cached set of bookmarked event IDs in this session; refreshed
+    /// via the store's `.bookmarksChanged` change stream.
+    private(set) var bookmarkedIds: Set<Int64> = []
+
     /// Visual-only highlight term. Doesn't filter rows — just paints
     /// matches in the visible page. Matches the old Logger's "Search &
     /// highlight" field, separate from the include/exclude filters.
@@ -100,6 +109,7 @@ final class LogFeedViewModel {
         self.sessionId = sessionId
         requestReload()
         Task { await self.subscribeToChanges() }
+        Task { await self.reloadBookmarks() }
     }
 
     deinit {
@@ -122,6 +132,44 @@ final class LogFeedViewModel {
             guard !Task.isCancelled else { return }
             await self?.reload(rangeOnly: rangeOnly)
         }
+    }
+
+    // MARK: - Row presentation
+
+    /// A row as the table sees it. When `collapseRepeats` is off this
+    /// is one CollapsedRow per page event with count=1. When it's on
+    /// consecutive identical events fold into a single row whose
+    /// `count` is the run length.
+    struct CollapsedRow: Identifiable, Hashable {
+        let event: EventRecord
+        let count: Int
+        var id: EventRecord.ID { event.id }
+    }
+
+    var collapsedRows: [CollapsedRow] {
+        guard collapseRepeats else {
+            return page.map { CollapsedRow(event: $0, count: 1) }
+        }
+        var result: [CollapsedRow] = []
+        result.reserveCapacity(page.count)
+        for event in page {
+            if let last = result.last, isSameKind(last.event, event) {
+                result[result.count - 1] = CollapsedRow(
+                    event: last.event,
+                    count: last.count + 1
+                )
+            } else {
+                result.append(CollapsedRow(event: event, count: 1))
+            }
+        }
+        return result
+    }
+
+    private func isSameKind(_ a: EventRecord, _ b: EventRecord) -> Bool {
+        a.level == b.level &&
+        a.subsystem == b.subsystem &&
+        a.category == b.category &&
+        a.message == b.message
     }
 
     // MARK: - Visible range driving
@@ -180,6 +228,8 @@ final class LogFeedViewModel {
                 case .cleared(let sid) where sid == self.sessionId:
                     self.unseenCount = 0
                     self.requestReload()
+                case .bookmarksChanged(let sid) where sid == self.sessionId:
+                    await self.reloadBookmarks()
                 default:
                     break
                 }
@@ -202,6 +252,44 @@ final class LogFeedViewModel {
     func resumeFollow() {
         followTail = true
         // didSet on followTail already clears unseenCount.
+    }
+
+    // MARK: - Bookmarks
+
+    func isBookmarked(_ eventId: Int64) -> Bool {
+        bookmarkedIds.contains(eventId)
+    }
+
+    /// Toggle the bookmark state for an event. Fire-and-forget; the
+    /// store's `.bookmarksChanged` broadcast refreshes `bookmarkedIds`.
+    func toggleBookmark(_ eventId: Int64) {
+        let isOn = bookmarkedIds.contains(eventId)
+        print("[Bookmarks] toggle event=\(eventId) session=\(sessionId) wasOn=\(isOn)")
+        Task { [store, sessionId] in
+            do {
+                if isOn {
+                    try await store.removeBookmark(eventId: eventId, sessionId: sessionId)
+                } else {
+                    try await store.addBookmark(eventId: eventId, sessionId: sessionId)
+                }
+            } catch {
+                print("[Bookmarks] toggle ERROR: \(error)")
+            }
+        }
+    }
+
+    /// Jump the table to a bookmarked event — reuses the match-navigation
+    /// scroll path so the row gets centered and selected.
+    func jumpToBookmark(eventId: Int64) {
+        Task { await jumpTo(eventId: eventId) }
+    }
+
+    private func reloadBookmarks() async {
+        do {
+            bookmarkedIds = try await store.bookmarkedEventIds(sessionId: sessionId)
+        } catch {
+            print("reloadBookmarks: \(error)")
+        }
     }
 
     // MARK: - Search & highlight: match navigation

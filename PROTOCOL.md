@@ -86,8 +86,42 @@ Sent in response to user action in the command bar or storages screen.
 | Command         | Meaning                                                       | Sender                                |
 |-----------------|---------------------------------------------------------------|---------------------------------------|
 | `storage.list`  | Request a snapshot of session/local/keychain storage.         | Storages screen reload button         |
-| `cmdlist`       | Request the list of commands the SDK currently supports.      | Command bar autocomplete refresh      |
+| `cmdlist`       | Request the list of commands the SDK currently supports.      | Sent automatically on connect; ⟳ in command popover |
 | (anything else) | Free-form command text typed by the user in the command bar.  | Command bar submit                    |
+
+#### 3.2.1 `cmdlist` response shape (confirmed 2026-05-16)
+
+The SDK replies to `cmdlist` with a **regular log event** rather than a
+dedicated message type. The desktop side identifies it by subsystem +
+message prefix:
+
+- **Level:** `info`
+- **Subsystem:** `DebugFeatures/ConsoleCommands/GeneralHandler`
+- **Category:** empty
+- **Message:** `"Registered commands:\n<name1>\n<name2>\n…"` — a header
+  line followed by one command name per line, no syntax, no
+  descriptions.
+
+LoggerNext's parser drops the header line, trims each remaining line,
+and feeds the names through `CommandHints.merge` to add LoggerNext's
+known syntax (`CommandRegistry`) where available. See `DECISIONS.md`
+D17 for the registry-as-scaffold rationale.
+
+**Future improvement** (would let LoggerNext delete its registry):
+have the SDK return structured help, e.g.
+
+```json
+{
+  "type": "cmdlist_response",
+  "commands": [
+    { "name": "storage.local.set", "syntax": "storage.local.set <key> <value> [namespace]", "description": "Write a value to local storage" },
+    { "name": "debug.flag.on",      "syntax": "debug.flag.on <flagId>",                     "description": "Enable a feature flag" }
+  ]
+}
+```
+
+A new top-level `type` instead of a magic subsystem string would also
+remove the event-feed pollution from the discovery side-channel.
 
 **Open questions for the SDK team:**
 
@@ -300,7 +334,7 @@ Tracked for follow-up with the SDK team:
 
 1. **§3.2** — Does `storage.set` (or equivalent) exist? What's its payload?
 2. **§3.2** — Are commands acknowledged?
-3. **§3.2** — What does the SDK return for `cmdlist`?
+3. ~~**§3.2** — What does the SDK return for `cmdlist`?~~ **Closed** — see §3.2.1.
 4. **§4.1** — Is the SDK's `id` on event frames used downstream?
 5. **§4.2** — What's the real shape of storage `data` values?
 6. **§4.2** — Are there namespaces beyond session/local/secure?

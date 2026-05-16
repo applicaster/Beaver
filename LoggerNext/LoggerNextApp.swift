@@ -72,6 +72,13 @@ struct LoggerNextApp: App {
                             env.didConnectSession(session.id)
                         }
                     }
+                    // Ask the SDK for its command list so the command-bar
+                    // help popover has something to show. Brief delay so
+                    // the SDK has finished registering its handlers.
+                    Task {
+                        try? await Task.sleep(for: .milliseconds(500))
+                        await env.server.send(command: "cmdlist")
+                    }
                 case .clientDisconnected:
                     if let sid = env.currentSessionId {
                         try? await env.store.endSession(sid)
@@ -89,6 +96,22 @@ struct LoggerNextApp: App {
                 await Self.handleInbound(frame: frame, env: env)
             }
         }
+
+        // Keep the toolbar's "are there events to act on?" count fresh.
+        Task { @MainActor in
+            for await change in await env.store.changes() {
+                switch change {
+                case .appended(let sid, _) where sid == env.viewingSessionId:
+                    await env.refreshViewingEventCount()
+                case .cleared(let sid) where sid == env.viewingSessionId:
+                    await env.refreshViewingEventCount()
+                case .sessionStarted, .sessionEnded:
+                    await env.refreshViewingEventCount()
+                default:
+                    break
+                }
+            }
+        }
     }
 
     private static func handleInbound(frame: Data, env: AppEnvironment) async {
@@ -98,6 +121,16 @@ struct LoggerNextApp: App {
         switch ProtocolDecoder.decode(frame) {
         case .success(.event(let event)):
             await env.store.append(event, to: sessionId)
+            // Side-channel: detect cmdlist responses and populate the
+            // command-help popover. Identified by the GeneralHandler
+            // subsystem + "Registered commands:" prefix. Event still
+            // appears in the log feed normally.
+            if isCmdListResponse(event) {
+                let names = parseCmdListMessage(event.message)
+                await MainActor.run {
+                    env.availableCommands = CommandHints.merge(sdkNames: names)
+                }
+            }
         case .success(.storage(let namespaces)):
             for (namespace, json) in namespaces {
                 try? await env.store.recordStorageSnapshot(
@@ -126,6 +159,28 @@ struct LoggerNextApp: App {
             )
         }
     }
+}
+
+// MARK: - cmdlist response detection
+
+/// True iff the event looks like the SDK's reply to `cmdlist`.
+/// Documented format (empirically captured 2026-05-16):
+/// - level: info
+/// - subsystem: `DebugFeatures/ConsoleCommands/GeneralHandler`
+/// - message: `"Registered commands:\n<name>\n<name>\n…"`
+private func isCmdListResponse(_ event: DecodedEvent) -> Bool {
+    event.subsystem == "DebugFeatures/ConsoleCommands/GeneralHandler"
+        && event.message.hasPrefix("Registered commands:")
+}
+
+/// Pull the command names out of a cmdlist response message. Drops the
+/// header line and any blank lines; trims whitespace from each entry.
+private func parseCmdListMessage(_ message: String) -> [String] {
+    message
+        .split(separator: "\n", omittingEmptySubsequences: true)
+        .dropFirst()  // "Registered commands:"
+        .map { $0.trimmingCharacters(in: .whitespaces) }
+        .filter { !$0.isEmpty }
 }
 
 // MARK: - Synthetic-event helpers

@@ -16,6 +16,8 @@ struct MainWindow: View {
     @State private var showingImporter = false
     @State private var showingExporter = false
     @State private var exportDocument: JSONExportDocument?
+    @State private var showingBookmarks = false
+    @State private var bookmarksSnapshot: [BookmarkedEvent] = []
 
     enum Tab: Hashable {
         case logFeed
@@ -36,6 +38,15 @@ struct MainWindow: View {
             CommandBarView()
         }
         .frame(minWidth: 900, minHeight: 600)
+        // Switching sessions changes which session the toolbar acts on.
+        .onChange(of: env.viewingSessionId) { _, _ in
+            Task { await env.refreshViewingEventCount() }
+        }
+        .task {
+            // Initial fetch so toolbar disabled state is correct on
+            // first appearance.
+            await env.refreshViewingEventCount()
+        }
         .fileImporter(
             isPresented: $showingImporter,
             allowedContentTypes: [.json],
@@ -111,7 +122,7 @@ struct MainWindow: View {
             }
             .buttonStyle(.plain)
             .help("Save the visible events to a JSON file")
-            .disabled(env.viewingSessionId == nil)
+            .disabled(!hasEvents)
         }
         ToolbarItem(placement: .primaryAction) {
             Button(role: .destructive) {
@@ -122,7 +133,42 @@ struct MainWindow: View {
             }
             .buttonStyle(.plain)
             .help("Delete all events in the current session")
-            .disabled(env.viewingSessionId == nil)
+            .disabled(!hasEvents)
+        }
+        ToolbarItem(placement: .primaryAction) {
+            Button {
+                Task { await prepareBookmarks() }
+            } label: {
+                ToolbarButtonLabel(systemImage: "bookmark",
+                                   title: "Bookmarks")
+            }
+            .buttonStyle(.plain)
+            .help("Show bookmarked events in this session")
+            .disabled(!hasEvents)
+            .popover(isPresented: $showingBookmarks, arrowEdge: .bottom) {
+                BookmarksPopover(
+                    bookmarks: bookmarksSnapshot,
+                    onSelect: { eventId in
+                        showingBookmarks = false
+                        // Tell whichever LogFeedViewModel is active to
+                        // jump. We use a NotificationCenter signal so
+                        // we don't have to thread the view model up.
+                        NotificationCenter.default.post(
+                            name: .loggerNextJumpToBookmark,
+                            object: eventId
+                        )
+                    },
+                    onRemove: { eventId, sessionId in
+                        Task {
+                            try? await env.store.removeBookmark(
+                                eventId: eventId,
+                                sessionId: sessionId
+                            )
+                            await prepareBookmarks()
+                        }
+                    }
+                )
+            }
         }
         ToolbarItem(placement: .primaryAction) {
             Button {
@@ -137,6 +183,29 @@ struct MainWindow: View {
         ToolbarItem(placement: .status) {
             ConnectionIndicator(state: env.serverState)
         }
+    }
+
+    private func prepareBookmarks() async {
+        guard let sid = env.viewingSessionId else {
+            print("[Bookmarks] prepare: no viewing session")
+            return
+        }
+        do {
+            let bms = try await env.store.bookmarks(sessionId: sid)
+            print("[Bookmarks] prepare(viewingSession=\(sid)) -> \(bms.count)")
+            bookmarksSnapshot = bms
+        } catch {
+            print("[Bookmarks] prepare ERROR: \(error)")
+            bookmarksSnapshot = []
+        }
+        showingBookmarks = true
+    }
+
+    /// True iff there's a viewing session AND it has at least one event.
+    /// Gates the Export / Clear / Bookmarks toolbar buttons so they
+    /// can't fire on an empty session.
+    private var hasEvents: Bool {
+        env.viewingSessionId != nil && env.viewingEventCount > 0
     }
 
     private var navigationTitle: String {
@@ -167,6 +236,17 @@ struct MainWindow: View {
     private func clearEvents() async {
         guard let sid = env.viewingSessionId else { return }
         try? await env.store.clearEvents(sessionId: sid)
+
+        // If no client is currently connected, drop back to the
+        // "Waiting for a client…" placeholder. An empty session
+        // without a live feed is a dead end; the placeholder is the
+        // more useful empty state. While a client IS connected we
+        // stay on the session — new events will resume the feed.
+        if case .clientConnected = env.serverState {
+            // active client → stay
+        } else {
+            env.viewingSessionId = nil
+        }
     }
 
     private func prepareExport() async {
@@ -293,6 +373,91 @@ private struct ConnectionIndicator: View {
         case .failed:                "Error"
         case .stopped:               "Stopped"
         }
+    }
+}
+
+// MARK: - Bookmarks popover
+
+extension Notification.Name {
+    /// Posted with `object: Int64 (eventId)` when a bookmark is
+    /// clicked in the toolbar popover. LogFeedView listens for it and
+    /// jumps the active session's view model to the event.
+    static let loggerNextJumpToBookmark = Notification.Name("LoggerNextJumpToBookmark")
+}
+
+private struct BookmarksPopover: View {
+    let bookmarks: [BookmarkedEvent]
+    let onSelect: (Int64) -> Void
+    let onRemove: (_ eventId: Int64, _ sessionId: Int64) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if bookmarks.isEmpty {
+                ContentUnavailableView(
+                    "No bookmarks",
+                    systemImage: "bookmark",
+                    description: Text("Right-click any event → Bookmark.")
+                )
+                .frame(width: 320, height: 160)
+            } else {
+                ScrollView {
+                    VStack(spacing: 0) {
+                        ForEach(bookmarks) { be in
+                            BookmarkRow(
+                                bookmarked: be,
+                                onSelect: { onSelect(be.event.id) },
+                                onRemove: { onRemove(be.event.id, be.bookmark.sessionId) }
+                            )
+                            Divider()
+                        }
+                    }
+                }
+                .frame(width: 360, height: 320)
+            }
+        }
+    }
+}
+
+private struct BookmarkRow: View {
+    let bookmarked: BookmarkedEvent
+    let onSelect: () -> Void
+    let onRemove: () -> Void
+    @State private var isHovered = false
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "bookmark.fill")
+                .foregroundStyle(.yellow)
+                .font(.caption)
+                .padding(.top, 2)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(bookmarked.event.message)
+                    .font(.caption)
+                    .lineLimit(2)
+                Text("\(bookmarked.event.subsystem) · \(bookmarked.event.timeOfDayWithMillis)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 0)
+
+            Button {
+                onRemove()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .opacity(isHovered ? 1 : 0)
+            .help("Remove bookmark")
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(isHovered ? Color.accentColor.opacity(0.08) : Color.clear)
+        .contentShape(Rectangle())
+        .onTapGesture { onSelect() }
+        .onHover { isHovered = $0 }
     }
 }
 

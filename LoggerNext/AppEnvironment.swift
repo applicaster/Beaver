@@ -27,6 +27,17 @@ public final class AppEnvironment {
     /// Latest server state for the connection indicator.
     public var serverState: WSServer.State = .stopped
 
+    /// Number of events in the *viewing* session. Drives toolbar
+    /// button availability (Export / Clear / Bookmarks) — those
+    /// actions only make sense when there's something to act on.
+    public var viewingEventCount: Int = 0
+
+    /// Commands the connected SDK exposes (from its `cmdlist` reply).
+    /// Refreshed automatically on connect; cleared on disconnect.
+    /// Merged with `CommandRegistry` for syntax help in the
+    /// command-bar popover.
+    public var availableCommands: [CommandHint] = []
+
     public init(store: LogStore, server: WSServer) {
         self.store = store
         self.server = server
@@ -44,5 +55,19 @@ public final class AppEnvironment {
         currentSessionId = nil
         // viewingSessionId stays — the user can keep reading the now-ended
         // session.
+        availableCommands = []
+    }
+
+    /// Re-query the event count for the viewing session. Called on
+    /// session switch and whenever the store broadcasts a change that
+    /// could affect the count (`.appended`, `.cleared`,
+    /// `.sessionStarted/Ended`).
+    public func refreshViewingEventCount() async {
+        guard let sid = viewingSessionId else {
+            viewingEventCount = 0
+            return
+        }
+        let count = (try? await store.eventCount(sessionId: sid, filter: .none)) ?? 0
+        viewingEventCount = count
     }
 }

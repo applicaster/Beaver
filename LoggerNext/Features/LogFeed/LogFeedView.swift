@@ -47,6 +47,15 @@ private struct LogFeedContent: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        // Toolbar Bookmarks popover posts to this notification with
+        // the chosen event id; we forward it to the active view model.
+        .onReceive(
+            NotificationCenter.default.publisher(for: .loggerNextJumpToBookmark)
+        ) { notification in
+            if let eventId = notification.object as? Int64 {
+                vm.jumpToBookmark(eventId: eventId)
+            }
+        }
     }
 
     private var selectedEvent: EventRecord? {
@@ -137,6 +146,11 @@ private struct LogFeedFilterBar: View {
             Toggle("Follow", isOn: $vm.followTail)
                 .toggleStyle(.switch)
                 .fixedSize()
+
+            Toggle("Collapse", isOn: $vm.collapseRepeats)
+                .toggleStyle(.switch)
+                .fixedSize()
+                .help("Fold consecutive identical events into one row")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
@@ -384,38 +398,56 @@ private struct LogFeedTable: View {
 
     var body: some View {
         ScrollViewReader { proxy in
-            Table(vm.page, selection: $vm.selectedEventId) {
-                TableColumn("Level") { (event: EventRecord) in
-                    HStack {
+            Table(vm.collapsedRows, selection: $vm.selectedEventId) {
+                TableColumn("Level") { (row: LogFeedViewModel.CollapsedRow) in
+                    HStack(spacing: 4) {
+                        if vm.isBookmarked(row.event.id) {
+                            Image(systemName: "bookmark.fill")
+                                .font(.caption2)
+                                .foregroundStyle(.yellow)
+                        }
                         Circle()
-                            .fill(event.level.displayColor)
+                            .fill(row.event.level.displayColor)
                             .frame(width: 8, height: 8)
-                        Text(event.level.displayName)
+                        Text(row.event.level.displayName)
                             .font(.caption)
-                            .foregroundStyle(event.level.displayColor)
+                            .foregroundStyle(row.event.level.displayColor)
                     }
                 }
-                .width(80)
+                .width(95)
 
-                TableColumn("Message") { (event: EventRecord) in
-                    Text(highlighted(event.message))
-                        .lineLimit(2)
-                        .truncationMode(.tail)
+                TableColumn("Message") { (row: LogFeedViewModel.CollapsedRow) in
+                    HStack(spacing: 6) {
+                        Text(highlighted(row.event.message))
+                            .lineLimit(2)
+                            .truncationMode(.tail)
+                        if row.count > 1 {
+                            // ×N badge for collapsed groups.
+                            Text("×\(row.count)")
+                                .font(.caption.weight(.bold).monospacedDigit())
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 1)
+                                .background(
+                                    Capsule().fill(Color.secondary.opacity(0.18))
+                                )
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 }
                 .width(min: 400, ideal: 600)
 
-                TableColumn("Subsystem") { (event: EventRecord) in
-                    Text(highlighted(event.subsystem))
+                TableColumn("Subsystem") { (row: LogFeedViewModel.CollapsedRow) in
+                    Text(highlighted(row.event.subsystem))
                 }
                 .width(min: 150, ideal: 200)
 
-                TableColumn("Category") { (event: EventRecord) in
-                    Text(highlighted(event.category))
+                TableColumn("Category") { (row: LogFeedViewModel.CollapsedRow) in
+                    Text(highlighted(row.event.category))
                 }
                 .width(min: 120, ideal: 150)
 
-                TableColumn("Time") { (event: EventRecord) in
-                    Text(event.timeOfDayWithMillis)
+                TableColumn("Time") { (row: LogFeedViewModel.CollapsedRow) in
+                    Text(row.event.timeOfDayWithMillis)
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
@@ -480,6 +512,13 @@ private struct LogFeedTable: View {
 
     @ViewBuilder
     private func singleRowMenu(for event: EventRecord) -> some View {
+        Section {
+            Button(vm.isBookmarked(event.id)
+                   ? "Remove Bookmark"
+                   : "Bookmark") {
+                vm.toggleBookmark(event.id)
+            }
+        }
         Section {
             Button("Copy Message")   { copyToPasteboard(event.message) }
             Button("Copy Subsystem") { copyToPasteboard(event.subsystem) }
