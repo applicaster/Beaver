@@ -1,0 +1,42 @@
+# Xcode
+build/
+DerivedData/
+*.xcuserstate
+*.xcuserdatad/
+xcuserdata/
+*.moved-aside
+*.xccheckout
+*.xcscmblueprint
+
+# Xcode project file — kept in repo, but user state isn't
+*.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+
+# Swift Package Manager
+.swiftpm/
+.build/
+Packages/
+Package.resolved
+*.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/
+
+# Carthage / CocoaPods leftovers (we don't use these, just in case)
+Carthage/Build/
+Pods/
+
+# macOS
+.DS_Store
+
+# Editor caches
+.idea/
+.vscode/
+
+# Notarization / signing artifacts
+*.pkg
+*.dmg
+*.app
+release/
+notarization.zip
+
+# Environment
+.envrc
+.envrc.local
