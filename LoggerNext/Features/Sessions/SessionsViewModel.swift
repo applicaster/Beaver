@@ -58,7 +58,8 @@ final class SessionsViewModel {
             for await change in stream {
                 guard let self else { return }
                 switch change {
-                case .sessionStarted, .sessionEnded:
+                case .sessionStarted, .sessionEnded,
+                     .sessionDeleted, .sessionsCleared:
                     await self.reload()
                 case .appended, .cleared:
                     // Counts change; refresh in a debounced way later.
@@ -69,6 +70,29 @@ final class SessionsViewModel {
                     break
                 }
             }
+        }
+    }
+
+    // MARK: - Actions
+
+    /// Delete one session. Cascades through events / snapshots /
+    /// bookmarks via FK constraints. The subscription path picks up
+    /// the broadcast and reloads the list.
+    func deleteSession(id: Int64) async {
+        do {
+            try await store.deleteSession(id: id)
+        } catch {
+            print("SessionsViewModel.deleteSession(\(id)): \(error)")
+        }
+    }
+
+    /// Wipe every session. Same cascade story. Used by the
+    /// "Delete all sessions" toolbar button.
+    func deleteAllSessions() async {
+        do {
+            try await store.deleteAllSessions()
+        } catch {
+            print("SessionsViewModel.deleteAllSessions: \(error)")
         }
     }
 }

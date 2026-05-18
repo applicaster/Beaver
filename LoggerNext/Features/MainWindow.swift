@@ -74,7 +74,7 @@ struct MainWindow: View {
             Label("Sessions",  systemImage: "clock.arrow.circlepath")
                 .tag(Tab.sessions)
         }
-        .navigationTitle("LoggerNext")
+        .navigationTitle("Beaver")
     }
 
     // MARK: - Detail
@@ -93,7 +93,12 @@ struct MainWindow: View {
             case .storages:
                 StoragesView()
             case .sessions:
-                SessionsView()
+                SessionsView(onOpenInLogFeed: { _ in
+                    // The row already mutated `env.viewingSessionId`
+                    // (via the List selection binding). All we have
+                    // to do is flip to the Log feed tab.
+                    selectedTab = .logFeed
+                })
             }
         }
         // No explicit alignment — defaults to center, which is what
@@ -135,7 +140,8 @@ struct MainWindow: View {
                 Task { await clearEvents() }
             } label: {
                 ToolbarButtonLabel(systemImage: "xmark.circle",
-                                   title: "Clear")
+                                   title: "Clear",
+                                   tint: hasEvents ? .red : nil)
             }
             .buttonStyle(.plain)
             .help("Delete all events in the current session")
@@ -186,7 +192,9 @@ struct MainWindow: View {
             .buttonStyle(.plain)
             .help("Copy ws://<ip>:9080 to the clipboard")
         }
-        ToolbarItem(placement: .status) {
+        // `.principal` keeps the indicator centered in the title bar
+        // without the rounded-capsule chrome that `.status` adds.
+        ToolbarItem(placement: .principal) {
             ConnectionIndicator(state: env.serverState)
         }
     }
@@ -300,10 +308,12 @@ struct MainWindow: View {
 
 /// Icon + small caption rendered as a toolbar item. Matches the layout
 /// of the old Logger app where each toolbar button shows its purpose
-/// underneath the symbol.
+/// underneath the symbol. Optional `tint` lets destructive actions
+/// (e.g., Clear) render in red so the danger is visible at a glance.
 private struct ToolbarButtonLabel: View {
     let systemImage: String
     let title: String
+    var tint: Color? = nil
 
     var body: some View {
         VStack(spacing: 2) {
@@ -312,7 +322,7 @@ private struct ToolbarButtonLabel: View {
             Text(title)
                 .font(.system(size: 10))
         }
-        .foregroundStyle(.primary)
+        .foregroundStyle(tint ?? .primary)
         .frame(minWidth: 56)
         .contentShape(Rectangle())
     }
@@ -322,29 +332,50 @@ private struct ConnectionPlaceholder: View {
     let state: WSServer.State
 
     var body: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "antenna.radiowaves.left.and.right")
-                .font(.system(size: 48))
-                .foregroundStyle(.tertiary)
-            Text(message)
-                .font(.title3)
-                .foregroundStyle(.secondary)
-            if let address = NetworkInterface.bestAddress() {
-                Text("ws://\(address):9080")
-                    .font(.system(.body, design: .monospaced))
-                    .textSelection(.enabled)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        ContentUnavailableView(
+            title,
+            systemImage: iconName,
+            description: Text(descriptionText)
+        )
     }
 
-    private var message: String {
+    private var title: String {
         switch state {
-        case .stopped:                  "Server not started"
-        case .listening:                "Waiting for a client to connect…"
-        case .clientConnected:          "Loading session…"
-        case .clientDisconnected(let r): "Disconnected: \(r)"
-        case .failed(let r):            "Server error: \(r)"
+        case .stopped:                "Server not started"
+        case .listening:              "Waiting for a client to connect"
+        case .clientConnected:        "Loading session…"
+        case .clientDisconnected:     "Disconnected"
+        case .failed:                 "Server error"
+        }
+    }
+
+    private var iconName: String {
+        switch state {
+        case .listening, .clientConnected:
+            "antenna.radiowaves.left.and.right"
+        case .clientDisconnected:
+            "wifi.slash"
+        case .failed, .stopped:
+            "exclamationmark.triangle"
+        }
+    }
+
+    private var descriptionText: String {
+        // Keep these single-line so the placeholder centers at the
+        // same vertical position as the Storages "No session selected"
+        // empty state. Multi-line descriptions push the title up.
+        // The full URL is available via the Copy IP toolbar button.
+        switch state {
+        case .stopped:
+            return "The WebSocket listener hasn't started."
+        case .listening:
+            return "Connect a device to begin streaming logs."
+        case .clientConnected:
+            return "One moment — preparing the session."
+        case .clientDisconnected:
+            return "Reopen the device app to reconnect."
+        case .failed(let reason):
+            return reason
         }
     }
 }

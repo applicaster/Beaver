@@ -1,39 +1,208 @@
 #!/usr/bin/env bash
-# release.sh — build, sign, notarize, and staple a LoggerNext .pkg.
 #
-# Replaces the 12-step manual README from the old Logger project (D13).
-# Designed to run locally or in CI.
+# release.sh — build, codesign, notarize, and staple a LoggerNext.app
+# package as a distributable .zip.
 #
-# Required environment variables:
-#   APPLE_ID                   Apple ID with notarization access
-#   APPLE_APP_PASSWORD         App-specific password for APPLE_ID
-#   APPLE_TEAM_ID              10-character team identifier
-#   DEVELOPER_ID_INSTALLER     Common name of your Developer ID Installer cert
-#                              (e.g., "Developer ID Installer: Acme Corp (ABCDE12345)")
-#   DEVELOPER_ID_APPLICATION   Common name of your Developer ID Application cert
-#   BUNDLE_ID                  e.g., com.applicaster.LoggerNext
+# Per DECISIONS.md D13 (revised): we ship a signed + notarized
+# .app.zip rather than a .pkg installer. Trade-off explained in the
+# decision log; short version is "internal devs drag to Applications,
+# we don't need .pkg's extra cert + steps."
+#
+# Required environment variables (read from `.envrc.local` if present):
+#   APPLE_ID                    Apple ID used for notarization
+#   APPLE_APP_PASSWORD          App-specific password for APPLE_ID
+#                               (https://appleid.apple.com → Sign-In and Security
+#                               → App-Specific Passwords → +)
+#   APPLE_TEAM_ID               10-character team identifier
+#   DEVELOPER_ID_APPLICATION    Full identity, e.g.
+#                               "Developer ID Application: Acme Corp (ABCDE12345)"
 #
 # Optional:
-#   CONFIGURATION              Defaults to Release
-#   BUILD_DIR                  Defaults to ./build
+#   CONFIGURATION               Defaults to Release
+#   BUILD_DIR                   Defaults to ./build
+#   VERSION                     Defaults to MARKETING_VERSION from project,
+#                               falling back to "dev-<git-sha>"
 #
 # Usage:
 #   ./scripts/release.sh
 #
 # Output:
-#   build/LoggerNext-<version>-signed-notarized.pkg
-
+#   build/LoggerNext-<version>.zip   (notarized, stapled, ready to share)
+#
 set -euo pipefail
 
-# -- TODO: fill in once Xcode project is scaffolded -------------------
-# 1. xcodebuild archive  → LoggerNext.app
-# 2. codesign            → sign .app with DEVELOPER_ID_APPLICATION
-# 3. productbuild        → LoggerNext.pkg
-# 4. productsign         → sign .pkg with DEVELOPER_ID_INSTALLER
-# 5. notarytool submit   → wait for Apple's response
-# 6. stapler staple      → attach the ticket
-# 7. pkgutil --check-signature  → verify before publishing
-# --------------------------------------------------------------------
+# ─── Config ───────────────────────────────────────────────────────────
 
-echo "release.sh: not yet implemented — see TODO list above."
-exit 1
+PROJECT="LoggerNext.xcodeproj"
+SCHEME="LoggerNext"
+# Internal name = LoggerNext (target, bundle id, exec); user-facing
+# brand = Beaver (CFBundleDisplayName + final .app rename). See
+# DECISIONS.md D21.
+APP_NAME="LoggerNext"
+BRAND_NAME="Beaver"
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_ROOT"
+
+# Source local secrets if present (.envrc.local is .gitignored).
+if [ -f ".envrc.local" ]; then
+    # shellcheck disable=SC1091
+    source ".envrc.local"
+fi
+
+CONFIGURATION="${CONFIGURATION:-Release}"
+BUILD_DIR="${BUILD_DIR:-build}"
+ARCHIVE_PATH="$BUILD_DIR/$APP_NAME.xcarchive"
+EXPORT_DIR="$BUILD_DIR/export"
+APP_PATH="$EXPORT_DIR/$APP_NAME.app"
+
+# ─── Pre-flight checks ────────────────────────────────────────────────
+
+require_env() {
+    local name="$1"
+    if [ -z "${!name:-}" ]; then
+        echo "❌ Missing required env var: $name" >&2
+        echo "   See scripts/.envrc.example for the full list." >&2
+        exit 1
+    fi
+}
+require_env APPLE_ID
+require_env APPLE_APP_PASSWORD
+require_env APPLE_TEAM_ID
+require_env DEVELOPER_ID_APPLICATION
+
+if ! command -v xcodebuild >/dev/null;  then echo "❌ xcodebuild not found"; exit 1; fi
+if ! command -v xcrun >/dev/null;       then echo "❌ xcrun not found";      exit 1; fi
+if ! command -v ditto >/dev/null;       then echo "❌ ditto not found";      exit 1; fi
+
+VERSION="${VERSION:-$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' \
+    "$REPO_ROOT/LoggerNext/Info.plist" 2>/dev/null || true)}"
+if [ -z "$VERSION" ]; then
+    VERSION="dev-$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+fi
+
+OUTPUT_ZIP="$BUILD_DIR/$BRAND_NAME-$VERSION.zip"
+# Friendly name shown when the user unzips. Renaming the .app file
+# is safe (codesigning is bundle-id based, not filename based), and
+# Finder already shows CFBundleDisplayName regardless.
+BRANDED_APP_PATH="$EXPORT_DIR/$BRAND_NAME.app"
+
+# ─── Step 1: Clean ────────────────────────────────────────────────────
+
+echo "▸ Cleaning previous build…"
+rm -rf "$ARCHIVE_PATH" "$EXPORT_DIR" "$OUTPUT_ZIP"
+mkdir -p "$BUILD_DIR"
+
+# ─── Step 2: Archive ──────────────────────────────────────────────────
+
+echo "▸ Archiving $SCHEME ($CONFIGURATION)…"
+xcodebuild archive \
+    -project "$PROJECT" \
+    -scheme "$SCHEME" \
+    -configuration "$CONFIGURATION" \
+    -destination "generic/platform=macOS" \
+    -archivePath "$ARCHIVE_PATH" \
+    CODE_SIGN_STYLE=Manual \
+    CODE_SIGN_IDENTITY="$DEVELOPER_ID_APPLICATION" \
+    DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+    | xcbeautify 2>/dev/null \
+    || xcodebuild archive \
+        -project "$PROJECT" \
+        -scheme "$SCHEME" \
+        -configuration "$CONFIGURATION" \
+        -destination "generic/platform=macOS" \
+        -archivePath "$ARCHIVE_PATH" \
+        CODE_SIGN_STYLE=Manual \
+        CODE_SIGN_IDENTITY="$DEVELOPER_ID_APPLICATION" \
+        DEVELOPMENT_TEAM="$APPLE_TEAM_ID"
+
+# ─── Step 3: Export .app ──────────────────────────────────────────────
+
+echo "▸ Exporting .app for Developer ID distribution…"
+
+EXPORT_OPTIONS_PLIST="$BUILD_DIR/ExportOptions.plist"
+cat > "$EXPORT_OPTIONS_PLIST" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>method</key>
+    <string>developer-id</string>
+    <key>teamID</key>
+    <string>$APPLE_TEAM_ID</string>
+    <key>signingStyle</key>
+    <string>manual</string>
+    <key>signingCertificate</key>
+    <string>$DEVELOPER_ID_APPLICATION</string>
+</dict>
+</plist>
+EOF
+
+xcodebuild -exportArchive \
+    -archivePath "$ARCHIVE_PATH" \
+    -exportPath "$EXPORT_DIR" \
+    -exportOptionsPlist "$EXPORT_OPTIONS_PLIST"
+
+if [ ! -d "$APP_PATH" ]; then
+    echo "❌ Export did not produce $APP_PATH" >&2
+    exit 1
+fi
+
+# ─── Step 4: Re-sign with hardened runtime (belt-and-braces) ──────────
+
+# `developer-id` export usually signs correctly, but signing again with
+# --options runtime is cheap insurance that notarization won't reject
+# us for missing the hardened-runtime flag.
+echo "▸ Verifying hardened-runtime signature…"
+codesign --verify --deep --strict --verbose=2 "$APP_PATH"
+
+# ─── Step 5: Notarize ─────────────────────────────────────────────────
+
+echo "▸ Submitting to Apple's notarization service (this can take a few minutes)…"
+
+NOTARIZE_ZIP="$BUILD_DIR/$APP_NAME-for-notarization.zip"
+rm -f "$NOTARIZE_ZIP"
+ditto -c -k --keepParent "$APP_PATH" "$NOTARIZE_ZIP"
+
+xcrun notarytool submit "$NOTARIZE_ZIP" \
+    --apple-id "$APPLE_ID" \
+    --password "$APPLE_APP_PASSWORD" \
+    --team-id "$APPLE_TEAM_ID" \
+    --wait
+
+# ─── Step 6: Staple ───────────────────────────────────────────────────
+
+echo "▸ Stapling notarization ticket to the .app…"
+xcrun stapler staple "$APP_PATH"
+xcrun stapler validate "$APP_PATH"
+
+# Final Gatekeeper check (this is what end-users will see).
+spctl --assess --type execute --verbose=2 "$APP_PATH" || {
+    echo "⚠️  spctl assessment warning — check the message above"
+}
+
+# ─── Step 7: Package final zip ────────────────────────────────────────
+
+# Rename to the brand name so the user sees "Beaver.app" in the zip
+# and in /Applications. Rename happens AFTER notarize + staple so
+# Apple's tools never see the renamed bundle (they identify by
+# bundle id, but keeping the path stable through notarization is the
+# defensively-simple choice).
+echo "▸ Renaming bundle to $BRAND_NAME.app for distribution…"
+mv "$APP_PATH" "$BRANDED_APP_PATH"
+
+echo "▸ Packaging final $OUTPUT_ZIP…"
+rm -f "$OUTPUT_ZIP"
+ditto -c -k --keepParent "$BRANDED_APP_PATH" "$OUTPUT_ZIP"
+
+# ─── Step 8: Cleanup intermediates ────────────────────────────────────
+
+rm -f "$NOTARIZE_ZIP" "$EXPORT_OPTIONS_PLIST"
+
+# ─── Done ─────────────────────────────────────────────────────────────
+
+SIZE="$(du -h "$OUTPUT_ZIP" | cut -f1)"
+echo
+echo "✅ Release ready: $OUTPUT_ZIP ($SIZE)"
+echo "   Upload it to your distribution location (Drive, S3, internal HTTPS, …)"
+echo "   and tell the team to grab the new build."

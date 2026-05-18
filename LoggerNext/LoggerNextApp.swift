@@ -97,7 +97,9 @@ struct LoggerNextApp: App {
             }
         }
 
-        // Keep the toolbar's "are there events to act on?" count fresh.
+        // Keep the toolbar's "are there events to act on?" count fresh,
+        // and react to session deletions so the viewing/current pointers
+        // don't dangle on rows that no longer exist.
         Task { @MainActor in
             for await change in await env.store.changes() {
                 switch change {
@@ -106,6 +108,16 @@ struct LoggerNextApp: App {
                 case .cleared(let sid) where sid == env.viewingSessionId:
                     await env.refreshViewingEventCount()
                 case .sessionStarted, .sessionEnded:
+                    await env.refreshViewingEventCount()
+                case .sessionDeleted(let id):
+                    if env.viewingSessionId == id { env.viewingSessionId = nil }
+                    if env.currentSessionId == id { env.currentSessionId = nil }
+                    await ensureLiveSessionIfConnected(env: env)
+                    await env.refreshViewingEventCount()
+                case .sessionsCleared:
+                    env.viewingSessionId = nil
+                    env.currentSessionId = nil
+                    await ensureLiveSessionIfConnected(env: env)
                     await env.refreshViewingEventCount()
                 default:
                     break
@@ -158,6 +170,22 @@ struct LoggerNextApp: App {
                 to: sessionId
             )
         }
+    }
+}
+
+// MARK: - Helpers
+
+/// If a device is currently connected but `currentSessionId` is nil
+/// (e.g., right after the user deleted every session), create a fresh
+/// live session so the inbound WebSocket pipeline has somewhere to
+/// write. Without this, events from the live device would be silently
+/// dropped until the user reconnected the device.
+@MainActor
+private func ensureLiveSessionIfConnected(env: AppEnvironment) async {
+    guard case .clientConnected = env.serverState else { return }
+    guard env.currentSessionId == nil else { return }
+    if let session = try? await env.store.createSession(source: .live) {
+        env.didConnectSession(session.id)
     }
 }
 

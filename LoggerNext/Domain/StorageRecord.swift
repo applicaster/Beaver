@@ -18,6 +18,11 @@ public struct StorageRecord: Identifiable, Hashable, Sendable {
     public let key: String
     public let valueText: String?
     public let children: [StorageRecord]?
+    /// What the value actually is — string / number / bool / null /
+    /// container. Set by `build(...)` for proper syntax-colouring in
+    /// the detail pane (StoragesView). Containers carry their child
+    /// count so the row can render `{ N }` / `[ N ]` without re-counting.
+    public let kind: JSONKind
 
     public var isContainer: Bool { children != nil }
     public var itemCount: Int { children?.count ?? 0 }
@@ -26,12 +31,14 @@ public struct StorageRecord: Identifiable, Hashable, Sendable {
         id: String,
         key: String,
         valueText: String? = nil,
-        children: [StorageRecord]? = nil
+        children: [StorageRecord]? = nil,
+        kind: JSONKind = .null
     ) {
         self.id = id
         self.key = key
         self.valueText = valueText
         self.children = children
+        self.kind = kind
     }
 
     // MARK: - Parsing
@@ -57,7 +64,8 @@ public struct StorageRecord: Identifiable, Hashable, Sendable {
                 id: path,
                 key: key,
                 valueText: nil,
-                children: children.isEmpty ? nil : children
+                children: children.isEmpty ? nil : children,
+                kind: .object(count: children.count)
             )
         case let array as [Any]:
             let children = array.enumerated().map { (i, v) in
@@ -67,14 +75,27 @@ public struct StorageRecord: Identifiable, Hashable, Sendable {
                 id: path,
                 key: key,
                 valueText: nil,
-                children: children.isEmpty ? nil : children
+                children: children.isEmpty ? nil : children,
+                kind: .array(count: children.count)
             )
         case is NSNull:
-            return StorageRecord(id: path, key: key, valueText: "null")
+            return StorageRecord(id: path, key: key, valueText: "null", kind: .null)
         case let b as Bool:
-            return StorageRecord(id: path, key: key, valueText: b ? "true" : "false")
+            return StorageRecord(
+                id: path,
+                key: key,
+                valueText: b ? "true" : "false",
+                kind: .bool(b)
+            )
         case let n as NSNumber:
-            return StorageRecord(id: path, key: key, valueText: n.stringValue)
+            // NSNumber bridges from Bool too, but Bool was matched
+            // above so anything here is a real number.
+            return StorageRecord(
+                id: path,
+                key: key,
+                valueText: n.stringValue,
+                kind: .number(n.stringValue)
+            )
         case let s as String:
             // Auto-expand: if the string is itself a JSON document
             // (an object or an array), parse it and render as a
@@ -85,9 +106,15 @@ public struct StorageRecord: Identifiable, Hashable, Sendable {
             if let expanded = expandedFromJSONString(s, key: key, path: path) {
                 return expanded
             }
-            return StorageRecord(id: path, key: key, valueText: s)
+            return StorageRecord(id: path, key: key, valueText: s, kind: .string(s))
         default:
-            return StorageRecord(id: path, key: key, valueText: String(describing: value))
+            let described = String(describing: value)
+            return StorageRecord(
+                id: path,
+                key: key,
+                valueText: described,
+                kind: .string(described)
+            )
         }
     }
 
@@ -132,8 +159,8 @@ public struct StorageRecord: Identifiable, Hashable, Sendable {
         let pad      = String(repeating: "  ", count: indent)
         let innerPad = String(repeating: "  ", count: indent + 1)
 
-        if let value = record.valueText {
-            return jsonLiteral(value)
+        if record.children == nil {
+            return jsonLiteral(for: record)
         }
         guard let children = record.children, !children.isEmpty else {
             return "null"
@@ -160,24 +187,26 @@ public struct StorageRecord: Identifiable, Hashable, Sendable {
         }
     }
 
-    /// Convert a stored `valueText` back to a JSON literal. The
-    /// values we hold come pre-stringified from `build(...)` — we
-    /// detect numbers / bools / null and emit them as-is, otherwise
-    /// treat as a JSON string and escape + quote.
-    private static func jsonLiteral(_ value: String) -> String {
-        switch value {
-        case "null", "true", "false":
-            return value
-        default:
-            break
+    /// Convert a leaf record back to a JSON literal for the copy
+    /// action. Uses `kind` directly — that way a stored string like
+    /// `"42"` is emitted as the quoted JSON string `"42"`, not the
+    /// number `42`.
+    private static func jsonLiteral(for record: StorageRecord) -> String {
+        switch record.kind {
+        case .null:                  return "null"
+        case .bool(let b):           return b ? "true" : "false"
+        case .number(let n):         return n
+        case .string(let raw):
+            let escaped = raw
+                .replacingOccurrences(of: "\\", with: "\\\\")
+                .replacingOccurrences(of: "\"", with: "\\\"")
+            return "\"\(escaped)\""
+        case .object:
+            // Empty containers — caller already short-circuited on
+            // non-empty ones, so children must be nil here.
+            return "{}"
+        case .array:
+            return "[]"
         }
-        // Try numeric — int first, then double.
-        if Int64(value) != nil { return value }
-        if Double(value) != nil { return value }
-        // String — escape and quote.
-        let escaped = value
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-        return "\"\(escaped)\""
     }
 }

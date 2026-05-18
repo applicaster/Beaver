@@ -1,0 +1,45 @@
+# Sample env file for `scripts/release.sh`.
+#
+# Copy this to `.envrc.local` at the repo root and fill in real values.
+# `.envrc.local` is .gitignored so secrets stay out of source control.
+#
+#   cp scripts/.envrc.example .envrc.local
+#   $EDITOR .envrc.local
+#   ./scripts/release.sh
+
+# ─── Required ─────────────────────────────────────────────────────────
+
+# Your Apple ID — the one that owns the Developer Program membership.
+# Format: email address.
+export APPLE_ID="you@example.com"
+
+# An app-specific password for that Apple ID. Generate one at:
+#   https://appleid.apple.com → Sign-In and Security → App-Specific Passwords → +
+# Format: four groups of four lowercase letters, hyphen-separated.
+# Notarytool keeps a token after first use, so the password isn't sent
+# every release; it's just needed initially.
+export APPLE_APP_PASSWORD="xxxx-xxxx-xxxx-xxxx"
+
+# Apple Developer Team ID — 10 alphanumeric characters.
+# Find it at https://developer.apple.com/account → Membership Details.
+export APPLE_TEAM_ID="ABCDE12345"
+
+# Full name of the Developer ID Application certificate in your
+# Keychain (NOT Developer ID Installer — we ship a .app, not a .pkg).
+# Run `security find-identity -v -p codesigning` to list candidates;
+# pick the one starting with "Developer ID Application:".
+export DEVELOPER_ID_APPLICATION="Developer ID Application: Your Org Name (ABCDE12345)"
+
+# ─── Optional overrides ───────────────────────────────────────────────
+
+# Build configuration. Defaults to Release; switch to Debug for a
+# faster build during script testing.
+# export CONFIGURATION="Release"
+
+# Where intermediate and final artifacts live. Defaults to ./build,
+# which is .gitignored.
+# export BUILD_DIR="build"
+
+# Version string baked into the zip filename. Defaults to the
+# project's MARKETING_VERSION, falling back to `dev-<git-sha>`.
+# export VERSION="1.0.0"

@@ -378,14 +378,32 @@ project.
 
 ---
 
-## D13. Distribution: scripted .pkg (modernized toolchain)
+## D13. Distribution: scripted .app.zip with Sparkle auto-updates
 
-**Status:** Accepted (2026-05-15)
+**Status:** Accepted (2026-05-15), **revised 2026-05-17 from .pkg to
+.app.zip**. Phase 1 (signed + notarized .app.zip) shipped; Phase 2
+(Sparkle auto-updates) deferred until manual updates become annoying.
 
-**Decision.** Keep the `.pkg` installer format. Replace the 12-step manual
-README with a single `make release` (or `scripts/release.sh`) that runs
-`productbuild`, `notarytool`, and `stapler` end-to-end. Credentials read
-from environment variables. Runnable from CI.
+**Decision.** Ship LoggerNext as a signed + notarized `LoggerNext.app`
+packaged as a `.zip`. A single `make release` (calling
+`scripts/release.sh`) runs `xcodebuild archive` → `codesign` →
+`notarytool submit --wait` → `stapler` → `ditto -c -k` end-to-end.
+Credentials read from `.envrc.local` (gitignored). Phase 2 will layer
+Sparkle on top so users get auto-updates from an HTTPS appcast feed.
+
+**Why the .pkg → .app.zip pivot.**
+- Internal audience is the Applicaster dev team — technical users for
+  whom drag-to-Applications is muscle memory; .pkg's installer wizard
+  adds zero value.
+- .app.zip needs only the **Developer ID Application** certificate.
+  .pkg additionally needs **Developer ID Installer** + `productsign` +
+  `pkgutil --check-signature`. Half the moving parts to break.
+- The old Logger's 12-step README depended on the 3rd-party
+  Packages.app GUI tool to build .pkg from a .pkgproj. We avoid that
+  whole dependency.
+- `notarytool submit --wait` (the modern replacement for `altool`)
+  blocks until Apple finishes notarization, so we don't have the
+  "check email, then come back to staple" two-phase manual flow.
 
 **Why.**
 - The current README is manual toil, not a format problem. Scripting it
@@ -402,11 +420,17 @@ from environment variables. Runnable from CI.
   affordances and Gatekeeper quarantine handling.
 
 **Implications.**
-- `scripts/release.sh` checked into the repo.
-- Apple ID + app-specific password + team ID + distribution cert title
-  loaded from env vars (`.envrc.example` documents the names).
-- CI pipeline can produce a signed, notarized, stapled `.pkg` on each
-  tagged release.
+- `scripts/release.sh` + `Makefile` checked into the repo.
+- Credentials loaded from `.envrc.local` (gitignored);
+  `scripts/.envrc.example` documents the four required vars
+  (`APPLE_ID`, `APPLE_APP_PASSWORD`, `APPLE_TEAM_ID`,
+  `DEVELOPER_ID_APPLICATION`).
+- Output: `build/LoggerNext-<version>.zip`. Uploaded manually to a
+  shared location for Phase 1; Phase 2 adds Sparkle + an HTTPS
+  appcast for auto-updates.
+- CI-friendly — same script runs on a macOS GitHub Actions runner with
+  cert imported from a base64-encoded secret. Tag-triggered release
+  is Phase 3.
 
 ---
 
@@ -570,3 +594,198 @@ registry. The command-help popover displays:
 - The cmdlist response event still appears in the log feed
   (discovery is a pure side-channel; we don't suppress it). When the
   SDK adopts a typed response message, we can stop polluting the feed.
+
+---
+
+## D18. JSON detail pane: typed kind + manual recursive tree
+
+**Status:** Accepted (2026-05-18)
+
+**Decision.** Replace `OutlineGroup`-based JSON rendering with a manual
+recursive view (`JSONTree` for log events, `StorageTree` for storages)
+that owns its own disclosure chevrons and applies an explicit
+`depth × 14pt` indent per nesting level. Each node carries a
+`JSONKind` enum (`.string`, `.number`, `.bool`, `.null`,
+`.object(count:)`, `.array(count:)`) instead of a stringified
+`valueText`. A shared `JSONSyntax` Text builder renders one row per
+node with inline colour: quoted purple keys, orange strings, blue
+numbers, magenta bools, muted `null` / container summaries.
+
+**Why.**
+- `OutlineGroup` only indents children visually when it's nested
+  inside a `List`. Used directly inside a `VStack` the children render
+  flat — the tree didn't read as a tree. The screenshot review caught
+  this immediately.
+- The stringified `valueText` approach couldn't distinguish a JSON
+  string `"42"` from the number `42` once formatted, breaking the
+  copy-as-JSON path (a leaf was always emitted unquoted). A typed
+  `JSONKind` makes the copy serialiser straightforward and the
+  syntax-colouring trivial.
+- Sharing `JSONSyntax.row(key:isArrayIndex:kind:)` between the
+  log-event detail pane and the Storages detail pane keeps the two
+  visually identical with zero duplication.
+
+**Alternatives considered.**
+- *Stick with OutlineGroup, wrap in a List.* Would re-introduce a
+  full `List` row chrome (selection highlight, hover background) that
+  the detail pane doesn't want.
+- *Compute depth via SwiftUI preference keys.* More cleverness, same
+  outcome; the manual recursive view is half the code.
+
+**Implications.**
+- New file `Domain/JSONKind.swift` (model) + `Features/Shared/JSONSyntaxText.swift`
+  (SwiftUI Text builder).
+- `JSONTreeNode.build` no longer appends `{ N }` / `[ N ]` to labels —
+  the container summary is rendered as its own coloured segment.
+- `StorageRecord` gained a `kind: JSONKind` field; `jsonLiteral` now
+  switches on `kind` instead of guessing from `valueText`.
+
+---
+
+## D19. Storages tab: explicit subscription bootstrap before refresh
+
+**Status:** Accepted (2026-05-18)
+
+**Decision.** Move the Storages view-model's "subscribe to store
+changes" step out of the fire-and-forget Task pair in `init` into an
+explicit `bootstrap()` async method. `StoragesView.task(id:)` must
+`await fresh.bootstrap()` before publishing the VM and before sending
+the first `storage.list`. Also add a 400 ms delayed `reloadFromStore()`
+inside `requestRefresh` as a belt-and-braces fallback.
+
+**Why.**
+- Two `Task { await … }` blocks fired from `init` have no guaranteed
+  scheduling order relative to each other or to the request Task that
+  `StoragesView.task` kicked off immediately after. The SDK could
+  respond and broadcast `.storageUpdated` before the subscription Task
+  had even reached `await store.changes()`, leaving the UI showing the
+  empty state even after a manual Reload. This was the user-reported
+  bug ("storage not loaded also reload not help").
+- Awaiting `bootstrap()` makes the ordering explicit: subscription
+  registered, cached snapshots read, only then does the request go
+  out. The belt-and-braces delayed reload catches any remaining race
+  if a future broadcast slips through.
+
+**Alternatives considered.**
+- *Poll the store on a timer.* Heavier and still racy at the edges.
+- *Make `store.changes()` a multicast subject with replay.* Larger
+  change to the store actor; the explicit-bootstrap fix is local to
+  the view model.
+
+**Implications.**
+- `StoragesViewModel.init` no longer self-starts any Tasks. Callers
+  must `await vm.bootstrap()` before treating the VM as live.
+- Same pattern should apply to any future VM that combines a store
+  subscription with an outbound request — see D19 when refactoring.
+
+---
+
+## D20. Sessions: delete + click-to-open
+
+**Status:** Accepted (2026-05-18)
+
+**Decision.** The Sessions tab now supports three actions:
+
+1. *Click a row* → switches the selected tab to Log feed (showing
+   that session's events) and updates `viewingSessionId`.
+2. *Hover a row* → red trash icon appears on the right; clicking it
+   opens a confirmation dialog and, on confirm, deletes the session.
+   Same dialog is reachable via right-click → "Delete session…".
+3. *Footer "Delete all sessions…"* (red) → confirmation dialog;
+   wipes every session, every event, every storage snapshot, every
+   bookmark via `ON DELETE CASCADE` on the FK constraints.
+
+The currently-live session (matching `currentSessionId`) is tagged
+with a green "LIVE" capsule in the row and cannot be deleted while
+the device is connected.
+
+**Why.**
+- Without a delete, sessions accumulate forever — even short-lived
+  reconnect sessions clutter the sidebar.
+- Tab-switch on click matches the user expectation that picking a
+  past session means "show me its logs", not "highlight it in the
+  sidebar".
+- Cascading deletes via SQLite FKs keep the implementation tiny
+  (one DELETE per call) and atomic (no dangling rows).
+
+**Alternatives considered.**
+- *Edit-mode list with bulk checkbox selection.* Heavier UI for a
+  tool that's mostly used one session at a time.
+- *Soft-delete with hide/restore.* Adds a column, an "Archived"
+  filter, and a "Show archived" toggle — not worth it for a debug
+  tool.
+
+**Implications.**
+- New `LogStore.deleteSession(id:)` and `LogStore.deleteAllSessions()`
+  + two new `Change` cases: `.sessionDeleted(id:)` and
+  `.sessionsCleared`. All existing consumers had `default:` arms, so
+  the addition is backwards-compatible.
+- `LoggerNextApp` bootstrap subscriber clears `viewingSessionId` /
+  `currentSessionId` on deletion and, if a device is still connected,
+  immediately spins up a fresh live session so its events have
+  somewhere to go.
+- **Known limitation.** macOS `.contextMenu` items don't respect
+  SwiftUI's `role: .destructive` tint or per-element `.foregroundColor`
+  in this version — the right-click "Delete session…" stays in the
+  system menu colour even though the matching hover/footer affordances
+  are explicitly red. The primary delete path is the hover trash
+  button; the context menu is a secondary shortcut. A future change
+  could replace `.contextMenu` with a custom `.popover` driven by an
+  `NSViewRepresentable` right-click catcher, which would give us full
+  styling control.
+
+---
+
+## D21. Rebrand to "Beaver" — display only, internals unchanged
+
+**Status:** Accepted (2026-05-18)
+
+**Decision.** Change every *user-facing* surface to read "Beaver"
+while leaving the internal Xcode project, target name, bundle
+identifier, executable name, entitlements file, on-disk store
+directory, and Git history alone (all still "LoggerNext"). The
+rebrand is implemented as:
+
+- `INFOPLIST_KEY_CFBundleDisplayName = Beaver` and
+  `INFOPLIST_KEY_CFBundleName = Beaver` in both Debug + Release build
+  configs of the app target.
+- `MainWindow.navigationTitle("Beaver")`.
+- `scripts/release.sh` renames the exported `LoggerNext.app` →
+  `Beaver.app` *after* notarization, and packages it into
+  `build/Beaver-<version>.zip`.
+- README header rebranded with a note explaining the split.
+
+**Why.**
+- The brand only needs to live where users see it — Finder, Apple
+  menu, About dialog, window title, distribution zip. Everywhere
+  else the codename `LoggerNext` is fine and changing it would carry
+  real cost.
+- Renaming the bundle identifier would invalidate every existing
+  user's Application Support data directory (named after
+  `com.applicaster.LoggerNext`) and require re-issuing the Developer
+  ID-signed builds with a new identifier. Both are wasteful for a
+  cosmetic rebrand.
+- Renaming the Xcode target / scheme / group paths is a 100+ line
+  pbxproj edit, with high risk of breaking the project file or the
+  test target's `TEST_HOST` / `TEST_TARGET_NAME` references. Display
+  keys give us 95% of the rebrand for 1% of the risk.
+
+**Alternatives considered.**
+- *Full rename.* Folders, target, scheme, bundle id all → Beaver.
+  Cleaner long-term, but breaks installed user data (bundle id move),
+  forces a new signed cert, and demands a careful pbxproj surgery
+  pass that's hard to verify without a successful Xcode build.
+- *Keep "LoggerNext" everywhere.* Avoids the work but means the user
+  sees the internal codename — the whole point of picking a brand.
+
+**Implications.**
+- The .app on disk inside the distribution zip is `Beaver.app`.
+- The .app's Mach-O executable inside the bundle is still
+  `LoggerNext` (matches PRODUCT_NAME = $(TARGET_NAME)). Users never
+  see this; Finder uses CFBundleDisplayName.
+- Application Support directory remains
+  `~/Library/Application Support/LoggerNext/store.sqlite`. Stable
+  across the rebrand, so existing users keep their session history.
+- If we ever do want a full rename (e.g., to fully decouple from the
+  old Logger trademark), the path is documented here and is a
+  one-time migration project rather than something to do reactively.

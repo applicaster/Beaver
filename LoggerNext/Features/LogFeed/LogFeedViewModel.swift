@@ -28,24 +28,31 @@ final class LogFeedViewModel {
     /// In-memory window of events for the visible range.
     private(set) var page: [EventRecord] = []
 
-    /// Whether the table is auto-scrolling to the tail as new events
-    /// arrive. Filtering and counts always stay live regardless of this
-    /// setting — Follow only controls the scroll behavior (D3).
-    var followTail: Bool = true {
+    /// True when the table content is frozen — new events still
+    /// arrive and persist in the store, but they don't enter `page`
+    /// so the user can scroll / select / read without interference.
+    /// Resuming clears the unseen counter and triggers a reload.
+    var isPaused: Bool = false {
         didSet {
-            // Re-engaging Follow means the user has caught up.
-            if followTail { unseenCount = 0 }
+            if oldValue && !isPaused {
+                // Resuming — catch up to whatever arrived while paused.
+                unseenCount = 0
+                requestReload()
+            }
         }
     }
 
-    /// Number of new events that arrived while Follow was off.
-    /// Drives the "↓ N new events" pill in the filter bar.
+    /// Number of new events that arrived while paused. Drives the
+    /// "↓ N new events" pill next to the Pause/Resume button.
     private(set) var unseenCount: Int = 0
 
     /// When on, consecutive events with identical (subsystem, category,
     /// message, level) collapse to one visible row showing ×N. Display
     /// only — every event still lives in the store (D8).
-    var collapseRepeats: Bool = false
+    /// Default ON because noisy clients (loops, polling, retries)
+    /// make uncollapsed feeds unreadable; users who want strict
+    /// chronology can toggle off.
+    var collapseRepeats: Bool = true
 
     /// Cached set of bookmarked event IDs in this session; refreshed
     /// via the store's `.bookmarksChanged` change stream.
@@ -87,7 +94,18 @@ final class LogFeedViewModel {
 
     // MARK: - Window
 
-    private var visibleRange: Range<Int> = 0..<200
+    /// Upper bound on how many events `reload` will pull in one query.
+    /// Sized well above any realistic single-session count so the
+    /// table sees the full filtered set and SwiftUI handles render
+    /// virtualization internally. Was previously a sliding 200-row
+    /// window, which caused new events (past index 200) to never
+    /// appear even though `totalCount` updated.
+    private let maxEventsPerFetch: Int = 1_000_000
+
+    /// Retained because `jumpTo(...)` still updates it and other code
+    /// reads it for window-aware decisions. With the unbounded fetch
+    /// it effectively always equals `0..<totalCount`.
+    private var visibleRange: Range<Int> = 0..<0
     private let pageOverscan: Int = 100
 
     /// `nonisolated(unsafe)` so the nonisolated `deinit` can cancel
@@ -190,8 +208,8 @@ final class LogFeedViewModel {
 
     private func reload(rangeOnly: Bool) async {
         loadTask?.cancel()
-        let snapshotRange = visibleRange
         let snapshotFilter = filter
+        let limit = maxEventsPerFetch
         loadTask = Task { [store, sessionId] in
             do {
                 if !rangeOnly {
@@ -200,13 +218,19 @@ final class LogFeedViewModel {
                         filter: snapshotFilter
                     )
                     if Task.isCancelled { return }
-                    await MainActor.run { self.totalCount = count }
+                    await MainActor.run {
+                        self.totalCount = count
+                        // Keep visibleRange in sync for downstream
+                        // code (jumpTo, didReachEnd). Now always
+                        // covers the full filtered result set.
+                        self.visibleRange = 0..<count
+                    }
                 }
                 let events = try await store.events(
                     sessionId: sessionId,
                     filter: snapshotFilter,
-                    offset: snapshotRange.lowerBound,
-                    limit: snapshotRange.count
+                    offset: 0,
+                    limit: limit
                 )
                 if Task.isCancelled { return }
                 await MainActor.run { self.page = events }
@@ -238,20 +262,22 @@ final class LogFeedViewModel {
     }
 
     private func handleAppended(count: Int) async {
-        // Bump the unseen badge immediately if paused so the UI reflects
-        // it before the (debounced) reload lands.
-        if !followTail {
+        if isPaused {
+            // Frozen view — don't pull the new events into `page`.
+            // Just track the gap so the UI shows the user how much
+            // is waiting for them when they resume.
             unseenCount += count
+            return
         }
         // Debounce: high event rates coalesce into one reload.
         requestReload()
     }
 
-    /// Re-engage Follow and clear the unseen-events counter. Called by
-    /// the "↓ N new events" pill in the filter bar.
-    func resumeFollow() {
-        followTail = true
-        // didSet on followTail already clears unseenCount.
+    /// Resume the live feed. Identical to setting `isPaused = false`;
+    /// kept as a named action so the UI (pill click) reads cleanly.
+    func resume() {
+        isPaused = false
+        // didSet on isPaused handles unseenCount reset + reload.
     }
 
     // MARK: - Bookmarks
@@ -362,8 +388,9 @@ final class LogFeedViewModel {
         let upper = offset + half + 1
         visibleRange = lower..<upper
         await reload(rangeOnly: true)
-        // Pause Follow so the new tail doesn't fight the navigation.
-        followTail = false
+        // Auto-pause so incoming events don't scroll us off the
+        // match we just navigated to.
+        isPaused = true
         // Trigger scroll + selection.
         scrollTarget = (eventId, UUID())
         selectedEventId = eventId

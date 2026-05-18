@@ -1,6 +1,6 @@
-# LoggerNext — Architecture
+# Beaver — Architecture
 
-This document describes the target architecture for LoggerNext, the rewrite
+This document describes the target architecture for Beaver, the rewrite
 of the existing macOS Logger app. It synthesizes the decisions captured in
 `DECISIONS.md` (D1–D13) into a coherent layered design and serves as the
 reference contract for implementation.
@@ -23,7 +23,7 @@ this document gets updated.
    views each have a clear thread-of-control. Actors mediate; nothing
    shares mutable state across boundaries.
 4. **Wire format is sacrosanct.** The mobile SDK is the source of truth
-   for what comes over the socket. LoggerNext adapts; the SDK does not
+   for what comes over the socket. Beaver adapts; the SDK does not
    change.
 5. **No singletons.** Dependencies travel through SwiftUI's `Environment`
    and constructor injection. Testability is non-negotiable.
@@ -287,7 +287,7 @@ IPv4 otherwise).
 
 ## 7. Wire protocol (consumer view)
 
-LoggerNext is a consumer of the mobile SDK's protocol. We do not redefine
+Beaver is a consumer of the mobile SDK's protocol. We do not redefine
 it. The contract — what we decode, what we send — is captured separately
 in `PROTOCOL.md` (next deliverable). Architecturally, the relevant point
 is:
@@ -318,13 +318,18 @@ LoggerNext/
 │   └── release.sh               (D13: scripted .pkg pipeline)
 ├── LoggerNext.xcodeproj/
 ├── LoggerNext/
-│   ├── LoggerNextApp.swift      (App + scene)
+│   ├── BeaverApp.swift      (App + scene)
 │   ├── AppEnvironment.swift     (DI container)
 │   ├── Domain/
+│   │   ├── Bookmark.swift
+│   │   ├── CommandHint.swift
+│   │   ├── CommandRegistry.swift   (D17 scaffold)
 │   │   ├── EventRecord.swift
 │   │   ├── Filter.swift
+│   │   ├── JSONKind.swift          (D18 typed tree)
 │   │   ├── LogLevel.swift
 │   │   ├── Session.swift
+│   │   ├── StorageRecord.swift
 │   │   └── StorageSnapshot.swift
 │   ├── Store/
 │   │   ├── LogStore.swift
@@ -348,8 +353,10 @@ LoggerNext/
 │   │   ├── CommandBar/
 │   │   │   ├── CommandBarView.swift
 │   │   │   └── CommandBarViewModel.swift
-│   │   └── DetailPane/
-│   │       └── DetailPaneView.swift
+│   │   ├── DetailPane/
+│   │   │   └── DetailPaneView.swift
+│   │   └── Shared/
+│   │       └── JSONSyntaxText.swift   (D18 colour palette + row builder)
 │   └── Support/
 │       ├── Highlighting.swift
 │       └── NetworkInterface.swift
@@ -383,7 +390,7 @@ Wired at app launch:
 
 ```swift
 @main
-struct LoggerNextApp: App {
+struct BeaverApp: App {
   @State private var env: AppEnvironment
 
   init() {
@@ -418,7 +425,7 @@ Three classes of error, each with a clear destination:
    via the connection indicator and as synthetic events.
 
 No `print()` for anything user-visible. `os_log` for developer-facing
-logs from LoggerNext itself.
+logs from Beaver itself.
 
 ---
 

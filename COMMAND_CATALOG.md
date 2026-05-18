@@ -1,13 +1,13 @@
 # COMMAND_CATALOG.md — SDK Command Catalog Protocol
 
 **Status:** Forward-looking spec. The current SDK responds to `cmdlist`
-with names only (see `PROTOCOL.md §3.2.1`); LoggerNext maintains a
+with names only (see `PROTOCOL.md §3.2.1`); Beaver maintains a
 hard-coded mapping in `CommandRegistry.swift` as a temporary scaffold
 (`DECISIONS.md` D17). This doc defines the new contract the SDK should
-implement so LoggerNext can delete that mapping and read everything
+implement so Beaver can delete that mapping and read everything
 straight from the wire.
 
-This is the single source of truth for what LoggerNext expects. Any
+This is the single source of truth for what Beaver expects. Any
 deviation in the SDK implementation will require a corresponding change
 on the desktop side; both should be PR-able together once the SDK
 implements this.
@@ -22,13 +22,13 @@ The new command is **`cmdspec`** (replaces `cmdlist`).
 - Doesn't collide with any current registered name.
 
 The legacy `cmdlist` should keep working — both names should be
-registered side by side until LoggerNext drops the old code path. See
+registered side by side until Beaver drops the old code path. See
 §7 (Backwards compatibility) for migration details.
 
 **Suggested alternative names** if `cmdspec` doesn't fit the SDK's
 naming conventions: `cmdcatalog`, `help.commands`, `cmd.help`,
 `debug.commands.list`. The exact name doesn't matter — what matters is
-that LoggerNext knows which command to send and which response to
+that Beaver knows which command to send and which response to
 parse.
 
 ---
@@ -48,14 +48,14 @@ without having to expand the data pane).
 **Why not a new top-level message type?** Cleaner long-term, but
 adding a new `type` to the protocol requires every consumer to be
 updated. Putting it in an event's `data` field rides the existing
-infrastructure with zero protocol churn — LoggerNext only needs to
+infrastructure with zero protocol churn — Beaver only needs to
 recognize a specific subsystem to demux.
 
 ---
 
 ## 3. Identifying the response
 
-LoggerNext detects a catalog response by **exact match** on the event
+Beaver detects a catalog response by **exact match** on the event
 metadata:
 
 | Field        | Value                                                      |
@@ -66,9 +66,9 @@ metadata:
 | `data`       | A JSON object matching §4 below                            |
 
 The chosen subsystem **must be stable across SDK versions** — that's
-how LoggerNext keys the parser. If the SDK team wants to introduce a
+how Beaver keys the parser. If the SDK team wants to introduce a
 different subsystem in v2, that becomes a coordinated change with
-LoggerNext.
+Beaver.
 
 ---
 
@@ -79,7 +79,7 @@ The `data` field carries this object:
 ```jsonc
 {
   // Catalog format version. Increment on backwards-incompatible
-  // changes. LoggerNext checks this before parsing; on a version it
+  // changes. Beaver checks this before parsing; on a version it
   // doesn't recognize, it falls back to displaying just command
   // names from the `commands[].name` field (forward-compat path).
   "version": 1,
@@ -93,7 +93,7 @@ The `data` field carries this object:
   "app_version":       "187",         // host app build, if known
 
   // The actual command catalog. Order is preserved if the SDK wants
-  // a specific display order; LoggerNext otherwise groups by
+  // a specific display order; Beaver otherwise groups by
   // `group` field.
   "commands": [
     {
@@ -114,22 +114,22 @@ The `data` field carries this object:
       // in the popover row. Plain text, no markdown.
       "description": "Write a value to local storage",
 
-      // RECOMMENDED. Logical grouping. LoggerNext renders one
+      // RECOMMENDED. Logical grouping. Beaver renders one
       // section per distinct group, in catalog order. Examples
       // already in use:
       //   "Storage", "Debug", "Layout", "General"
-      // SDKs are free to add new groups — LoggerNext just renders
+      // SDKs are free to add new groups — Beaver just renders
       // whatever it gets. Commands without a `group` land in a
       // default "Other" section at the bottom.
       "group": "Storage",
 
-      // OPTIONAL. Structured argument list. LoggerNext doesn't use
+      // OPTIONAL. Structured argument list. Beaver doesn't use
       // this yet, but having it landed means we can later add:
       //   - In-line argument validation as the user types
       //   - Auto-fill placeholders ("press Tab to fill <key>")
       //   - Type-aware widgets (color pickers for "color", file
       //     pickers for "path", etc.)
-      // Until LoggerNext consumes this field, `syntax` is the
+      // Until Beaver consumes this field, `syntax` is the
       // source of truth for display.
       "arguments": [
         { "name": "key",       "type": "string",  "required": true,
@@ -141,7 +141,7 @@ The `data` field carries this object:
       ],
 
       // OPTIONAL. One or more example invocations. Currently
-      // unused by LoggerNext but landed for the future "click to
+      // unused by Beaver but landed for the future "click to
       // run an example" feature.
       "examples": [
         "storage.local.set userId abc-123",
@@ -150,12 +150,12 @@ The `data` field carries this object:
 
       // OPTIONAL. Alternative names that resolve to the same
       // command. Useful if the SDK renames a command but wants to
-      // keep the old name working. LoggerNext displays the primary
+      // keep the old name working. Beaver displays the primary
       // `name` and treats aliases as searchable synonyms.
       "aliases": ["storage.local.put"],
 
       // OPTIONAL. If the SDK has deprecated this command, set
-      // this to a short reason. LoggerNext shows it with a
+      // this to a short reason. Beaver shows it with a
       // strikethrough + warning icon and surfaces `replaced_by`
       // if present.
       "deprecated":   false,
@@ -164,11 +164,11 @@ The `data` field carries this object:
 
       // OPTIONAL. True if invoking this command produces a log
       // event in response (e.g., `cmdlist` itself, or
-      // `debug.flag.list`). LoggerNext can use this to indicate
+      // `debug.flag.list`). Beaver can use this to indicate
       // "this command will respond" in the UI.
       "produces_response": true,
 
-      // OPTIONAL. True for destructive commands. LoggerNext can
+      // OPTIONAL. True for destructive commands. Beaver can
       // show a confirmation dialog before sending.
       "destructive": false
     },
@@ -192,12 +192,12 @@ The `data` field carries this object:
 | `"enum"`     | Closed set; pair with `arguments[].choices: [string]`.         |
 | `"json"`     | A JSON literal. UI can offer a syntax-highlighted editor.      |
 
-Unknown types should be treated as `"string"` by LoggerNext.
+Unknown types should be treated as `"string"` by Beaver.
 
 ### 4.2 Minimum viable response
 
 The SDK is encouraged to populate all fields, but the **minimum
-acceptable response** for LoggerNext to render usefully is:
+acceptable response** for Beaver to render usefully is:
 
 ```json
 {
@@ -217,7 +217,7 @@ optional and can land in a follow-up.
 
 ## 5. Example response (full event payload)
 
-What LoggerNext receives over the WebSocket:
+What Beaver receives over the WebSocket:
 
 ```jsonc
 {
@@ -275,9 +275,9 @@ the double-encoded form.)
 
 ---
 
-## 6. LoggerNext parser contract
+## 6. Beaver parser contract
 
-When LoggerNext receives an event matching the §3 identifier, it:
+When Beaver receives an event matching the §3 identifier, it:
 
 1. Parses `data` into a `CommandCatalog` value type.
 2. Validates `version`. On `version != 1` (or absent), falls back to
@@ -297,14 +297,14 @@ fallback for SDKs that only implement legacy `cmdlist`.
 
 ## 7. Backwards compatibility
 
-| SDK state                                | LoggerNext behavior                                            |
+| SDK state                                | Beaver behavior                                            |
 |------------------------------------------|----------------------------------------------------------------|
 | Implements `cmdspec` only                | Uses catalog directly; ignores registry.                       |
 | Implements both `cmdspec` and `cmdlist`  | Prefers `cmdspec` response when it arrives; ignores `cmdlist`. |
 | Implements `cmdlist` only (today)        | Falls back to registry-merged names (current behavior).        |
 | Implements neither                       | Help popover shows "No commands available" state.              |
 
-**On the desktop side**, LoggerNext sends both commands on connect:
+**On the desktop side**, Beaver sends both commands on connect:
 
 ```
 500 ms after .clientConnected:
@@ -335,7 +335,7 @@ informative `message`:
 }
 ```
 
-LoggerNext should re-send `cmdspec` after a short delay if the
+Beaver should re-send `cmdspec` after a short delay if the
 catalog is empty but a session is active. (Future work; today the
 manual ⟳ button in the popover is the user's escape hatch.)
 
@@ -344,10 +344,10 @@ manual ⟳ button in the popover is the user's escape hatch.)
 ## 9. Versioning rules
 
 - Any breaking change to the JSON shape bumps `version`.
-- LoggerNext checks `version <= MAX_SUPPORTED_VERSION` before
+- Beaver checks `version <= MAX_SUPPORTED_VERSION` before
   parsing. On a higher version, falls back to legacy `name`-only
   rendering and logs a warning.
-- New optional fields don't require a version bump — LoggerNext
+- New optional fields don't require a version bump — Beaver
   ignores unknown keys.
 
 ---
@@ -364,7 +364,7 @@ manual ⟳ button in the popover is the user's escape hatch.)
    (`"iOS"`, `"tvOS"`, `"Android"`, `"Web"`, …).
 4. **Coordination with Android/tvOS/Web teams.** Should all three
    ship the same `cmdspec` contract, or is each platform free to
-   diverge? Same protocol = simpler LoggerNext, less SDK
+   diverge? Same protocol = simpler Beaver, less SDK
    flexibility.
 5. **Per-environment catalog filtering.** Should `cmdspec` filter
    out commands that aren't available in production builds? Or

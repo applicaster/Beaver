@@ -40,7 +40,14 @@ struct StoragesView: View {
                 return
             }
             if vm?.sessionId != sessionId {
-                vm = StoragesViewModel(store: env.store, sessionId: sessionId)
+                let fresh = StoragesViewModel(store: env.store, sessionId: sessionId)
+                // Critical: subscribe + load cached data BEFORE asking
+                // the device for fresh data. Otherwise the inbound
+                // `.storageUpdated` broadcast can race past the
+                // not-yet-registered continuation and leave the UI
+                // blank even after Reload.
+                await fresh.bootstrap()
+                vm = fresh
             }
             // Auto-refresh from the device. No-op if no client is
             // connected — WSServer.send silently drops in that case
@@ -375,8 +382,68 @@ private struct StoragesDetail: View {
 
     @ViewBuilder
     private func tree(children: [StorageRecord]) -> some View {
-        OutlineGroup(children, id: \.id, children: \.children) { node in
-            StorageTreeRow(record: node)
+        // Manual recursion — see DetailPaneView.JSONTree for the
+        // same pattern. OutlineGroup's automatic indentation isn't
+        // visible outside of a List, so we lay out depth padding +
+        // disclosure chevrons ourselves.
+        VStack(alignment: .leading, spacing: 2) {
+            ForEach(children) { child in
+                StorageTree(record: child, depth: 0)
+            }
+        }
+    }
+}
+
+// MARK: - Storage tree
+
+/// Recursive tree renderer for storage records. Indents children per
+/// nesting level so the structure reads as a tree, and renders its
+/// own disclosure chevron beside each container row.
+private struct StorageTree: View {
+    let record: StorageRecord
+    let depth: Int
+
+    @State private var isExpanded: Bool = true
+
+    private static let indentStep: CGFloat = 14
+
+    private var hasChildren: Bool {
+        !(record.children?.isEmpty ?? true)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                disclosureChevron
+                StorageTreeRow(record: record)
+            }
+            .padding(.leading, CGFloat(depth) * Self.indentStep)
+
+            if isExpanded, let children = record.children, !children.isEmpty {
+                ForEach(children) { child in
+                    StorageTree(record: child, depth: depth + 1)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var disclosureChevron: some View {
+        if hasChildren {
+            Button {
+                isExpanded.toggle()
+            } label: {
+                Image(systemName: "chevron.right")
+                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 10, height: 10)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(isExpanded ? "Collapse" : "Expand")
+        } else {
+            Color.clear.frame(width: 10, height: 10)
         }
     }
 }
@@ -387,20 +454,23 @@ private struct StoragesDetail: View {
 /// `JSONTreeRow` from the log-feed DetailPaneView: hover reveals a
 /// copy button on the right. Leaf rows copy the raw value; container
 /// rows copy the subtree as pretty-printed JSON.
+///
+/// Renders `"key": value` (or `[N]: value` for array elements) using
+/// `JSONSyntax` so colours match the log-event detail pane.
 private struct StorageTreeRow: View {
     let record: StorageRecord
     @State private var isHovered = false
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(record.key)
-                .foregroundStyle(.secondary)
-            if let value = record.valueText {
-                Text(value)
-                    .textSelection(.enabled)
-            } else {
-                Spacer(minLength: 0)
-            }
+            JSONSyntax.row(
+                key: record.key,
+                isArrayIndex: record.key.looksLikeJSONArrayIndex,
+                kind: record.kind
+            )
+            .textSelection(.enabled)
+            .help(record.key)
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             // Copy button: reserves space always so the row doesn't
             // jiggle when the pointer enters; only visible + clickable
@@ -413,7 +483,7 @@ private struct StorageTreeRow: View {
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
-            .help(record.valueText != nil ? "Copy value" : "Copy as JSON")
+            .help(record.kind.isContainer ? "Copy as JSON" : "Copy value")
             .opacity(isHovered ? 1 : 0)
             .allowsHitTesting(isHovered)
         }
@@ -424,10 +494,12 @@ private struct StorageTreeRow: View {
 
     private func copyToPasteboard() {
         let payload: String
-        if let value = record.valueText {
-            payload = value
-        } else {
-            payload = StorageRecord.serializeJSON(record)
+        switch record.kind {
+        case .string(let raw):  payload = raw
+        case .number(let n):    payload = n
+        case .bool(let b):      payload = b ? "true" : "false"
+        case .null:             payload = "null"
+        case .object, .array:   payload = StorageRecord.serializeJSON(record)
         }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(payload, forType: .string)

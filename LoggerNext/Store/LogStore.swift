@@ -19,6 +19,8 @@ public actor LogStore {
         case cleared(sessionId: Int64)
         case sessionStarted(Session)
         case sessionEnded(Session)
+        case sessionDeleted(id: Int64)
+        case sessionsCleared
         case storageUpdated(sessionId: Int64, namespace: StorageSnapshot.Namespace)
         case bookmarksChanged(sessionId: Int64)
     }
@@ -175,6 +177,37 @@ public actor LogStore {
         try await dbQueue.read { db in
             try Self.fetchAllSessions(db: db)
         }
+    }
+
+    /// Delete a single session row. Cascading FKs wipe its events,
+    /// storage snapshots, and bookmarks. Broadcasts
+    /// `.sessionDeleted(id:)` so view models can refresh their lists
+    /// and clear viewing-state if it pointed at this row.
+    ///
+    /// No-op if `id` doesn't exist (idempotent so the UI can fire
+    /// repeated deletes safely).
+    public func deleteSession(id: Int64) async throws {
+        let deleted: Bool = try await dbQueue.write { db in
+            try db.execute(
+                sql: "DELETE FROM session WHERE id = ?",
+                arguments: [id]
+            )
+            return db.changesCount > 0
+        }
+        if deleted {
+            broadcast(.sessionDeleted(id: id))
+        }
+    }
+
+    /// Delete every session row. Cascades through events, storage
+    /// snapshots, and bookmarks. Broadcasts `.sessionsCleared` once,
+    /// even on an empty store, so the UI's "are you sure?" path can
+    /// safely settle into the empty state.
+    public func deleteAllSessions() async throws {
+        try await dbQueue.write { db in
+            try db.execute(sql: "DELETE FROM session")
+        }
+        broadcast(.sessionsCleared)
     }
 
     /// Delete every event row in a session plus any bookmarks that

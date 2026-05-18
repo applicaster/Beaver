@@ -90,34 +90,91 @@ struct DetailPaneView: View {
 
     @ViewBuilder
     private func treeView(root: JSONTreeNode) -> some View {
-        OutlineGroup(root, children: \.children) { node in
-            JSONTreeRow(node: node)
+        // Manual recursive tree — OutlineGroup's automatic
+        // indentation doesn't show through outside of a List, which
+        // made the tree visually flat. `JSONTree` adds explicit
+        // leading padding per depth and renders its own disclosure
+        // chevron, so nesting reads at a glance.
+        JSONTree(node: root, depth: 0)
+    }
+}
+
+// MARK: - JSON tree
+
+/// Recursive tree renderer. Indents children by `depth × indentStep`
+/// so the JSON structure reads visually as a tree, and owns its
+/// expand/collapse state per node. Each row is a `JSONTreeRow`.
+private struct JSONTree: View {
+    let node: JSONTreeNode
+    let depth: Int
+
+    @State private var isExpanded: Bool = true
+
+    /// Visual indent applied per nesting level.
+    private static let indentStep: CGFloat = 14
+
+    private var hasChildren: Bool {
+        !(node.children?.isEmpty ?? true)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                disclosureChevron
+                JSONTreeRow(node: node)
+            }
+            .padding(.leading, CGFloat(depth) * Self.indentStep)
+
+            if isExpanded, let children = node.children, !children.isEmpty {
+                ForEach(children) { child in
+                    JSONTree(node: child, depth: depth + 1)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var disclosureChevron: some View {
+        if hasChildren {
+            Button {
+                isExpanded.toggle()
+            } label: {
+                Image(systemName: "chevron.right")
+                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 10, height: 10)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(isExpanded ? "Collapse" : "Expand")
+        } else {
+            // Leaf rows still reserve the same gutter so keys + values
+            // line up under their container's content column.
+            Color.clear.frame(width: 10, height: 10)
         }
     }
 }
 
 // MARK: - JSON tree row
 
-/// One row in the OutlineGroup. Owns its hover state so it can reveal
-/// a copy icon on the right when the pointer is over it.
+/// One row in the tree. Renders `"key": value` (or `[N]:` for array
+/// elements) as a single syntax-coloured Text, with a hover-revealed
+/// copy icon on the right.
 private struct JSONTreeRow: View {
     let node: JSONTreeNode
     @State private var isHovered = false
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(node.label)
-                .foregroundStyle(.secondary)
-                .frame(width: node.labelColumnWidth, alignment: .trailing)
-                .help(node.label)
-
-            if let value = node.valueText {
-                Text(value)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            } else {
-                Spacer(minLength: 0)
-            }
+            JSONSyntax.row(
+                key: node.label,
+                isArrayIndex: node.label.looksLikeJSONArrayIndex,
+                kind: node.kind
+            )
+            .textSelection(.enabled)
+            .help(node.label)
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             // Copy button: reserves space always (so layout is stable),
             // becomes visible + clickable only when the row is hovered.
@@ -129,9 +186,7 @@ private struct JSONTreeRow: View {
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
-            .help(node.valueText == nil
-                  ? "Copy as JSON"
-                  : "Copy value")
+            .help(node.kind.isContainer ? "Copy as JSON" : "Copy value")
             .opacity(isHovered ? 1 : 0)
             .allowsHitTesting(isHovered)
         }
@@ -145,38 +200,33 @@ private struct JSONTreeRow: View {
     /// as pretty-printed JSON.
     private func copyToPasteboard() {
         let payload: String
-        if let value = node.valueText {
-            // Strip the surrounding quotes that we added when
-            // displaying strings (`"hello"` → `hello`).
-            if value.hasPrefix("\"") && value.hasSuffix("\"") && value.count >= 2 {
-                payload = String(value.dropFirst().dropLast())
-            } else {
-                payload = value
-            }
-        } else {
-            payload = JSONTreeNode.serializeJSON(node)
+        switch node.kind {
+        case .string(let raw):  payload = raw
+        case .number(let n):    payload = n
+        case .bool(let b):      payload = b ? "true" : "false"
+        case .null:             payload = "null"
+        case .object, .array:   payload = JSONTreeNode.serializeJSON(node)
         }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(payload, forType: .string)
     }
 }
 
-// MARK: - JSON tree
+// MARK: - JSON tree model
 
-/// Recursive model for rendering arbitrary JSON in an `OutlineGroup`.
+/// Recursive model used by `JSONTree`. Parse-once; no in-row
+/// recursion. Replaces the old `DataModel` +
+/// `DataModelHelper.prepareDataSource…` machinery (≈200 LOC) with
+/// about 60.
 ///
-/// Replaces the old `DataModel` + `DataModelHelper.prepareDataSource…`
-/// machinery (≈200 LOC) with about 60. Parse-once; no in-row recursion.
+/// `label` is the bare key — no `{ N }` / `[ N ]` summary appended,
+/// since `JSONSyntax` renders the summary as its own coloured Text
+/// segment.
 struct JSONTreeNode: Identifiable, Hashable {
     let id: String
     let label: String
-    let valueText: String?
+    let kind: JSONKind
     let children: [JSONTreeNode]?
-
-    /// Width of the label column for THIS node's row. Set by the parent
-    /// so all siblings within the same group share the same column,
-    /// making value columns line up.
-    var labelColumnWidth: CGFloat = 90
 
     static func parse(_ json: String) -> JSONTreeNode? {
         guard let data = json.data(using: .utf8),
@@ -189,70 +239,66 @@ struct JSONTreeNode: Identifiable, Hashable {
         switch value {
         case let dict as [String: Any]:
             let sortedKeys = dict.keys.sorted()
-            var children = sortedKeys.map { key in
+            let children = sortedKeys.map { key in
                 build(label: key, value: dict[key]!, path: "\(path).\(key)")
             }
-            // All siblings get the same label column width = max width
-            // among their labels. Width estimate is based on monospaced
-            // .caption font (~6.7pt per char), with small padding.
-            let column = estimatedColumnWidth(forLabels: children.map(\.label))
-            for i in children.indices { children[i].labelColumnWidth = column }
             return JSONTreeNode(
                 id: path,
-                label: "\(label)  { \(children.count) }",
-                valueText: nil,
+                label: label,
+                kind: .object(count: children.count),
                 children: children.isEmpty ? nil : children
             )
         case let array as [Any]:
-            var children = array.enumerated().map { (index, element) in
+            let children = array.enumerated().map { (index, element) in
                 build(label: "[\(index)]", value: element, path: "\(path)[\(index)]")
             }
-            let column = estimatedColumnWidth(forLabels: children.map(\.label))
-            for i in children.indices { children[i].labelColumnWidth = column }
             return JSONTreeNode(
                 id: path,
-                label: "\(label)  [ \(children.count) ]",
-                valueText: nil,
+                label: label,
+                kind: .array(count: children.count),
                 children: children.isEmpty ? nil : children
             )
         case is NSNull:
-            return JSONTreeNode(id: path, label: label, valueText: "null", children: nil)
+            return JSONTreeNode(id: path, label: label, kind: .null, children: nil)
         case let bool as Bool:
-            return JSONTreeNode(id: path, label: label, valueText: bool ? "true" : "false", children: nil)
+            return JSONTreeNode(id: path, label: label, kind: .bool(bool), children: nil)
         case let number as NSNumber:
-            return JSONTreeNode(id: path, label: label, valueText: number.stringValue, children: nil)
+            // Bool was matched above; this branch is real numbers only.
+            return JSONTreeNode(
+                id: path,
+                label: label,
+                kind: .number(number.stringValue),
+                children: nil
+            )
         case let string as String:
-            return JSONTreeNode(id: path, label: label, valueText: "\"\(string)\"", children: nil)
+            return JSONTreeNode(id: path, label: label, kind: .string(string), children: nil)
         default:
-            return JSONTreeNode(id: path, label: label, valueText: String(describing: value), children: nil)
+            return JSONTreeNode(
+                id: path,
+                label: label,
+                kind: .string(String(describing: value)),
+                children: nil
+            )
         }
     }
 
     /// Serialize a subtree as pretty-printed JSON for the copy action.
-    /// Reconstructs the JSON shape from the tree representation: leaf
-    /// `valueText` is already JSON-valid (`"str"`, `true`, `123`,
-    /// `null`); containers become `{...}` (object) or `[...]` (array)
-    /// depending on whether their children labels look like `[N]`
-    /// indices.
+    /// Walks `kind` directly — no string-parsing guesswork.
     static func serializeJSON(_ node: JSONTreeNode, indent: Int = 0) -> String {
-        let pad = String(repeating: "  ", count: indent)
+        let pad      = String(repeating: "  ", count: indent)
         let innerPad = String(repeating: "  ", count: indent + 1)
 
-        if let value = node.valueText {
-            return value
-        }
-        guard let children = node.children, !children.isEmpty else {
-            return "null"
-        }
-        let isArray = children.allSatisfy {
-            $0.label.hasPrefix("[") && $0.label.hasSuffix("]")
-        }
-        if isArray {
-            let parts = children.map { child in
-                "\(innerPad)\(serializeJSON(child, indent: indent + 1))"
-            }
-            return "[\n" + parts.joined(separator: ",\n") + "\n\(pad)]"
-        } else {
+        switch node.kind {
+        case .null:           return "null"
+        case .bool(let b):    return b ? "true" : "false"
+        case .number(let n):  return n
+        case .string(let s):
+            let escaped = s
+                .replacingOccurrences(of: "\\", with: "\\\\")
+                .replacingOccurrences(of: "\"", with: "\\\"")
+            return "\"\(escaped)\""
+        case .object:
+            guard let children = node.children, !children.isEmpty else { return "{}" }
             let parts = children.map { child in
                 let escapedKey = child.label
                     .replacingOccurrences(of: "\\", with: "\\\\")
@@ -260,16 +306,12 @@ struct JSONTreeNode: Identifiable, Hashable {
                 return "\(innerPad)\"\(escapedKey)\": \(serializeJSON(child, indent: indent + 1))"
             }
             return "{\n" + parts.joined(separator: ",\n") + "\n\(pad)}"
+        case .array:
+            guard let children = node.children, !children.isEmpty else { return "[]" }
+            let parts = children.map { child in
+                "\(innerPad)\(serializeJSON(child, indent: indent + 1))"
+            }
+            return "[\n" + parts.joined(separator: ",\n") + "\n\(pad)]"
         }
-    }
-
-    /// Approximate pixel width for the widest label in a sibling group.
-    /// Tuned for `.system(.caption, design: .monospaced)`; the char
-    /// width is ~6.7pt at typical caption size. Capped so a single
-    /// pathological key doesn't blow out the whole detail pane.
-    private static func estimatedColumnWidth(forLabels labels: [String]) -> CGFloat {
-        let maxChars = labels.map(\.count).max() ?? 0
-        let approx = CGFloat(maxChars) * 6.7 + 6
-        return min(max(approx, 70), 300)   // floor 70, ceiling 300
     }
 }

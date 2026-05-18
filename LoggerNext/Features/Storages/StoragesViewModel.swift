@@ -54,12 +54,26 @@ final class StoragesViewModel {
     init(store: LogStore, sessionId: Int64) {
         self.store = store
         self.sessionId = sessionId
-        Task { await self.reloadFromStore() }
-        Task { await self.subscribeToChanges() }
     }
 
     deinit {
         subscription?.cancel()
+    }
+
+    /// Two-phase init: must be `await`ed before the VM is published.
+    ///
+    /// The change-stream subscription has to be registered with the
+    /// store BEFORE we ask the device for new data, otherwise the
+    /// inbound `.storageUpdated` broadcast can race past the
+    /// not-yet-listening continuation and leave the UI showing nothing
+    /// even after a reload. Keeping `init` synchronous wasn't enough
+    /// because `Task { await … }` is unstructured and Swift can
+    /// schedule the request Task before the subscription Task ever
+    /// reaches its `await store.changes()` call. See
+    /// `StoragesView.task(id:)` for the call site.
+    func bootstrap() async {
+        await subscribeToChanges()
+        await reloadFromStore()
     }
 
     // MARK: - Derived state
@@ -114,11 +128,25 @@ final class StoragesViewModel {
     // MARK: - Actions
 
     /// Send `storage.list` to the device. The response will come back
-    /// as a `storage` message and refresh `snapshots` via the
+    /// as a `storage` message and refresh `snapshots` via the change
     /// subscription. No-op if no client is connected (WSServer.send
     /// silently drops in that case).
+    ///
+    /// Belt-and-braces: in addition to relying on the subscription,
+    /// we also reload from the store ourselves a short delay after
+    /// sending. The subscription is the primary path (it picks up
+    /// updates from ANY source, including auto-refresh from other VMs);
+    /// this delayed reload covers the edge case where the broadcast
+    /// arrives before the consumer Task has woken up.
     func requestRefresh(via server: WSServer) {
-        Task { await server.send(command: "storage.list") }
+        Task { [weak self] in
+            await server.send(command: "storage.list")
+            // 400 ms is a typical SDK round-trip for storage.list;
+            // small enough that the user doesn't see staleness, big
+            // enough that the SDK has almost certainly answered.
+            try? await Task.sleep(for: .milliseconds(400))
+            await self?.reloadFromStore()
+        }
     }
 
     /// Wipe local snapshot cache. Doesn't touch the device's actual

@@ -23,7 +23,7 @@ LoggerNext/                                  ← repo root
 │   └── release.sh
 ├── LoggerNext.xcodeproj/                    ← double-click to open
 ├── LoggerNext/                              ← target: LoggerNext
-│   ├── LoggerNextApp.swift                  (the real app entry)
+│   ├── BeaverApp.swift                  (the real app entry)
 │   ├── AppEnvironment.swift
 │   ├── Assets.xcassets/                     (Xcode resource bundle)
 │   ├── LoggerNext.entitlements              (App Sandbox entitlements)
@@ -45,7 +45,7 @@ LoggerNext/                                  ← repo root
 ## Open the project
 
 ```bash
-cd /Users/antonkononenko/Work/Applicaster/LoggerNext
+cd /Users/antonkononenko/Work/Applicaster/Beaver
 open LoggerNext.xcodeproj
 ```
 
@@ -55,7 +55,7 @@ open LoggerNext.xcodeproj
 
 1. **Add the new source folders to the project navigator.**
    In Xcode the project navigator will show `LoggerNext` as a group
-   containing `LoggerNextApp.swift` and `ContentView.swift` (which is
+   containing `BeaverApp.swift` and `ContentView.swift` (which is
    now red — see step 2). The new folders on disk (`Domain`,
    `Features`, `Store`, `Support`, `Transport`) aren't referenced yet.
    - In Finder, navigate to `LoggerNext/LoggerNext/`.
@@ -63,11 +63,11 @@ open LoggerNext.xcodeproj
      and the loose **AppEnvironment.swift** into the `LoggerNext` group
      in Xcode's navigator.
    - Dialog: select **Create groups** (not "Create folder references"),
-     and **Add to target: LoggerNext**.
+     and **Add to target: Beaver**.
 2. **Remove `ContentView.swift` from the project.**
    It's already deleted from disk; the navigator will show it red.
    Right-click → **Delete** → **Remove Reference**.
-3. **Confirm `LoggerNextApp.swift` is the real one.**
+3. **Confirm `BeaverApp.swift` is the real one.**
    Xcode's auto-generated copy was overwritten on disk. If Xcode warns
    that the file changed externally, click **Keep Disk Version** /
    **Revert**, or just close and reopen the project.
@@ -75,7 +75,7 @@ open LoggerNext.xcodeproj
    - **File ▸ Add Package Dependencies…**
    - URL: `https://github.com/groue/GRDB.swift`
    - Rule: **Up to Next Major Version**, starting at `7.0.0`.
-   - Add to target **LoggerNext** (not the test targets).
+   - Add to target **Beaver** (not the test targets).
 5. **Add the test files to the test target.**
    - Drag `LogStoreTests.swift` and `ProtocolDecoderTests.swift` from
      Finder into the `LoggerNextTests` group in Xcode.
@@ -83,7 +83,7 @@ open LoggerNext.xcodeproj
    - Remove the boilerplate `LoggerNextTests.swift` reference (file is
      already deleted from disk).
 6. **Project settings.**
-   - Select the **LoggerNext** project, then the **LoggerNext** target.
+   - Select the **Beaver** project, then the **Beaver** target.
    - **General ▸ Minimum Deployments**: macOS **26.0**.
    - **Build Settings ▸ Swift Language Version**: **Swift 6**.
    - **Build Settings ▸ Strict Concurrency Checking**: **Complete**.
@@ -101,11 +101,11 @@ open LoggerNext.xcodeproj
 To run the unit tests without Xcode (useful for CI):
 
 ```bash
-cd /Users/antonkononenko/Work/Applicaster/LoggerNext
+cd /Users/antonkononenko/Work/Applicaster/Beaver
 swift test
 ```
 
-This builds the `LoggerNextCore` library + `LoggerNextCoreTests` target
+This builds the `BeaverCore` library + `BeaverCoreTests` target
 declared in `Package.swift`. The full app target only builds in Xcode
 (SwiftUI views, `@main` entry, entitlements).
 

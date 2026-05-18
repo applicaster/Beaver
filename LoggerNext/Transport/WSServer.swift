@@ -61,6 +61,20 @@ public actor WSServer {
         parameters.includePeerToPeer = true
         // PROTOCOL.md §1: accept both IPv4 and IPv6.
 
+        // Enable TCP keepalive with aggressive timing so we detect
+        // half-open connections within ~60 seconds. Default OS
+        // keepalive idle is ~2 hours, which means a killed client
+        // would leave us showing "Connected" until next reboot.
+        //
+        // Detection budget = keepaliveIdle + (keepaliveInterval *
+        // keepaliveCount) = 30 + (10 * 3) = 60 seconds.
+        if let tcp = parameters.defaultProtocolStack.transportProtocol as? NWProtocolTCP.Options {
+            tcp.enableKeepalive = true
+            tcp.keepaliveIdle = 30
+            tcp.keepaliveInterval = 10
+            tcp.keepaliveCount = 3
+        }
+
         let wsOptions = NWProtocolWebSocket.Options()
         wsOptions.autoReplyPing = true
         parameters.defaultProtocolStack.applicationProtocols.insert(wsOptions, at: 0)
@@ -104,12 +118,17 @@ public actor WSServer {
 
     private func handleNewConnection(_ connection: NWConnection) {
         print("[WSServer] new connection arriving (endpoint=\(connection.endpoint))")
-        if current != nil {
-            print("[WSServer] rejecting (another client already connected)")
-            connection.cancel()
-            return
+        if let old = current {
+            // Take-over policy: assume the previous connection is
+            // dead (TCP keepalive may not have proven it yet) and
+            // accept the new one. The single-client invariant is
+            // preserved — we just always pick "newest wins" rather
+            // than rejecting. Rationale: in our debug-tool use case
+            // a second incoming client almost always means the same
+            // device reconnected, not a competing real client.
+            print("[WSServer] replacing existing connection with the new one")
+            old.cancel()
         }
-
         current = connection
         connection.stateUpdateHandler = { [weak self] state in
             print("[WSServer] connection state changed: \(state)")
@@ -123,6 +142,15 @@ public actor WSServer {
         _ state: NWConnection.State,
         connection: NWConnection
     ) async {
+        // Guard against stale state callbacks from a connection that
+        // was already replaced by a newer one. Without this, the old
+        // connection's `.cancelled` event (from `old.cancel()` in
+        // handleNewConnection) would race in and clear `current`,
+        // wiping out the new connection's reference.
+        guard connection === current else {
+            print("[WSServer] ignoring stale state update from replaced connection: \(state)")
+            return
+        }
         print("[WSServer] handleConnectionState: \(state)")
         switch state {
         case .ready:

@@ -122,11 +122,11 @@ private struct LogFeedFilterBar: View {
             .font(.caption)
             .fixedSize()
 
-            // "↓ N new events" pill — shown when paused with unseen events.
-            // Click re-engages Follow, scrolls to bottom, and clears the count.
-            if !vm.followTail && vm.unseenCount > 0 {
+            // "↓ N new events" pill — shown only when paused with
+            // unseen events queued up. Click resumes the live feed.
+            if vm.isPaused && vm.unseenCount > 0 {
                 Button {
-                    vm.resumeFollow()
+                    vm.resume()
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "arrow.down")
@@ -140,12 +140,20 @@ private struct LogFeedFilterBar: View {
                     .foregroundStyle(.white)
                 }
                 .buttonStyle(.plain)
-                .help("Scroll to latest and resume following")
+                .help("Resume and scroll to latest")
             }
 
-            Toggle("Follow", isOn: $vm.followTail)
-                .toggleStyle(.switch)
-                .fixedSize()
+            Button {
+                vm.isPaused.toggle()
+            } label: {
+                Label(
+                    vm.isPaused ? "Resume" : "Pause",
+                    systemImage: vm.isPaused ? "play.fill" : "pause.fill"
+                )
+            }
+            .help(vm.isPaused
+                  ? "Resume the live feed (catch up on new events)"
+                  : "Freeze the table so you can read without new events shifting it")
 
             Toggle("Collapse", isOn: $vm.collapseRepeats)
                 .toggleStyle(.switch)
@@ -456,22 +464,25 @@ private struct LogFeedTable: View {
             .contextMenu(forSelectionType: EventRecord.ID.self) { ids in
                 rowContextMenu(for: events(forSelection: ids))
             }
-            // Auto-scroll to the newest row when Follow is on. We watch
-            // the last visible event id; whenever it changes, scroll
-            // to it. SwiftUI's Table tags each row with its
-            // Identifiable id, which ScrollViewReader can target.
+            // Auto-scroll to the newest row whenever a new event
+            // lands in the page. NOT animated — under fast streaming
+            // the animation would move row positions while the user
+            // tries to click, causing hit-tests to resolve to the
+            // wrong row. Instant scroll keeps clicks reliable.
+            //
+            // Paused state means `page` doesn't grow, so no scroll
+            // fires. Match-jump scrolls to its own target separately
+            // via scrollTarget below (which IS animated, because
+            // that's a one-shot user action).
             .onChange(of: vm.page.last?.id) { _, newLastId in
-                guard vm.followTail, let newLastId else { return }
-                withAnimation(.easeInOut(duration: 0.15)) {
-                    proxy.scrollTo(newLastId, anchor: .bottom)
-                }
+                guard let newLastId else { return }
+                proxy.scrollTo(newLastId, anchor: .bottom)
             }
-            // Re-engaging Follow should immediately jump to the bottom.
-            .onChange(of: vm.followTail) { _, isFollowing in
-                guard isFollowing, let lastId = vm.page.last?.id else { return }
-                withAnimation(.easeInOut(duration: 0.15)) {
-                    proxy.scrollTo(lastId, anchor: .bottom)
-                }
+            // Resuming from paused should snap to the latest row.
+            // Same instant-scroll reasoning.
+            .onChange(of: vm.isPaused) { _, paused in
+                guard !paused, let lastId = vm.page.last?.id else { return }
+                proxy.scrollTo(lastId, anchor: .bottom)
             }
             // Jump-to-match: when the view model signals a scroll
             // target (via Up/Down on the match navigator), center the
