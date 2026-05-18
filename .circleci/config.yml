@@ -1,0 +1,183 @@
+version: 2.1
+
+# CI pipeline for Beaver. Two workflows:
+#
+#   on-pull-request  — fast build + test on any non-main branch.
+#                      Catches broken builds before merge.
+#
+#   on-merge-to-main — runs the full release pipeline (build → sign →
+#                      notarize → staple → zip → publish GitHub Release).
+#                      Idempotent: if the MARKETING_VERSION in the
+#                      pbxproj is already released on GitHub, the job
+#                      halts cleanly. So most merges (without a version
+#                      bump) are a no-op release-wise.
+#
+# Required CircleCI project environment variables — set under
+# Project Settings → Environment Variables:
+#
+#   APPLE_ID                   Apple ID (email) on the Developer Program account
+#   APPLE_APP_PASSWORD         App-specific password from appleid.apple.com
+#   APPLE_TEAM_ID              10-character team ID (e.g. WZZ4E5L8EL)
+#   DEVELOPER_ID_APPLICATION   Full cert string ("Developer ID Application: Applicaster Ltd. (WZZ4E5L8EL)")
+#   DEVELOPER_ID_P12_BASE64    Base-64 encoded .p12 export of the cert + private key.
+#                              Export from Keychain Access → right-click cert → Export
+#                              → choose .p12 → set a password → then on your Mac:
+#                                  base64 -i Beaver.p12 | pbcopy
+#                              and paste into CircleCI as a single line.
+#   DEVELOPER_ID_P12_PASSWORD  The password you set when exporting the .p12.
+#   GITHUB_TOKEN               Personal access token (fine-grained or classic with `repo` scope).
+#                              Used by `gh release create` to publish the .zip.
+
+executors:
+  macos:
+    macos:
+      # Match your local Xcode version. CircleCI's available list:
+      # https://circleci.com/docs/using-macos/#supported-xcode-versions
+      xcode: "26.0.0"
+    resource_class: macos.m1.medium.gen1
+
+jobs:
+  build-and-test:
+    executor: macos
+    steps:
+      - checkout
+      - restore_cache:
+          name: Restore SPM cache
+          keys:
+            - v1-spm-{{ checksum "LoggerNext.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved" }}
+            - v1-spm-
+      - run:
+          name: Resolve Swift packages
+          command: xcodebuild -resolvePackageDependencies -project LoggerNext.xcodeproj
+      - save_cache:
+          name: Save SPM cache
+          paths:
+            - ~/Library/Developer/Xcode/DerivedData/LoggerNext-*/SourcePackages
+          key: v1-spm-{{ checksum "LoggerNext.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved" }}
+      - run:
+          name: Build (Debug)
+          command: make build
+      - run:
+          name: Unit tests
+          command: make test
+
+  release:
+    executor: macos
+    steps:
+      - checkout
+
+      # ── Read current MARKETING_VERSION from the pbxproj ─────────────
+      - run:
+          name: Resolve version
+          command: |
+            VERSION=$(grep -m1 'MARKETING_VERSION = ' \
+              LoggerNext.xcodeproj/project.pbxproj \
+              | sed 's/.*= //; s/;//' | tr -d '[:space:]')
+            if [ -z "$VERSION" ]; then
+              echo "❌ Could not read MARKETING_VERSION from pbxproj"; exit 1
+            fi
+            echo "Building Beaver ${VERSION}"
+            echo "export BEAVER_VERSION=${VERSION}" >> "$BASH_ENV"
+
+      # ── Idempotency: skip if this version already has a Release ─────
+      - run:
+          name: Skip if release already exists
+          command: |
+            # gh ships pre-installed on CircleCI macOS images. Auth via
+            # GITHUB_TOKEN env var (gh picks it up automatically).
+            if gh release view "${BEAVER_VERSION}" --repo applicaster/Beaver \
+                 >/dev/null 2>&1; then
+              echo "✅ Release ${BEAVER_VERSION} already exists. Halting."
+              circleci-agent step halt
+            fi
+            echo "Release ${BEAVER_VERSION} not found — proceeding."
+
+      # ── Set up an ephemeral keychain with the Developer ID cert ─────
+      - run:
+          name: Import Developer ID Application certificate
+          command: |
+            set -euo pipefail
+            KEYCHAIN=ci.keychain
+            KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+
+            echo "${DEVELOPER_ID_P12_BASE64}" | base64 --decode > /tmp/cert.p12
+
+            security create-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN}"
+            security default-keychain -s "${KEYCHAIN}"
+            security unlock-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN}"
+            # Keep the keychain unlocked for the duration of the build.
+            security set-keychain-settings -t 7200 -u "${KEYCHAIN}"
+
+            security import /tmp/cert.p12 \
+              -k "${KEYCHAIN}" \
+              -P "${DEVELOPER_ID_P12_PASSWORD}" \
+              -T /usr/bin/codesign \
+              -T /usr/bin/security \
+              -T /usr/bin/productbuild
+
+            # Allow codesign to use the private key without GUI prompt.
+            security set-key-partition-list \
+              -S apple-tool:,apple:,codesign: \
+              -s -k "${KEYCHAIN_PASSWORD}" "${KEYCHAIN}"
+
+            rm -f /tmp/cert.p12
+            security find-identity -v -p codesigning
+
+      # ── Build, sign, notarize, zip ──────────────────────────────────
+      - run:
+          name: make release
+          # The release script reads APPLE_ID / APPLE_APP_PASSWORD /
+          # APPLE_TEAM_ID / DEVELOPER_ID_APPLICATION from the env, the
+          # same way `.envrc.local` does locally.
+          command: make release
+          no_output_timeout: 15m
+
+      # ── Tag the commit, push the tag, publish the Release ──────────
+      - run:
+          name: Tag + publish GitHub Release
+          command: |
+            set -euo pipefail
+            git config user.name  "CircleCI"
+            git config user.email "ci@applicaster.com"
+
+            # Tag the commit if not already tagged.
+            if ! git rev-parse "${BEAVER_VERSION}" >/dev/null 2>&1; then
+              git tag -a "${BEAVER_VERSION}" -m "Beaver ${BEAVER_VERSION}"
+              git push origin "${BEAVER_VERSION}"
+            fi
+
+            # Extract the [Unreleased] section from CHANGELOG.md as
+            # release notes. Falls back to a generic message.
+            NOTES=$(awk '
+              /^## \[Unreleased\]/   { capturing = 1; next }
+              /^## /                 { capturing = 0 }
+              capturing
+            ' CHANGELOG.md | sed '/./,$!d')
+            if [ -z "${NOTES}" ]; then
+              NOTES="Auto-released from $(git rev-parse --short HEAD)."
+            fi
+
+            gh release create "${BEAVER_VERSION}" \
+              "build/Beaver-${BEAVER_VERSION}.zip" \
+              --title "Beaver ${BEAVER_VERSION}" \
+              --notes "${NOTES}" \
+              --repo applicaster/Beaver
+
+      - store_artifacts:
+          path: build
+          destination: build
+
+workflows:
+  on-pull-request:
+    jobs:
+      - build-and-test:
+          filters:
+            branches:
+              ignore: main
+
+  on-merge-to-main:
+    jobs:
+      - release:
+          filters:
+            branches:
+              only: main
