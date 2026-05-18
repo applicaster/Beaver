@@ -46,40 +46,66 @@ mobile client at it.
 - Xcode 17 or later
 - Swift 6 toolchain
 
-## Release (deploy a signed + notarized build)
+## Install (end users)
 
-`scripts/release.sh` builds, codesigns, notarizes via `notarytool`,
-staples the ticket, and packages a `.app.zip` ready to share.
-`make ship` does this end-to-end including the version bump.
+Latest release: **https://github.com/applicaster/Beaver/releases/latest**
 
-### One-time setup
+1. Download `Beaver-X.Y.Z.zip` from the **Assets** section of the
+   release page (NOT "Source code"). The zip is signed + notarized
+   by Apple; macOS Gatekeeper accepts it on first launch.
+2. Unzip → drag `Beaver.app` into `/Applications`.
+3. Launch it. The toolbar's **Copy IP** button gives you the
+   `<your-mac-ip>:9080` address to point your mobile SDK at.
+
+## Release (publishing a new version)
+
+There are two paths: **automated via CircleCI** (preferred — every
+merge to `main` that bumps the version produces a signed release),
+and **manual from your Mac** (fallback when CI is unavailable).
+
+### Automated (CircleCI on merge to main)
+
+`.circleci/config.yml` runs the full release pipeline on every push
+to `main`. It's idempotent — if the `MARKETING_VERSION` in the
+`pbxproj` already has a GitHub Release, the job halts cleanly.
+Otherwise it builds → signs → notarizes → tags → publishes.
+
+**Per-release workflow:**
+
+```bash
+# 1. Move CHANGELOG.md items from [Unreleased] under a new section.
+$EDITOR CHANGELOG.md
+
+# 2. Bump the version (commits + tags locally).
+make bump VERSION=1.1.0
+
+# 3. Push.
+git push && git push --tags
+```
+
+CircleCI does the rest in ~5 min. The release will appear at
+`https://github.com/applicaster/Beaver/releases/tag/1.1.0`.
+
+**Required CircleCI environment variables** (set once under Project
+Settings → Environment Variables): `APPLE_ID`, `APPLE_APP_PASSWORD`,
+`APPLE_TEAM_ID`, `DEVELOPER_ID_APPLICATION`, `DEVELOPER_ID_P12_BASE64`,
+`DEVELOPER_ID_P12_PASSWORD`, `GITHUB_TOKEN`. See the comments at the
+top of `.circleci/config.yml` for how to derive each value.
+
+### Manual (from your Mac)
+
+Use this when CI is down, you need to test a release locally, or
+you're cutting a one-off build that shouldn't go through `main`.
+
+**One-time setup**
 
 ```bash
 cp scripts/.envrc.example .envrc.local
 $EDITOR .envrc.local          # fill in the four secrets below
+chmod +x scripts/release.sh   # if you cloned and the bit was stripped
 ```
 
-### Cutting a release
-
-```bash
-# Move items from [Unreleased] into a new section in CHANGELOG.md, then:
-make ship VERSION=1.1.0       # ≈ 3–5 min including notarization
-git push && git push --tags
-# → build/Beaver-1.1.0.zip
-```
-
-`make ship` is `make bump VERSION=X.Y.Z` (bumps `MARKETING_VERSION` +
-`CURRENT_PROJECT_VERSION`, commits, tags) followed by `make release`
-(builds, signs, notarizes, zips). Each step can also be run on its own.
-
-### Useful commands
-
-```bash
-make version                  # print current MARKETING_VERSION + build
-make bump VERSION=1.1.0       # bump + commit + tag, no build
-make release                  # build + notarize the current version
-make tag                      # tag HEAD at the current MARKETING_VERSION
-```
+`.envrc.local` is gitignored — your secrets stay local.
 
 **What you need to provide in `.envrc.local`:**
 
@@ -90,9 +116,56 @@ make tag                      # tag HEAD at the current MARKETING_VERSION
 | `APPLE_TEAM_ID`             | 10-char team ID from https://developer.apple.com/account → Membership Details. |
 | `DEVELOPER_ID_APPLICATION`  | Exact certificate name from `security find-identity -v -p codesigning` (the one starting with "Developer ID Application:"). |
 
-No installer profile is needed — D13 ships a notarized `.app.zip`, not
-a `.pkg`. The Developer ID Application certificate is the only signing
-identity required.
+No installer profile is needed — D13 ships a notarized `.app.zip`,
+not a `.pkg`. The Developer ID Application certificate is the only
+signing identity required.
+
+**Cutting a release manually**
+
+```bash
+# 1. Edit CHANGELOG.md — move [Unreleased] items under a new section.
+$EDITOR CHANGELOG.md
+
+# 2. Bump + build + sign + notarize + zip in one command.
+make ship VERSION=1.1.0       # ≈ 3–5 min including notarization
+# → build/Beaver-1.1.0.zip
+
+# 3. Push the commit + tag so CI sees consistent state.
+git push && git push --tags
+
+# 4. Publish the GitHub Release with the zip attached.
+gh release create 1.1.0 build/Beaver-1.1.0.zip \
+    --title "Beaver 1.1.0" \
+    --notes-file CHANGELOG.md
+```
+
+`make ship` is `make bump VERSION=X.Y.Z` (bumps `MARKETING_VERSION` +
+`CURRENT_PROJECT_VERSION`, commits, tags) followed by `make release`
+(builds, signs, notarizes, zips). Each step can also be run on its
+own — see below.
+
+**Useful sub-commands**
+
+```bash
+make version                  # print current MARKETING_VERSION + build
+make bump VERSION=1.1.0       # bump + commit + tag, no build
+make release                  # build + notarize the current version
+make tag                      # tag HEAD at the current MARKETING_VERSION
+make build                    # plain Debug build, no signing
+make test                     # run the unit tests
+make clean                    # wipe build/ + DerivedData
+```
+
+**Troubleshooting**
+
+| Symptom | Fix |
+|---|---|
+| `make: ./scripts/release.sh: Permission denied` | `chmod +x scripts/release.sh` |
+| `No signing certificate "Developer ID Application" found` | Verify `DEVELOPER_ID_APPLICATION` in `.envrc.local` matches `security find-identity -v -p codesigning` output exactly |
+| `notarytool 401 Unauthorized` | App-specific password is wrong or expired. Regenerate at appleid.apple.com |
+| Notarization stuck on "in progress" | `xcrun notarytool log <submission-id> --apple-id … --password … --team-id …` to see the rejection reason |
+| `spctl assess` warning at the end | Re-run `make release` — stapling didn't complete cleanly |
+| `make ship` fails because tree is dirty | Commit/stash your changes first; `make bump` refuses to run on a dirty tree to avoid mixing version bumps with other edits |
 
 ## License
 
