@@ -75,8 +75,17 @@ if ! command -v xcodebuild >/dev/null;  then echo "❌ xcodebuild not found"; ex
 if ! command -v xcrun >/dev/null;       then echo "❌ xcrun not found";      exit 1; fi
 if ! command -v ditto >/dev/null;       then echo "❌ ditto not found";      exit 1; fi
 
-VERSION="${VERSION:-$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' \
-    "$REPO_ROOT/LoggerNext/Info.plist" 2>/dev/null || true)}"
+# Resolve VERSION. The project uses GENERATE_INFOPLIST_FILE=YES so
+# there's no literal Info.plist on disk — read MARKETING_VERSION from
+# the pbxproj instead. (PlistBuddy's "File Doesn't Exist, Will Create"
+# message prints to stdout, not stderr, so it sneaks past 2>/dev/null
+# and pollutes the variable. The Makefile already reads pbxproj — same
+# trick here.)
+if [ -z "${VERSION:-}" ]; then
+    VERSION="$(grep -m1 'MARKETING_VERSION = ' \
+        "$REPO_ROOT/LoggerNext.xcodeproj/project.pbxproj" \
+        | sed 's/.*= //; s/;//' | tr -d '[:space:]')"
+fi
 if [ -z "$VERSION" ]; then
     VERSION="dev-$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 fi
@@ -191,7 +200,7 @@ spctl --assess --type execute --verbose=2 "$APP_PATH" || {
 echo "▸ Renaming bundle to $BRAND_NAME.app for distribution…"
 mv "$APP_PATH" "$BRANDED_APP_PATH"
 
-echo "▸ Packaging final $OUTPUT_ZIP…"
+echo "▸ Packaging final ${OUTPUT_ZIP}…"
 rm -f "$OUTPUT_ZIP"
 ditto -c -k --keepParent "$BRANDED_APP_PATH" "$OUTPUT_ZIP"
 
