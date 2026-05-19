@@ -20,6 +20,18 @@ struct MainWindow: View {
     @State private var bookmarksSnapshot: [BookmarkedEvent] = []
     @State private var showingTimeJump = false
 
+    /// Per-session view-models, owned here so their state (filter,
+    /// sort, exclude, expanded namespaces, search term, etc.)
+    /// survives tab switches. Without this, the `switch
+    /// selectedTab` below tears down each tab's view subtree —
+    /// including its `@State` VM — so coming back from Storages
+    /// would reset every Log-feed filter pill.
+    ///
+    /// Rebuilt only when `env.viewingSessionId` actually changes
+    /// (see `.task(id:)` below).
+    @State private var logFeedVM: LogFeedViewModel?
+    @State private var storagesVM: StoragesViewModel?
+
     enum Tab: Hashable {
         case logFeed
         case storages
@@ -47,6 +59,29 @@ struct MainWindow: View {
             // Initial fetch so toolbar disabled state is correct on
             // first appearance.
             await env.refreshViewingEventCount()
+        }
+        // Keep the per-session VMs in sync with the active session.
+        // Fires on first appearance and whenever the user switches
+        // sessions — but NOT on tab switches, because the task id
+        // hasn't changed. That's the whole point: filter / sort /
+        // expand state survives Log feed → Storages → Log feed.
+        .task(id: env.viewingSessionId) {
+            guard let sid = env.viewingSessionId else {
+                logFeedVM = nil
+                storagesVM = nil
+                return
+            }
+            if logFeedVM?.sessionId != sid {
+                logFeedVM = LogFeedViewModel(store: env.store, sessionId: sid)
+            }
+            if storagesVM?.sessionId != sid {
+                let fresh = StoragesViewModel(store: env.store, sessionId: sid)
+                // Subscribe before the first request so the inbound
+                // `.storageUpdated` broadcast isn't dropped. See
+                // StoragesViewModel.bootstrap() docstring.
+                await fresh.bootstrap()
+                storagesVM = fresh
+            }
         }
         .fileImporter(
             isPresented: $showingImporter,
@@ -85,14 +120,19 @@ struct MainWindow: View {
         Group {
             switch selectedTab {
             case .logFeed:
-                if let sessionId = env.viewingSessionId {
-                    LogFeedView(sessionId: sessionId)
-                        .id(sessionId)
+                if let vm = logFeedVM {
+                    // No `.id(sessionId)` here — the VM is replaced
+                    // on session change (via the `.task(id:)` above)
+                    // which is sufficient to reset all per-session
+                    // state. Forcing an additional view rebuild on
+                    // session change would just throw away the
+                    // selection / scroll position we just restored.
+                    LogFeedView(vm: vm)
                 } else {
                     ConnectionPlaceholder(state: env.serverState)
                 }
             case .storages:
-                StoragesView()
+                StoragesView(vm: storagesVM)
             case .sessions:
                 SessionsView(onOpenInLogFeed: { _ in
                     // The row already mutated `env.viewingSessionId`

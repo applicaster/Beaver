@@ -5,27 +5,17 @@
 
 import SwiftUI
 
-/// Owns the `LogFeedViewModel` for a given session and renders the
-/// table + filter bar + detail split. Apply `.id(sessionId)` on the
-/// parent to force a clean rebuild when the active session changes.
+/// Renders the table + filter bar + detail split for a session.
+/// The `LogFeedViewModel` is owned by `MainWindow` (so its state
+/// — filter, exclude, sort, selection — survives tab switches);
+/// this view just receives the instance and binds against it. The
+/// VM is replaced when `env.viewingSessionId` changes; same
+/// session → same VM, every visit.
 struct LogFeedView: View {
-    let sessionId: Int64
-
-    @Environment(AppEnvironment.self) private var env
-    @State private var vm: LogFeedViewModel?
+    @Bindable var vm: LogFeedViewModel
 
     var body: some View {
-        Group {
-            if let vm {
-                LogFeedContent(vm: vm)
-            } else {
-                ProgressView("Loading session…")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-        }
-        .task(id: sessionId) {
-            vm = LogFeedViewModel(store: env.store, sessionId: sessionId)
-        }
+        LogFeedContent(vm: vm)
     }
 }
 

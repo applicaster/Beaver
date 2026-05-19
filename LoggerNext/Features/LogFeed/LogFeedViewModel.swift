@@ -109,7 +109,11 @@ final class LogFeedViewModel {
     // MARK: - Dependencies
 
     private let store: LogStore
-    private let sessionId: Int64
+    /// The session this view-model is bound to. Exposed (not
+    /// private) so the owning view can compare against
+    /// `env.viewingSessionId` and decide whether to replace the
+    /// instance when the user switches sessions.
+    let sessionId: Int64
 
     // MARK: - Window
 

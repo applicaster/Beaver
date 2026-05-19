@@ -17,47 +17,35 @@ import SwiftUI
 ///   • Top-level scalar row:      [copy-value]   [delete]
 ///   • Inner `key: value` row:    [copy-value]   [delete]
 struct StoragesView: View {
+    /// VM is owned by `MainWindow` (keyed by `viewingSessionId`)
+    /// so per-tab state — selected layer, expanded namespaces,
+    /// search term, auto-refresh toggle — survives tab switches.
+    /// Optional because the user may not have a session selected.
+    let vm: StoragesViewModel?
+
     @Environment(AppEnvironment.self) private var env
-    @State private var vm: StoragesViewModel?
 
     var body: some View {
         Group {
-            if let sessionId = env.viewingSessionId {
-                if let vm {
-                    StoragesContent(vm: vm)
-                } else {
-                    ProgressView("Loading session…")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-            } else {
+            if env.viewingSessionId == nil {
                 ContentUnavailableView(
                     "No session selected",
                     systemImage: "externaldrive",
                     description: Text("Connect a device or pick a past session from the sidebar.")
                 )
+            } else if let vm {
+                StoragesContent(vm: vm)
+            } else {
+                ProgressView("Loading session…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .task(id: env.viewingSessionId) {
-            // .task(id:) re-fires on every appearance AND on session
-            // change, so this gives us both "fresh data on tab open"
-            // and "fresh data on session switch" in one place.
-            guard let sessionId = env.viewingSessionId else {
-                vm = nil
-                return
-            }
-            if vm?.sessionId != sessionId {
-                let fresh = StoragesViewModel(store: env.store, sessionId: sessionId)
-                // Critical: subscribe + load cached data BEFORE asking
-                // the device for fresh data. Otherwise the inbound
-                // `.storageUpdated` broadcast can race past the
-                // not-yet-registered continuation and leave the UI
-                // blank even after Reload.
-                await fresh.bootstrap()
-                vm = fresh
-            }
-            // Auto-refresh from the device. No-op if no client is
-            // connected — WSServer.send silently drops in that case
-            // and the UI keeps showing whatever's cached on disk.
+        // Refresh from the device whenever the user pops back to
+        // this tab — the in-memory snapshot may have gone stale
+        // while they were in the Log feed. No-op if no client is
+        // connected; `WSServer.send` silently drops in that case
+        // and the UI keeps showing whatever's cached on disk.
+        .onAppear {
             vm?.requestRefresh(via: env.server)
         }
     }
