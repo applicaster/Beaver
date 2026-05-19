@@ -11,6 +11,7 @@ import UniformTypeIdentifiers
 /// spans the whole window via `.safeAreaInset`.
 struct MainWindow: View {
     @Environment(AppEnvironment.self) private var env
+    @Environment(ToastCenter.self) private var toasts
 
     @State private var selectedTab: Tab = .logFeed
     @State private var showingImporter = false
@@ -51,6 +52,13 @@ struct MainWindow: View {
             CommandBarView()
         }
         .frame(minWidth: 900, minHeight: 600)
+        // Toast surface — single chip that slides down from the top
+        // when any action posts to ToastCenter (copy, save, delete, …).
+        // `allowsHitTesting(false)` is applied inside ToastPresenter
+        // so the chip never blocks underlying clicks.
+        .overlay(alignment: .top) {
+            ToastPresenter()
+        }
         // Switching sessions changes which session the toolbar acts on.
         .onChange(of: env.viewingSessionId) { _, _ in
             Task { await env.refreshViewingEventCount() }
@@ -346,11 +354,13 @@ struct MainWindow: View {
         let url = "ws://\(host):9080"
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(url, forType: .string)
+        toasts.success("Copied \(url)")
     }
 
     private func clearEvents() async {
         guard let sid = env.viewingSessionId else { return }
         try? await env.store.clearEvents(sessionId: sid)
+        toasts.success("Session cleared")
 
         // If no client is currently connected, drop back to the
         // "Waiting for a client…" placeholder. An empty session
@@ -430,6 +440,7 @@ struct MainWindow: View {
 /// as a single line into the clipboard for bug reports.
 private struct ToolbarDeviceBadge: View {
     let context: StoragesViewModel.AppContext
+    @Environment(ToastCenter.self) private var toasts
 
     /// Single muted subtitle line: `<version> · <device> · <OS> <ver>`.
     /// Each piece is skipped if missing, so e.g. an SDK that doesn't
@@ -476,6 +487,7 @@ private struct ToolbarDeviceBadge: View {
             Button("Copy device fingerprint") {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(fingerprint, forType: .string)
+                toasts.success("Copied device fingerprint")
             }
         }
     }

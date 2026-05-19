@@ -11,6 +11,12 @@ struct LoggerNextApp: App {
 
     @State private var env: AppEnvironment
 
+    /// Window-level toast surface. Single instance shared across every
+    /// view that wants to confirm an action ("Copied!", "Bookmark
+    /// added", …). Lives at the App level so it survives every
+    /// tab / window mutation.
+    @State private var toasts = ToastCenter()
+
     /// Sparkle's standard controller — owns the updater process,
     /// runs the periodic appcast check, and presents the system
     /// "Update Available" dialog. Lives for the entire app lifetime.
@@ -57,6 +63,7 @@ struct LoggerNextApp: App {
         WindowGroup {
             MainWindow()
                 .environment(env)
+                .environment(toasts)
         }
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1200, height: 800)
@@ -73,6 +80,7 @@ struct LoggerNextApp: App {
                     let url = "ws://\(host):9080"
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(url, forType: .string)
+                    toasts.success("Copied \(url)")
                 }
                 .keyboardShortcut("c", modifiers: [.command, .shift])
             }
@@ -92,7 +100,7 @@ struct LoggerNextApp: App {
 
         // Track server state on the main actor.
         Task { @MainActor in
-            for await state in await env.server.state {
+            for await state in env.server.state {
                 env.serverState = state
 
                 switch state {
@@ -122,7 +130,7 @@ struct LoggerNextApp: App {
 
         // Forward inbound frames into the decoder + store.
         Task {
-            for await frame in await env.server.inbound {
+            for await frame in env.server.inbound {
                 await Self.handleInbound(frame: frame, env: env)
             }
         }

@@ -504,6 +504,7 @@ private struct NamespaceRow: View {
     ) -> Void
 
     @Environment(AppEnvironment.self) private var env
+    @Environment(ToastCenter.self) private var toasts
     @State private var isHovered = false
 
     private var isExpanded: Bool {
@@ -691,6 +692,9 @@ private struct NamespaceRow: View {
         let payload = StorageRecord.serializeJSON(record)
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(payload, forType: .string)
+        toasts.success(record.isContainer
+                       ? "Copied \(record.key) as JSON"
+                       : "Copied value")
     }
 
     private func copyValue(of child: StorageRecord) {
@@ -705,6 +709,7 @@ private struct NamespaceRow: View {
         }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(payload, forType: .string)
+        toasts.success("Copied \(child.key)")
     }
 
     /// Just the namespace's key text — `"applicaster.v2"`, no
@@ -714,6 +719,7 @@ private struct NamespaceRow: View {
     private func copyKeyName() {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(record.key, forType: .string)
+        toasts.success("Copied name")
     }
 
     /// Raw scalar payload (no JSON quoting). Mirrors `copyValue` but
@@ -730,6 +736,7 @@ private struct NamespaceRow: View {
         }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(payload, forType: .string)
+        toasts.success("Copied value")
     }
 }
 
@@ -748,6 +755,7 @@ private struct InnerKeyRow: View {
 
     @State private var isHovered = false
     @State private var showingFullValue = false
+    @Environment(ToastCenter.self) private var toasts
 
     /// True when the row content is likely to be truncated and
     /// worth surfacing an expand affordance for. Short scalars
@@ -840,6 +848,7 @@ private struct InnerKeyRow: View {
             Button {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(child.key, forType: .string)
+                toasts.success("Copied key name")
             } label: {
                 Label("Copy key name", systemImage: "textformat")
             }
@@ -874,6 +883,7 @@ private struct InnerKeyRow: View {
         let line = "\"\(child.key)\": \(valuePart)"
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(line, forType: .string)
+        toasts.success("Copied as JSON line")
     }
 
     /// Hover wins over zebra (hover band needs to be visible);
@@ -900,6 +910,7 @@ private struct InnerKeyRow: View {
 /// arrays) the body is pretty-printed JSON.
 private struct StorageValuePopover: View {
     let record: StorageRecord
+    @Environment(ToastCenter.self) private var toasts
 
     /// What goes in the scrollable body — raw string for scalars,
     /// pretty JSON for containers.
@@ -944,6 +955,9 @@ private struct StorageValuePopover: View {
                 Button {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(bodyText, forType: .string)
+                    toasts.success(record.kind.isContainer
+                                   ? "Copied JSON"
+                                   : "Copied value")
                 } label: {
                     Image(systemName: "doc.on.doc")
                 }

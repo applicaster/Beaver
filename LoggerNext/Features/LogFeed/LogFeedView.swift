@@ -630,6 +630,7 @@ private struct LevelChip: View {
 
 private struct LogFeedTable: View {
     @Bindable var vm: LogFeedViewModel
+    @Environment(ToastCenter.self) private var toasts
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -764,25 +765,29 @@ private struct LogFeedTable: View {
             Button(vm.isBookmarked(event.id)
                    ? "Remove Bookmark"
                    : "Bookmark") {
+                let wasBookmarked = vm.isBookmarked(event.id)
                 vm.toggleBookmark(event.id)
+                toasts.success(wasBookmarked ? "Bookmark removed" : "Bookmark added")
             }
         }
         Section {
-            Button("Copy Message")   { copyToPasteboard(event.message) }
-            Button("Copy Subsystem") { copyToPasteboard(event.subsystem) }
+            Button("Copy Message")   { copyToPasteboard(event.message,   label: "Message") }
+            Button("Copy Subsystem") { copyToPasteboard(event.subsystem, label: "Subsystem") }
             if !event.category.isEmpty {
-                Button("Copy Category") { copyToPasteboard(event.category) }
+                Button("Copy Category") { copyToPasteboard(event.category, label: "Category") }
             }
-            Button("Copy as JSON")   { copyToPasteboard(formatAsJSON([event])) }
+            Button("Copy as JSON")   { copyToPasteboard(formatAsJSON([event]), label: "Event JSON") }
         }
         Section {
             Button("Filter to this Subsystem") {
                 vm.filter.search = event.subsystem
                 vm.filter.searchIsRegex = false
+                toasts.info("Filtered to subsystem")
             }
             Button("Exclude this Subsystem") {
                 vm.filter.exclude = event.subsystem
                 vm.filter.excludeIsRegex = false
+                toasts.info("Excluding subsystem")
             }
         }
         if !event.category.isEmpty {
@@ -790,10 +795,29 @@ private struct LogFeedTable: View {
                 Button("Filter to this Category") {
                     vm.filter.search = event.category
                     vm.filter.searchIsRegex = false
+                    toasts.info("Filtered to category")
                 }
                 Button("Exclude this Category") {
                     vm.filter.exclude = event.category
                     vm.filter.excludeIsRegex = false
+                    toasts.info("Excluding category")
+                }
+            }
+        }
+        // Level-based quick filter. Sets the minimum level so the
+        // user can right-click a warning → "Show ≥ Warning" to
+        // instantly hide the verbose / debug noise.
+        Section {
+            if vm.filter.minLevel != event.level {
+                Button("Show \(event.level.displayName) and above") {
+                    vm.filter.minLevel = event.level
+                    toasts.info("Showing \(event.level.displayName) and above")
+                }
+            }
+            if vm.filter.minLevel != .verbose {
+                Button("Reset level to Verbose") {
+                    vm.filter.minLevel = .verbose
+                    toasts.info("Level reset")
                 }
             }
         }
@@ -803,16 +827,17 @@ private struct LogFeedTable: View {
     private func multiRowMenu(for events: [EventRecord]) -> some View {
         Button("Copy \(events.count) Messages") {
             let messages = events.map(\.message).joined(separator: "\n")
-            copyToPasteboard(messages)
+            copyToPasteboard(messages, label: "\(events.count) messages")
         }
         Button("Copy \(events.count) Events as JSON") {
-            copyToPasteboard(formatAsJSON(events))
+            copyToPasteboard(formatAsJSON(events), label: "\(events.count) events as JSON")
         }
     }
 
-    private func copyToPasteboard(_ text: String) {
+    private func copyToPasteboard(_ text: String, label: String) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
+        toasts.success("Copied \(label.lowercased())")
     }
 
     /// Reuse the same JSON shape as the toolbar Export, so a clipboard

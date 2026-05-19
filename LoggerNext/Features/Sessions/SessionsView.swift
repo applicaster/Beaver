@@ -10,6 +10,7 @@ import SwiftUI
 /// a confirmation prompt; a footer button wipes the whole history.
 struct SessionsView: View {
     @Environment(AppEnvironment.self) private var env
+    @Environment(ToastCenter.self) private var toasts
     @State private var vm: SessionsViewModel?
 
     /// Callback the parent (MainWindow) provides so we can flip the
@@ -108,8 +109,12 @@ struct SessionsView: View {
         ) { item in
             Button("Delete", role: .destructive) {
                 let id = item.id
+                let title = item.title
                 pendingDelete = nil
-                Task { await vm.deleteSession(id: id) }
+                Task {
+                    await vm.deleteSession(id: id)
+                    toasts.success("Deleted \"\(title)\"")
+                }
             }
             Button("Cancel", role: .cancel) {
                 pendingDelete = nil
@@ -125,7 +130,10 @@ struct SessionsView: View {
         ) {
             Button("Delete All", role: .destructive) {
                 pendingDeleteAll = false
-                Task { await vm.deleteAllSessions() }
+                Task {
+                    await vm.deleteAllSessions()
+                    toasts.success("All sessions deleted")
+                }
             }
             Button("Cancel", role: .cancel) {
                 pendingDeleteAll = false

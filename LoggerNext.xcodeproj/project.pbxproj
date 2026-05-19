@@ -425,11 +425,6 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LoggerNext/Info.plist;
-				// Xcode defaults INFOPLIST_KEY_CFBundleName to
-				// $(PRODUCT_NAME), which would clobber our
-				// Info.plist's "Beaver" with "LoggerNext". Pin it
-				// explicitly so the user-visible app name matches
-				// CFBundleDisplayName.
 				INFOPLIST_KEY_CFBundleName = Beaver;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -460,11 +455,6 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LoggerNext/Info.plist;
-				// Xcode defaults INFOPLIST_KEY_CFBundleName to
-				// $(PRODUCT_NAME), which would clobber our
-				// Info.plist's "Beaver" with "LoggerNext". Pin it
-				// explicitly so the user-visible app name matches
-				// CFBundleDisplayName.
 				INFOPLIST_KEY_CFBundleName = Beaver;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
