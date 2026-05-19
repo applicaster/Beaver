@@ -470,9 +470,15 @@ private struct ToolbarDeviceBadge: View {
         .background(
             Capsule().fill(Color(.controlBackgroundColor))
         )
+        // Use `.primary` (adapts dark/light) at low opacity instead
+        // of `.secondary` — the system chrome inside `.principal`
+        // washes secondary out. `.primary` at 0.22 reads as the
+        // same hairline-grey as the device badge's border. 1.2pt
+        // gives a hair of extra weight so it shows through the
+        // toolbar's translucent backdrop.
         .overlay(
             Capsule()
-                .strokeBorder(Color.secondary.opacity(0.35), lineWidth: 1)
+                .strokeBorder(Color.primary.opacity(0.22), lineWidth: 1.2)
         )
         .contentShape(Capsule())
         .help(fingerprint)
@@ -596,9 +602,15 @@ private struct ConnectionIndicator: View {
         .background(
             Capsule().fill(Color(.controlBackgroundColor))
         )
+        // Use `.primary` (adapts dark/light) at low opacity instead
+        // of `.secondary` — the system chrome inside `.principal`
+        // washes secondary out. `.primary` at 0.22 reads as the
+        // same hairline-grey as the device badge's border. 1.2pt
+        // gives a hair of extra weight so it shows through the
+        // toolbar's translucent backdrop.
         .overlay(
             Capsule()
-                .strokeBorder(Color.secondary.opacity(0.35), lineWidth: 1)
+                .strokeBorder(Color.primary.opacity(0.22), lineWidth: 1.2)
         )
     }
 
