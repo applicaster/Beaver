@@ -503,6 +503,28 @@ public actor LogStore {
         }
     }
 
+    /// Earliest event timestamp in the session, regardless of filter.
+    /// Used by the Jump-to-Time UI to rebase a typed time-of-day onto
+    /// the session's calendar day (so an imported session from 2026-05-15
+    /// jumps correctly when the user types "12:13:42" even though
+    /// "today" is 2026-05-19). Returns nil if the session is empty.
+    public func sessionFirstEventTimestampMillis(
+        sessionId: Int64
+    ) async throws -> Int64? {
+        try await dbQueue.read { db in
+            try Int64.fetchOne(
+                db,
+                sql: """
+                    SELECT timestamp_ms FROM event
+                    WHERE session_id = ?
+                    ORDER BY timestamp_ms ASC
+                    LIMIT 1
+                """,
+                arguments: [sessionId]
+            )
+        }
+    }
+
     /// Find the event in the session (respecting the current filter)
     /// whose `timestamp_ms` is closest to `targetMillis`. Used by the
     /// "Jump to Time" toolbar action — "the app crashed at 14:13:42" →

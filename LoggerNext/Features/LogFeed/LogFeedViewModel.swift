@@ -334,25 +334,61 @@ final class LogFeedViewModel {
 
     /// Jump to the event whose timestamp is closest to `target`,
     /// respecting the active filter. Pauses follow-tail so the
-    /// jump isn't immediately undone by tail-scroll. Used by the
-    /// "Jump to Time" toolbar action (D27).
+    /// jump isn't immediately undone by tail-scroll.
+    ///
+    /// `target` carries a date (typically "today" from the popover)
+    /// AND a time-of-day. The date may be wrong — for an imported
+    /// session that ran days ago, "today + 12:13:42" lies far away
+    /// from every event in the session, and the nearest-event query
+    /// would always snap to the chronologically last event. So before
+    /// querying, we rebase the time-of-day onto the SESSION's day
+    /// (derived from its first event). If the session is empty, no-op.
+    /// See D27.
     func jumpToTime(_ target: Date) {
         Task { [weak self] in
             guard let self else { return }
-            let millis = Int64(target.timeIntervalSince1970 * 1000)
             do {
-                let id = try await store.nearestEventId(
+                let rebased = try await rebaseToSessionDay(target) ?? target
+                let millis = Int64(rebased.timeIntervalSince1970 * 1000)
+                guard let id = try await store.nearestEventId(
                     sessionId: sessionId,
                     targetMillis: millis,
                     filter: filter
-                )
-                guard let id else { return }
+                ) else { return }
                 isPaused = true
                 await jumpTo(eventId: id)
             } catch {
                 print("jumpToTime: \(error)")
             }
         }
+    }
+
+    /// Take the time-of-day from `target` and the calendar day from
+    /// the session's first event. Returns nil if the session is empty
+    /// (in which case there's nothing to jump to anyway). Both inputs
+    /// and output are in the current calendar / local time zone.
+    private func rebaseToSessionDay(_ target: Date) async throws -> Date? {
+        guard let firstMillis = try await store.sessionFirstEventTimestampMillis(
+            sessionId: sessionId
+        ) else {
+            return nil
+        }
+        let sessionStart = Date(timeIntervalSince1970: TimeInterval(firstMillis) / 1000.0)
+        let calendar = Calendar.current
+        let dayParts  = calendar.dateComponents([.year, .month, .day], from: sessionStart)
+        let timeParts = calendar.dateComponents(
+            [.hour, .minute, .second, .nanosecond],
+            from: target
+        )
+        var combined = DateComponents()
+        combined.year       = dayParts.year
+        combined.month      = dayParts.month
+        combined.day        = dayParts.day
+        combined.hour       = timeParts.hour
+        combined.minute     = timeParts.minute
+        combined.second     = timeParts.second
+        combined.nanosecond = timeParts.nanosecond
+        return calendar.date(from: combined)
     }
 
     private func reloadBookmarks() async {
