@@ -65,11 +65,18 @@ private struct StoragesContent: View {
     @State private var showingExporter = false
     @State private var exportDocument: JSONExportDocument?
 
+    // Edit / add / delete sheet state. One key field is shared across
+    // all three flows so we always know which row we're acting on.
+    @State private var pendingEdit: StorageRecord?
+    @State private var pendingDelete: StorageRecord?
+    @State private var showingAddKey = false
+
     var body: some View {
         VStack(spacing: 0) {
             StoragesTopBar(
                 vm: vm,
-                onExport: { Task { await prepareExport() } }
+                onExport: { Task { await prepareExport() } },
+                onAddKey: { showingAddKey = true }
             )
             Divider()
             StoragesSearchBar(vm: vm)
@@ -77,12 +84,68 @@ private struct StoragesContent: View {
             HSplitView {
                 StoragesTable(vm: vm)
                     .frame(minWidth: 400, maxWidth: .infinity, maxHeight: .infinity)
-                StoragesDetail(vm: vm)
-                    .frame(minWidth: 280, idealWidth: 360, maxHeight: .infinity)
+                StoragesDetail(
+                    vm: vm,
+                    onEdit: { pendingEdit = $0 },
+                    onDelete: { pendingDelete = $0 }
+                )
+                .frame(minWidth: 280, idealWidth: 360, maxHeight: .infinity)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        // Edit sheet
+        .sheet(item: $pendingEdit) { record in
+            EditStorageValueSheet(
+                namespace: vm.selectedNamespace,
+                key: record.key,
+                initialValue: record.valueText ?? "",
+                onSave: { newValue in
+                    vm.setValue(
+                        in: vm.selectedNamespace,
+                        key: record.key,
+                        value: newValue,
+                        via: env.server
+                    )
+                    pendingEdit = nil
+                },
+                onCancel: { pendingEdit = nil }
+            )
+        }
+        // Delete confirmation
+        .confirmationDialog(
+            "Delete \"\(pendingDelete?.key ?? "")\" from \(vm.selectedNamespace.displayName)?",
+            isPresented: Binding(
+                get: { pendingDelete != nil },
+                set: { if !$0 { pendingDelete = nil } }
+            ),
+            presenting: pendingDelete
+        ) { record in
+            Button("Delete", role: .destructive) {
+                let key = record.key
+                pendingDelete = nil
+                vm.deleteValue(in: vm.selectedNamespace, key: key, via: env.server)
+            }
+            Button("Cancel", role: .cancel) { pendingDelete = nil }
+        } message: { _ in
+            Text("The value is removed on the device immediately. Other devices won't see the change until they reconnect.")
+        }
+        // Add key sheet
+        .sheet(isPresented: $showingAddKey) {
+            AddStorageKeySheet(
+                initialNamespace: vm.selectedNamespace,
+                onSave: { namespace, key, value in
+                    vm.setValue(
+                        in: namespace,
+                        key: key,
+                        value: value,
+                        via: env.server
+                    )
+                    showingAddKey = false
+                },
+                onCancel: { showingAddKey = false }
+            )
+        }
         // Periodic auto-refresh loop. Re-fires when the toggle flips
         // or when the user pauses (id covers both transitions).
         .task(id: vm.autoRefreshEnabled) {
@@ -121,6 +184,7 @@ private struct StoragesTopBar: View {
     @Bindable var vm: StoragesViewModel
     @Environment(AppEnvironment.self) private var env
     let onExport: () -> Void
+    let onAddKey: () -> Void
 
     var body: some View {
         HStack(spacing: 10) {
@@ -137,6 +201,16 @@ private struct StoragesTopBar: View {
                 }
             }
             .fixedSize()
+
+            // "+ Add key" — opens the new-key sheet. Requires a live
+            // client (storage.<ns>.set is a no-op without one).
+            Button(action: onAddKey) {
+                Label("Add key", systemImage: "plus.circle")
+            }
+            .disabled(!isClientConnected)
+            .help(isClientConnected
+                  ? "Add a new key/value to the device's storage"
+                  : "Connect a device to add a key")
 
             Spacer()
 
@@ -329,6 +403,9 @@ private struct StoragesTable: View {
 
 private struct StoragesDetail: View {
     @Bindable var vm: StoragesViewModel
+    @Environment(AppEnvironment.self) private var env
+    let onEdit: (StorageRecord) -> Void
+    let onDelete: (StorageRecord) -> Void
 
     var body: some View {
         if let record = vm.selectedRecord {
@@ -359,12 +436,31 @@ private struct StoragesDetail: View {
         }
     }
 
+    /// Edit is offered for top-level leaf records (id == key with no
+    /// children). Nested values are skipped in v1 — overwriting them
+    /// from the SDK would require a path-aware command that doesn't
+    /// exist. Delete works the same way: only top-level.
+    private func canEditOrDelete(_ record: StorageRecord) -> Bool {
+        record.id == record.key
+    }
+
+    private var isClientConnected: Bool {
+        if case .clientConnected = env.serverState { return true }
+        return false
+    }
+
     @ViewBuilder
     private func header(_ record: StorageRecord) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(record.key)
-                .font(.title3)
-                .textSelection(.enabled)
+            HStack(alignment: .firstTextBaseline) {
+                Text(record.key)
+                    .font(.title3)
+                    .textSelection(.enabled)
+                Spacer(minLength: 12)
+                if canEditOrDelete(record) {
+                    actionButtons(record)
+                }
+            }
             HStack(spacing: 6) {
                 Text(vm.selectedNamespace.displayName)
                     .font(.caption.weight(.semibold))
@@ -378,6 +474,39 @@ private struct StoragesDetail: View {
             }
             .foregroundStyle(.secondary)
         }
+    }
+
+    @ViewBuilder
+    private func actionButtons(_ record: StorageRecord) -> some View {
+        HStack(spacing: 6) {
+            // Edit only makes sense for scalar values — replacing a
+            // container would mean re-typing the entire JSON tree
+            // in a text field. Defer that to a later "Edit as JSON"
+            // sheet (Phase 2).
+            if !record.isContainer {
+                Button {
+                    onEdit(record)
+                } label: {
+                    Label("Edit", systemImage: "pencil")
+                }
+                .disabled(!isClientConnected)
+                .help(isClientConnected
+                      ? "Set a new value on the device"
+                      : "Connect a device to edit values")
+            }
+            Button(role: .destructive) {
+                onDelete(record)
+            } label: {
+                Label("Delete", systemImage: "trash")
+                    .foregroundStyle(isClientConnected ? Color.red : Color.secondary)
+            }
+            .buttonStyle(.plain)
+            .disabled(!isClientConnected)
+            .help(isClientConnected
+                  ? "Remove this key from the device"
+                  : "Connect a device to delete keys")
+        }
+        .controlSize(.small)
     }
 
     @ViewBuilder
@@ -503,5 +632,130 @@ private struct StorageTreeRow: View {
         }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(payload, forType: .string)
+    }
+}
+
+// MARK: - Edit / Add value sheets
+
+/// Sheet for changing the value of an existing top-level storage key.
+/// The SDK's `storage.<ns>.set` command takes a space-separated
+/// `<key> <value>`, so values containing spaces will be truncated —
+/// surfaced as an inline warning when the user types one.
+private struct EditStorageValueSheet: View {
+    let namespace: StorageSnapshot.Namespace
+    let key: String
+    let initialValue: String
+    let onSave: (String) -> Void
+    let onCancel: () -> Void
+
+    @State private var value: String = ""
+
+    private var hasSpace: Bool { value.contains(" ") }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Edit value")
+                .font(.headline)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(namespace.displayName + " · " + key)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text("Sends: storage.\(namespace.wireKey).set \(key) <value>")
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                TextField("New value", text: $value)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { onSave(value) }
+                if hasSpace {
+                    Text("⚠️ Spaces in the value may be lost — the SDK splits arguments on whitespace.")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+            }
+
+            HStack {
+                Spacer()
+                Button("Cancel", role: .cancel, action: onCancel)
+                    .keyboardShortcut(.cancelAction)
+                Button("Save") { onSave(value) }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(value.isEmpty)
+            }
+        }
+        .padding(20)
+        .frame(width: 420)
+        .onAppear { value = initialValue }
+    }
+}
+
+/// Sheet for adding a brand-new key. Namespace defaults to whichever
+/// chip is currently selected so the common flow ("add a key here")
+/// is one click.
+private struct AddStorageKeySheet: View {
+    let initialNamespace: StorageSnapshot.Namespace
+    let onSave: (StorageSnapshot.Namespace, String, String) -> Void
+    let onCancel: () -> Void
+
+    @State private var namespace: StorageSnapshot.Namespace = .local
+    @State private var key: String = ""
+    @State private var value: String = ""
+
+    private var canSave: Bool {
+        !key.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Add key").font(.headline)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Namespace").font(.caption).foregroundStyle(.secondary)
+                Picker("Namespace", selection: $namespace) {
+                    ForEach(StorageSnapshot.Namespace.allCases, id: \.self) { ns in
+                        Text(ns.displayName).tag(ns)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Key").font(.caption).foregroundStyle(.secondary)
+                TextField("e.g. featureFlag.premium", text: $key)
+                    .textFieldStyle(.roundedBorder)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Value").font(.caption).foregroundStyle(.secondary)
+                TextField("e.g. true", text: $value)
+                    .textFieldStyle(.roundedBorder)
+            }
+
+            // Live preview of the command we'll send so the power
+            // user knows exactly what's about to fly over the wire.
+            Text("Sends: storage.\(namespace.wireKey).set \(key) \(value)")
+                .font(.system(.caption2, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .truncationMode(.middle)
+
+            HStack {
+                Spacer()
+                Button("Cancel", role: .cancel, action: onCancel)
+                    .keyboardShortcut(.cancelAction)
+                Button("Save") {
+                    onSave(namespace, key.trimmingCharacters(in: .whitespaces), value)
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(!canSave)
+            }
+        }
+        .padding(20)
+        .frame(width: 460)
+        .onAppear { namespace = initialNamespace }
     }
 }

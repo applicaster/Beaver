@@ -15,6 +15,12 @@ When releasing:
 ## [Unreleased]
 
 ### Added
+- **Storage edit / delete / add (D6).** The Storages detail pane now
+  has Edit and Delete buttons for top-level keys, plus an "Add key"
+  button in the top bar. Hits the SDK's existing
+  `storage.<namespace>.set` / `storage.<namespace>.delete` console
+  commands (already shipped — no SDK change needed). Auto-refreshes
+  after each change so the table reflects the new state.
 - **Jump to Time** toolbar button. Click → pick a target time → table
   scrolls to the event with the closest timestamp. Respects the active
   filter, so "what happened at 14:13:42?" inside a `level≥warning` view

@@ -1006,3 +1006,70 @@ yanked away by streaming events.
 - New `JumpToTimePopover` view + toolbar item in `MainWindow`.
   The picker seeds to "now" each time the popover opens so the
   user typically just adjusts hours/minutes.
+
+---
+
+## D28. Storage edit-and-push-back via existing SDK console commands
+
+**Status:** Accepted (2026-05-19)
+
+**Decision.** Wire the Storages detail pane's Edit / Delete / Add
+buttons to the `storage.<namespace>.set` and
+`storage.<namespace>.delete` console commands the SDK already exposes
+(cataloged in `CommandRegistry.swift` since D17). No SDK change
+needed — Beaver constructs and sends the command string over the
+existing `command` channel, then issues `storage.list` ~400 ms later
+to refresh the table.
+
+UI scope for v1:
+- Detail-pane header gains Edit + Delete buttons, only enabled for
+  top-level **leaf** records (id == key, no children). Container
+  records (objects / arrays) and nested leaves are skipped — the
+  current SDK command doesn't accept dotted paths or whole-tree
+  payloads, and replacing them by sending the whole JSON value is a
+  Phase 2 concern (Edit-as-JSON sheet).
+- Top bar gains "Add key" — opens a sheet with a segmented namespace
+  picker + key/value fields + a live preview of the command being
+  sent.
+- Delete uses a confirmation dialog (matches the rest of the
+  destructive actions in the app).
+- All three buttons are disabled when no client is connected — the
+  SDK can't apply anything if the device isn't on the wire.
+
+**Why.**
+- The SDK's `storage.<ns>.set` / `.delete` were verified live by
+  typing them in Beaver's command bar; both return success log
+  events from `DebugFeatures/ConsoleCommands/StorageCommandsHandler`.
+  Nothing to ask for from the SDK team.
+- This is the #2 must-have feature ("flip a feature flag from the
+  desktop") and we already had every piece of plumbing except the
+  buttons. Half-day delivery.
+- Keeping the protocol opaque-string (rather than the typed JSON
+  payload we'd ideally want — see prior D6 discussion) limits us:
+  values containing spaces, quoting rules, complex objects are all
+  TBD. Surfaced in the UI as a yellow inline warning when the user
+  types a value with a space.
+
+**Alternatives considered.**
+- *Wait for the SDK team to ship a typed payload variant of
+  `storage.set`.* Indefinite timeline; we'd be sitting on a feature
+  the SDK already supports.
+- *Inline-edit inside the detail-pane tree rows.* Tighter UX but
+  conflicts with the recursive tree's hover-copy / disclosure
+  triangle affordances. A separate sheet keeps the tree read-only
+  for browsing and isolates the editing semantics.
+
+**Implications.**
+- `StoragesViewModel` gains `setValue(in:key:value:via:)` and
+  `deleteValue(in:key:via:)`. Both fire-and-forget — they don't
+  wait for the SDK's reply, they just refresh after a short delay.
+- `StoragesDetail` takes `onEdit` / `onDelete` callbacks; the parent
+  view owns the sheet state.
+- Two new sheets: `EditStorageValueSheet` and `AddStorageKeySheet`,
+  both with command-preview text so the power user always sees
+  exactly what's about to fly over the wire.
+- Phase 2 candidates (later, if anyone asks):
+  - JSON-editor for containers
+  - Quote-handling for values with spaces
+  - Per-namespace permission introspection (cmdlist could tell us
+    which namespaces are read-only on a given platform)

@@ -138,6 +138,53 @@ final class StoragesViewModel {
     /// updates from ANY source, including auto-refresh from other VMs);
     /// this delayed reload covers the edge case where the broadcast
     /// arrives before the consumer Task has woken up.
+    /// Push a new value into the device's storage for the currently
+    /// selected namespace. SDK contract (CommandRegistry):
+    ///   storage.<wireKey>.set <key> <value> [namespace]
+    /// We omit the optional trailing `[namespace]` — it's an
+    /// SDK-internal subscope rarely needed during debugging.
+    ///
+    /// After the SDK applies the write it emits a log event back; we
+    /// also fire a `storage.list` refresh so the table picks up the
+    /// new state without the user clicking Reload.
+    func setValue(
+        in namespace: StorageSnapshot.Namespace,
+        key: String,
+        value: String,
+        via server: WSServer
+    ) {
+        let trimmedKey = key.trimmingCharacters(in: .whitespaces)
+        guard !trimmedKey.isEmpty else { return }
+        // The SDK's parser is space-separated. Spaces inside `value`
+        // would be lost unless we quote — but the SDK doesn't document
+        // any quoting rule. Document this limitation in the UI.
+        let cmd = "storage.\(namespace.wireKey).set \(trimmedKey) \(value)"
+        Task { [weak self] in
+            await server.send(command: cmd)
+            try? await Task.sleep(for: .milliseconds(400))
+            self?.requestRefresh(via: server)
+        }
+    }
+
+    /// Remove a key from the device's storage for the given namespace.
+    /// SDK contract: `storage.<wireKey>.delete <key> [namespace]`.
+    /// Refreshes after the command completes (same belt-and-braces
+    /// pattern as setValue).
+    func deleteValue(
+        in namespace: StorageSnapshot.Namespace,
+        key: String,
+        via server: WSServer
+    ) {
+        let trimmedKey = key.trimmingCharacters(in: .whitespaces)
+        guard !trimmedKey.isEmpty else { return }
+        let cmd = "storage.\(namespace.wireKey).delete \(trimmedKey)"
+        Task { [weak self] in
+            await server.send(command: cmd)
+            try? await Task.sleep(for: .milliseconds(400))
+            self?.requestRefresh(via: server)
+        }
+    }
+
     func requestRefresh(via server: WSServer) {
         Task { [weak self] in
             await server.send(command: "storage.list")
