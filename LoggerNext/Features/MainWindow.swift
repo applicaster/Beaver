@@ -459,16 +459,18 @@ private struct ToolbarDeviceBadge: View {
                     .truncationMode(.tail)
             }
         }
-        // Matches ConnectionIndicator's padding so the two
-        // toolbar clouds read as siblings.
+        // Matches ConnectionIndicator's chrome — same padding,
+        // same solid background, same border weight — so the
+        // two toolbar clouds read as siblings at different ends
+        // of the bar.
         .padding(.horizontal, 14)
         .padding(.vertical, 5)
         .background(
-            Capsule().fill(.bar)
+            Capsule().fill(Color(.controlBackgroundColor))
         )
         .overlay(
             Capsule()
-                .strokeBorder(Color.secondary.opacity(0.18), lineWidth: 1)
+                .strokeBorder(Color.secondary.opacity(0.35), lineWidth: 1)
         )
         .contentShape(Capsule())
         .help(fingerprint)
@@ -582,18 +584,19 @@ private struct ConnectionIndicator: View {
                 .frame(width: 8, height: 8)
             Text(label).font(.caption)
         }
-        // Extra inner padding so the pill reads as a proper
-        // capsule chip rather than text-with-a-dot. Matches the
-        // padding on ToolbarDeviceBadge so the two clouds at the
-        // leading and principal ends look like siblings.
         .padding(.horizontal, 14)
         .padding(.vertical, 5)
+        // Solid control background instead of .bar material — the
+        // .principal toolbar placement layers its own chrome
+        // behind the item which made .bar nearly invisible and
+        // the border barely register. controlBackgroundColor +
+        // a stronger border opacity reads as a proper pill.
         .background(
-            Capsule().fill(.bar)
+            Capsule().fill(Color(.controlBackgroundColor))
         )
         .overlay(
             Capsule()
-                .strokeBorder(Color.secondary.opacity(0.18), lineWidth: 1)
+                .strokeBorder(Color.secondary.opacity(0.35), lineWidth: 1)
         )
     }
 
