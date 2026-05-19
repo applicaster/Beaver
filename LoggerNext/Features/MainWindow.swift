@@ -181,17 +181,6 @@ struct MainWindow: View {
                 ToolbarDeviceBadge(context: ctx)
             }
         }
-        // Connected / Listening / Disconnected pill. Used to live
-        // at `.principal` (centered title slot) but macOS wraps
-        // `.principal` items in system chrome that swallowed the
-        // custom Capsule background — the pill looked borderless
-        // and washed-out. Moving it into a second `.navigation`
-        // slot lets the same custom chrome ConnectionIndicator
-        // applies actually render, and puts it next to the
-        // device badge where both clouds read as a pair.
-        ToolbarItem(placement: .navigation) {
-            ConnectionIndicator(state: env.serverState)
-        }
         ToolbarItem(placement: .primaryAction) {
             Button {
                 showingImporter = true
@@ -291,6 +280,13 @@ struct MainWindow: View {
             }
             .buttonStyle(.plain)
             .help("Copy ws://<ip>:9080 to the clipboard")
+        }
+        // Centered Connected pill. `.principal` keeps it anchored
+        // in the middle of the title bar so the device badge can
+        // sit on the leading edge and the action buttons on the
+        // trailing edge — three groups, three positions.
+        ToolbarItem(placement: .principal) {
+            ConnectionIndicator(state: env.serverState)
         }
     }
 
