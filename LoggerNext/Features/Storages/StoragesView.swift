@@ -65,10 +65,16 @@ private struct StoragesContent: View {
     @State private var showingExporter = false
     @State private var exportDocument: JSONExportDocument?
 
-    // Edit / add / delete sheet state. One key field is shared across
-    // all three flows so we always know which row we're acting on.
-    @State private var pendingEdit: StorageRecord?
-    @State private var pendingDelete: StorageRecord?
+    // Edit / add / delete sheet state. Each row in the outline owns
+    // its namespace, so we carry that along — the action sheet picks
+    // the right `storage.<ns>.set/delete` command.
+    struct EditTarget: Identifiable {
+        let record: StorageRecord
+        let namespace: StorageSnapshot.Namespace
+        var id: String { "\(namespace.rawValue):\(record.id)" }
+    }
+    @State private var pendingEdit: EditTarget?
+    @State private var pendingDelete: EditTarget?
     @State private var showingAddKey = false
 
     var body: some View {
@@ -82,28 +88,34 @@ private struct StoragesContent: View {
             StoragesSearchBar(vm: vm)
             Divider()
             HSplitView {
-                StoragesTable(vm: vm)
-                    .frame(minWidth: 400, maxWidth: .infinity, maxHeight: .infinity)
-                StoragesDetail(
+                StoragesOutline(
                     vm: vm,
-                    onEdit: { pendingEdit = $0 },
-                    onDelete: { pendingDelete = $0 }
+                    onEdit: { record, namespace in
+                        vm.selectedNamespace = namespace
+                        pendingEdit = EditTarget(record: record, namespace: namespace)
+                    },
+                    onDelete: { record, namespace in
+                        vm.selectedNamespace = namespace
+                        pendingDelete = EditTarget(record: record, namespace: namespace)
+                    }
                 )
-                .frame(minWidth: 280, idealWidth: 360, maxHeight: .infinity)
+                .frame(minWidth: 400, maxWidth: .infinity, maxHeight: .infinity)
+                StoragesDetail(vm: vm)
+                    .frame(minWidth: 280, idealWidth: 360, maxHeight: .infinity)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        // Edit sheet
-        .sheet(item: $pendingEdit) { record in
+        // Edit sheet — uses the namespace from the row that triggered it.
+        .sheet(item: $pendingEdit) { target in
             EditStorageValueSheet(
-                namespace: vm.selectedNamespace,
-                key: record.key,
-                initialValue: record.valueText ?? "",
+                namespace: target.namespace,
+                key: target.record.key,
+                initialValue: target.record.valueText ?? "",
                 onSave: { newValue in
                     vm.setValue(
-                        in: vm.selectedNamespace,
-                        key: record.key,
+                        in: target.namespace,
+                        key: target.record.key,
                         value: newValue,
                         via: env.server
                     )
@@ -112,19 +124,20 @@ private struct StoragesContent: View {
                 onCancel: { pendingEdit = nil }
             )
         }
-        // Delete confirmation
+        // Delete confirmation — also keyed off the row's namespace.
         .confirmationDialog(
-            "Delete \"\(pendingDelete?.key ?? "")\" from \(vm.selectedNamespace.displayName)?",
+            "Delete \"\(pendingDelete?.record.key ?? "")\" from \(pendingDelete?.namespace.displayName ?? "")?",
             isPresented: Binding(
                 get: { pendingDelete != nil },
                 set: { if !$0 { pendingDelete = nil } }
             ),
             presenting: pendingDelete
-        ) { record in
+        ) { target in
             Button("Delete", role: .destructive) {
-                let key = record.key
+                let key = target.record.key
+                let ns  = target.namespace
                 pendingDelete = nil
-                vm.deleteValue(in: vm.selectedNamespace, key: key, via: env.server)
+                vm.deleteValue(in: ns, key: key, via: env.server)
             }
             Button("Cancel", role: .cancel) { pendingDelete = nil }
         } message: { _ in
@@ -188,22 +201,9 @@ private struct StoragesTopBar: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            // Namespace chips — matches the original "session / local /
-            // keychain" tab row. Selected one fills with its color.
-            HStack(spacing: 6) {
-                ForEach(StorageSnapshot.Namespace.allCases, id: \.self) { ns in
-                    NamespaceChip(
-                        namespace: ns,
-                        isSelected: vm.selectedNamespace == ns,
-                        count: vm.recordCount(in: ns),
-                        action: { vm.selectedNamespace = ns }
-                    )
-                }
-            }
-            .fixedSize()
-
-            // "+ Add key" — opens the new-key sheet. Requires a live
-            // client (storage.<ns>.set is a no-op without one).
+            // Namespaces are now the outline section headers, so the
+            // chip row is gone. The only thing left on the leading
+            // edge is the global "Add key" action.
             Button(action: onAddKey) {
                 Label("Add key", systemImage: "plus.circle")
             }
@@ -299,13 +299,54 @@ private struct StoragesSearchBar: View {
     }
 }
 
-private struct NamespaceChip: View {
-    let namespace: StorageSnapshot.Namespace
-    let isSelected: Bool
-    let count: Int
-    let action: () -> Void
+// NamespaceChip removed when the outline view (D29) replaced the
+// tab-style chip row in the top bar. Section headers in
+// `NamespaceSection` now carry the same color cue.
 
-    @State private var isHovered = false
+// MARK: - Outline (sections per namespace)
+
+/// Replaces the old single-namespace Table with a sectioned list:
+/// each of the three namespaces is a collapsible section whose
+/// rows are its top-level keys. Hovering a row reveals Edit + Delete
+/// icons on the right — same affordance pattern as the Sessions
+/// list — and clicking the row's body sets the detail-pane selection.
+///
+/// All three sections start expanded; the user can collapse the
+/// ones they're not looking at via the chevron in each header.
+private struct StoragesOutline: View {
+    @Bindable var vm: StoragesViewModel
+    @Environment(AppEnvironment.self) private var env
+    let onEdit: (StorageRecord, StorageSnapshot.Namespace) -> Void
+    let onDelete: (StorageRecord, StorageSnapshot.Namespace) -> Void
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                ForEach(StorageSnapshot.Namespace.allCases, id: \.self) { ns in
+                    NamespaceSection(
+                        vm: vm,
+                        namespace: ns,
+                        onEdit: onEdit,
+                        onDelete: onDelete
+                    )
+                    Divider()
+                }
+                Spacer(minLength: 0)
+            }
+        }
+    }
+}
+
+/// One collapsible section (header + rows) for a namespace.
+private struct NamespaceSection: View {
+    @Bindable var vm: StoragesViewModel
+    let namespace: StorageSnapshot.Namespace
+    let onEdit: (StorageRecord, StorageSnapshot.Namespace) -> Void
+    let onDelete: (StorageRecord, StorageSnapshot.Namespace) -> Void
+
+    private var isExpanded: Bool { vm.expandedNamespaces.contains(namespace) }
+    private var records: [StorageRecord] { vm.filteredRecords(in: namespace) }
+    private var totalCount: Int { vm.recordCount(in: namespace) }
 
     private var color: Color {
         switch namespace {
@@ -316,85 +357,178 @@ private struct NamespaceChip: View {
     }
 
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: 6) {
-                Text(namespace.displayName.uppercased())
-                    .font(.caption.weight(.semibold))
-                if count > 0 {
-                    Text("\(count)")
-                        .font(.caption2.monospacedDigit())
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 1)
-                        .background(
-                            Capsule().fill(isSelected
-                                           ? Color.white.opacity(0.25)
-                                           : color.opacity(0.15))
+        VStack(alignment: .leading, spacing: 0) {
+            header
+            if isExpanded {
+                if records.isEmpty {
+                    emptyState
+                } else {
+                    ForEach(records) { record in
+                        StorageOutlineRow(
+                            vm: vm,
+                            namespace: namespace,
+                            record: record,
+                            onEdit: onEdit,
+                            onDelete: onDelete
                         )
+                    }
                 }
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .foregroundStyle(isSelected ? Color.white : color)
-            .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(isSelected
-                          ? color
-                          : (isHovered ? color.opacity(0.12) : Color.clear))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 6)
-                    .strokeBorder(color.opacity(isSelected ? 0 : 0.5), lineWidth: 1)
-            )
+        }
+    }
+
+    @ViewBuilder
+    private var header: some View {
+        Button {
+            if isExpanded {
+                vm.expandedNamespaces.remove(namespace)
+            } else {
+                vm.expandedNamespaces.insert(namespace)
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "chevron.right")
+                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 12)
+                Text(namespace.displayName.uppercased())
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(color)
+                Text("\(totalCount)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 1)
+                    .background(Capsule().fill(color.opacity(0.15)))
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .contentShape(Rectangle())
+            .background(color.opacity(0.04))
         }
         .buttonStyle(.plain)
-        .onHover { isHovered = $0 }
+    }
+
+    @ViewBuilder
+    private var emptyState: some View {
+        Text(vm.searchTerm.trimmingCharacters(in: .whitespaces).isEmpty
+             ? "No keys in this namespace."
+             : "No keys match \"\(vm.searchTerm)\".")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 36)
+            .padding(.vertical, 8)
     }
 }
 
-// MARK: - Table
-
-private struct StoragesTable: View {
+/// One row in an outline section.
+private struct StorageOutlineRow: View {
     @Bindable var vm: StoragesViewModel
+    let namespace: StorageSnapshot.Namespace
+    let record: StorageRecord
+    let onEdit: (StorageRecord, StorageSnapshot.Namespace) -> Void
+    let onDelete: (StorageRecord, StorageSnapshot.Namespace) -> Void
+
+    @Environment(AppEnvironment.self) private var env
+    @State private var isHovered = false
+
+    private var isSelected: Bool {
+        vm.selection?.namespace == namespace &&
+        vm.selection?.recordId  == record.id
+    }
+
+    private var isClientConnected: Bool {
+        if case .clientConnected = env.serverState { return true }
+        return false
+    }
 
     var body: some View {
-        if vm.records.isEmpty {
-            ContentUnavailableView(
-                "No \(vm.selectedNamespace.displayName.lowercased()) data",
-                systemImage: "tray",
-                description: Text("Click Reload to fetch from the connected device.")
-            )
-        } else if vm.filteredRecords.isEmpty {
-            ContentUnavailableView(
-                "No matches",
-                systemImage: "magnifyingglass",
-                description: Text("No keys or values match \"\(vm.searchTerm)\".")
-            )
-        } else {
-            Table(vm.filteredRecords, selection: $vm.selectedRecordId) {
-                TableColumn("Key") { row in
-                    Text(row.key)
-                        .font(.body.weight(.medium))
-                }
-                .width(min: 200, ideal: 300)
+        HStack(spacing: 10) {
+            // 36pt of leading indent so rows align past the chevron
+            // gutter in the section header.
+            Spacer().frame(width: 24)
 
-                TableColumn("Value") { row in
-                    if let value = row.valueText {
-                        Text(value)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
-                            .truncationMode(.tail)
-                    } else if row.isContainer {
-                        Text(row.itemCount == 1 ? "1 item" : "\(row.itemCount) items")
-                            .font(.body)
-                            .italic()
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Text("")
-                    }
-                }
-                .width(min: 200, ideal: 400)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(record.key)
+                    .font(.body)
+                    .foregroundStyle(.primary)
+                valueSummary
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            // Hover-revealed Edit + Delete. Edit is scalar-only;
+            // containers (object/array) show Delete only.
+            HStack(spacing: 4) {
+                if !record.isContainer {
+                    Button {
+                        onEdit(record, namespace)
+                    } label: {
+                        Image(systemName: "pencil")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 22, height: 22)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!isClientConnected)
+                    .help(isClientConnected
+                          ? "Edit this value on the device"
+                          : "Connect a device to edit")
+                }
+                Button(role: .destructive) {
+                    onDelete(record, namespace)
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.red)
+                        .frame(width: 22, height: 22)
+                }
+                .buttonStyle(.plain)
+                .disabled(!isClientConnected)
+                .help(isClientConnected
+                      ? "Delete this key from the device"
+                      : "Connect a device to delete")
+            }
+            .opacity(isHovered ? 1 : 0)
+            .allowsHitTesting(isHovered)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 4)
+        .background(rowBackground)
+        .contentShape(Rectangle())
+        .onHover { isHovered = $0 }
+        .onTapGesture {
+            vm.selection = .init(namespace: namespace, recordId: record.id)
+            vm.selectedNamespace = namespace
+        }
+    }
+
+    @ViewBuilder
+    private var valueSummary: some View {
+        if let text = record.valueText {
+            Text(text)
+        } else if record.isContainer {
+            Text(record.itemCount == 1
+                 ? "1 item"
+                 : "\(record.itemCount) items")
+        } else {
+            Text("")
+        }
+    }
+
+    @ViewBuilder
+    private var rowBackground: some View {
+        if isSelected {
+            Color.accentColor.opacity(0.18)
+        } else if isHovered {
+            Color.secondary.opacity(0.08)
+        } else {
+            Color.clear
         }
     }
 }
@@ -403,9 +537,6 @@ private struct StoragesTable: View {
 
 private struct StoragesDetail: View {
     @Bindable var vm: StoragesViewModel
-    @Environment(AppEnvironment.self) private var env
-    let onEdit: (StorageRecord) -> Void
-    let onDelete: (StorageRecord) -> Void
 
     var body: some View {
         if let record = vm.selectedRecord {
@@ -414,9 +545,6 @@ private struct StoragesDetail: View {
                     header(record)
                     Divider()
                     if record.valueText != nil {
-                        // Leaf record — wrap in StorageTreeRow so the
-                        // user gets the same hover-copy affordance as
-                        // any nested row.
                         StorageTreeRow(record: record)
                     } else if let children = record.children, !children.isEmpty {
                         tree(children: children)
@@ -431,38 +559,19 @@ private struct StoragesDetail: View {
             ContentUnavailableView(
                 "No record selected",
                 systemImage: "rectangle.inset.filled",
-                description: Text("Pick a key from the table to inspect its value.")
+                description: Text("Pick a key from the outline to inspect its value.")
             )
         }
-    }
-
-    /// Edit is offered for top-level leaf records (id == key with no
-    /// children). Nested values are skipped in v1 — overwriting them
-    /// from the SDK would require a path-aware command that doesn't
-    /// exist. Delete works the same way: only top-level.
-    private func canEditOrDelete(_ record: StorageRecord) -> Bool {
-        record.id == record.key
-    }
-
-    private var isClientConnected: Bool {
-        if case .clientConnected = env.serverState { return true }
-        return false
     }
 
     @ViewBuilder
     private func header(_ record: StorageRecord) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(record.key)
-                    .font(.title3)
-                    .textSelection(.enabled)
-                Spacer(minLength: 12)
-                if canEditOrDelete(record) {
-                    actionButtons(record)
-                }
-            }
+            Text(record.key)
+                .font(.title3)
+                .textSelection(.enabled)
             HStack(spacing: 6) {
-                Text(vm.selectedNamespace.displayName)
+                Text(vm.selectedRecordNamespace.displayName)
                     .font(.caption.weight(.semibold))
                 if record.isContainer {
                     Text("·")
@@ -474,39 +583,6 @@ private struct StoragesDetail: View {
             }
             .foregroundStyle(.secondary)
         }
-    }
-
-    @ViewBuilder
-    private func actionButtons(_ record: StorageRecord) -> some View {
-        HStack(spacing: 6) {
-            // Edit only makes sense for scalar values — replacing a
-            // container would mean re-typing the entire JSON tree
-            // in a text field. Defer that to a later "Edit as JSON"
-            // sheet (Phase 2).
-            if !record.isContainer {
-                Button {
-                    onEdit(record)
-                } label: {
-                    Label("Edit", systemImage: "pencil")
-                }
-                .disabled(!isClientConnected)
-                .help(isClientConnected
-                      ? "Set a new value on the device"
-                      : "Connect a device to edit values")
-            }
-            Button(role: .destructive) {
-                onDelete(record)
-            } label: {
-                Label("Delete", systemImage: "trash")
-                    .foregroundStyle(isClientConnected ? Color.red : Color.secondary)
-            }
-            .buttonStyle(.plain)
-            .disabled(!isClientConnected)
-            .help(isClientConnected
-                  ? "Remove this key from the device"
-                  : "Connect a device to delete keys")
-        }
-        .controlSize(.small)
     }
 
     @ViewBuilder

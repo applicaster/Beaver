@@ -1073,3 +1073,57 @@ UI scope for v1:
   - Quote-handling for values with spaces
   - Per-namespace permission introspection (cmdlist could tell us
     which namespaces are read-only on a given platform)
+
+---
+
+## D29. Storages — outline layout instead of namespace tabs
+
+**Status:** Accepted (2026-05-19)
+
+**Decision.** Replace the tab-style namespace chip row + per-namespace
+table with a single outline view that shows all three namespaces as
+collapsible sections. Each row gets its own hover-revealed Edit +
+Delete buttons. Detail pane on the right is unchanged — it still
+renders the selected key's value tree.
+
+**Why.**
+- User mental model is "the left column IS the namespace, rows are
+  keys inside it." Splitting across three tabs hid that
+  relationship and forced an extra click to find a key in an
+  unfamiliar namespace.
+- Per-row actions (Edit/Delete) want to live close to the row, not
+  in the detail pane header. The outline view makes per-row
+  affordances the obvious place for them — matches the Sessions
+  list pattern.
+- Collapsible sections let power users hide noisy namespaces (e.g.,
+  Local with 100 SDK-internal keys) when they're debugging
+  Session/Keychain.
+
+**Alternatives considered.**
+- *Keep tabs, add per-row affordances inside each table.* Works
+  but reinforces the wrong mental model and triples the affordance
+  surface (one Edit per tab × 3).
+- *Master/detail with a NavigationSplitView third pane.* Too
+  heavy — adds a fourth visual area when three (outline + detail)
+  already do the job.
+
+**Implications.**
+- `StoragesViewModel`:
+  - `selectedRecordId: String?` becomes
+    `selection: SelectionKey?` (composite `{namespace, recordId}`)
+    so two namespaces with the same key name don't collide.
+  - `records` / `filteredRecords` become parameterised by
+    namespace (`records(in:)`, `filteredRecords(in:)`).
+  - New `expandedNamespaces: Set<Namespace>` drives the collapse
+    state (default: all open).
+- `StoragesView`:
+  - `StoragesTopBar` loses the namespace chips; "Add key" sits on
+    the leading edge of the top bar.
+  - `StoragesTable` deleted, replaced by `StoragesOutline` ⇒
+    `NamespaceSection` ⇒ `StorageOutlineRow`.
+  - `StoragesDetail` loses its in-header Edit/Delete buttons —
+    those affordances now live on the row that owns the value.
+- `NamespaceChip` view deleted (no callers).
+
+The wire protocol is unchanged. Edit/Delete still pipe through
+`storage.<wireKey>.set / .delete` (D28).

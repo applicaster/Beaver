@@ -14,6 +14,14 @@ When releasing:
 
 ## [Unreleased]
 
+### Changed
+- **Storages tab redesigned as an outline view (D29).** All three
+  namespaces (Session / Local / Keychain) now show as collapsible
+  sections in a single list instead of the old tab-style chip row.
+  Each row has hover-revealed Edit + Delete buttons; the detail
+  pane on the right shows the selected key's value. You can collapse
+  the sections you're not using to keep the view focused.
+
 ### Added
 - **Storage edit / delete / add (D6).** The Storages detail pane now
   has Edit and Delete buttons for top-level keys, plus an "Add key"

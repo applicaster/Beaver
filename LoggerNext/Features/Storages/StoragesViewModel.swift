@@ -21,15 +21,34 @@ import Foundation
 @MainActor
 final class StoragesViewModel {
 
-    var selectedNamespace: StorageSnapshot.Namespace = .session {
-        didSet { selectedRecordId = nil }
+    /// A reference to one top-level key in a specific namespace.
+    /// Used as the selection identity across the outline view (all
+    /// three namespaces visible at once, so plain `recordId` alone
+    /// would be ambiguous if two namespaces have a key with the same
+    /// name).
+    public struct SelectionKey: Hashable, Sendable {
+        public let namespace: StorageSnapshot.Namespace
+        public let recordId: String
     }
+
+    /// The namespace the user most recently interacted with — used
+    /// as the default for the "Add key" sheet and as a hint for the
+    /// detail-pane header. Set automatically when a row's selected.
+    var selectedNamespace: StorageSnapshot.Namespace = .session
 
     /// Latest snapshot per namespace. Refreshed from the store after
     /// any `.storageUpdated` broadcast for this session.
     private(set) var snapshots: [StorageSnapshot.Namespace: StorageSnapshot] = [:]
 
-    var selectedRecordId: String?
+    /// Currently-focused (namespace, top-level key) pair. nil = nothing
+    /// selected.
+    var selection: SelectionKey?
+
+    /// Which namespace sections are expanded in the outline view.
+    /// Default: all three open.
+    var expandedNamespaces: Set<StorageSnapshot.Namespace> = Set(
+        StorageSnapshot.Namespace.allCases
+    )
 
     /// Substring filter applied to the visible records — matches the
     /// top-level row OR any nested descendant by key or value.
@@ -78,22 +97,22 @@ final class StoragesViewModel {
 
     // MARK: - Derived state
 
-    /// Top-level records in the currently-selected namespace, sorted
-    /// alphabetically. The table displays these; the detail pane
-    /// drills into any one of them.
-    var records: [StorageRecord] {
-        guard let snap = snapshots[selectedNamespace] else { return [] }
+    /// Top-level records in a given namespace, sorted alphabetically
+    /// by key (NOCASE).
+    func records(in namespace: StorageSnapshot.Namespace) -> [StorageRecord] {
+        guard let snap = snapshots[namespace] else { return [] }
         return StorageRecord.parseTopLevel(snap.dataJSON)
     }
 
-    /// Records narrowed by `searchTerm`. A top-level record matches
-    /// if any descendant key or value contains the term (case-
-    /// insensitive). Empty search term returns all records.
-    var filteredRecords: [StorageRecord] {
+    /// Records in a namespace narrowed by `searchTerm`. A top-level
+    /// record matches if any descendant key or value contains the
+    /// term (case-insensitive). Empty search term returns all.
+    func filteredRecords(in namespace: StorageSnapshot.Namespace) -> [StorageRecord] {
+        let all = records(in: namespace)
         let trimmed = searchTerm.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return records }
+        guard !trimmed.isEmpty else { return all }
         let needle = trimmed.lowercased()
-        return records.filter { record in
+        return all.filter { record in
             record.allDescendants().contains { node in
                 node.key.lowercased().contains(needle) ||
                 (node.valueText?.lowercased().contains(needle) ?? false)
@@ -101,17 +120,23 @@ final class StoragesViewModel {
         }
     }
 
-    /// Record currently focused in the detail pane. Looks through
-    /// every top-level record and its descendants — selection may
-    /// point at any depth via the OutlineGroup in the detail view.
+    /// Record currently focused in the detail pane. Resolves
+    /// `selection` against the records under its namespace.
     var selectedRecord: StorageRecord? {
-        guard let id = selectedRecordId else { return nil }
-        for top in records {
-            for record in top.allDescendants() where record.id == id {
+        guard let selection else { return nil }
+        for top in records(in: selection.namespace) {
+            for record in top.allDescendants() where record.id == selection.recordId {
                 return record
             }
         }
         return nil
+    }
+
+    /// The namespace currently focused (matches `selection`, falls
+    /// back to `selectedNamespace`). Used by the detail pane to
+    /// label which namespace the visible key belongs to.
+    var selectedRecordNamespace: StorageSnapshot.Namespace {
+        selection?.namespace ?? selectedNamespace
     }
 
     /// Total namespaces present in the latest snapshot set.
@@ -200,7 +225,7 @@ final class StoragesViewModel {
     /// storage; just clears what LoggerNext is displaying.
     func clearLocalCache() {
         snapshots.removeAll()
-        selectedRecordId = nil
+        selection = nil
     }
 
     /// Produce the file payload for the Export button. Includes all
