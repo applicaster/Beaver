@@ -168,8 +168,19 @@ struct SessionsView: View {
             .disabled(vm.sessions.isEmpty)
             .help("Wipe every recorded session and its events")
         }
-        .padding(.horizontal, 12)
+        // A bit more leading inset than 12 so the "N sessions"
+        // text doesn't hug the sidebar boundary at the bottom-left
+        // seam — macOS Tahoe's rounded-corner sidebar treatment
+        // makes that look like two views intersecting if the
+        // footer text sits flush against the divider.
+        .padding(.horizontal, 20)
         .padding(.vertical, 8)
+        // `.bar` is the system material macOS uses for status /
+        // bottom bars; it paints a uniform background across the
+        // full footer width so the sidebar's bottom-right curve
+        // doesn't bleed through the seam.
+        .frame(maxWidth: .infinity)
+        .background(.bar)
     }
 
     /// Live = the session created on the active WebSocket connection.
