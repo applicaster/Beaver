@@ -859,3 +859,60 @@ value rather than auto-bumping past it.
 - Branch protection on `main`, if ever enabled, must allow the
   `GITHUB_TOKEN` to push. Otherwise CI's bump commit + appcast push
   will fail.
+
+---
+
+## D24. Saved filter presets
+
+**Status:** Accepted (2026-05-19)
+
+**Decision.** The `saved_filter` table (schema v1, unused until now)
+backs a named list of `Filter` combinations the user can apply with
+one click. The log-feed filter bar gains a `★` button as its leading
+control: clicking opens a SwiftUI popover that lists every saved
+preset (name + 1-line summary), highlights the one matching the
+current active filter, and provides a "Save current filter…" action
+that opens a sheet for naming. Each row has a hover-revealed red
+trash icon for deletion.
+
+Apply semantics: clicking a preset overwrites `vm.filter` wholesale.
+`vm.highlight` is *not* affected — it's a session-local visual aid,
+not part of the persisted preset.
+
+**Why.**
+- Every engineer has 3-5 filter combos they re-type daily ("errors
+  only, no analytics", "this feature flag's subsystem", etc.). The
+  schema was provisioned for this on day one; it just never got UI.
+- Upsert-by-name (UNIQUE index on `name`) gives "save as / overwrite"
+  for free without a separate "rename" flow.
+- Putting the button at the *leading* edge of the filter bar keeps
+  the existing visual grammar — level menu, then filter pills, then
+  highlight — intact; the ★ slots in as "preset selector before the
+  individual fields."
+
+**Alternatives considered.**
+- *Recent-filter history (no save action).* Simpler but doesn't match
+  how users actually work — they recall a *name* like "the auth
+  filter," not a position in time.
+- *Per-session presets.* Saved filters scoped to one session. Wrong
+  scope; the value is cross-session re-use.
+- *App-wide hot-keys (⌘1, ⌘2, …) per preset.* Nice future addition
+  but requires a stable order — punting until presets stabilize.
+
+**Implications.**
+- New `Domain/SavedFilter.swift` value type.
+- `LogStore` gains `savedFilters()`, `upsertSavedFilter(name:filter:)`,
+  `deleteSavedFilter(id:)`, plus `.savedFiltersChanged` broadcast.
+- `LogFeedViewModel` gains `savedFilters`, `applySavedFilter(_:)`,
+  `saveCurrentFilter(as:)`, `deleteSavedFilter(id:)`. Subscription
+  reloads the list on `.savedFiltersChanged`.
+- `LogFeedView` adds the `★` button + popover + save-sheet at the
+  leading edge of the filter bar.
+- `SessionsViewModel`'s exhaustive switch over `Change` gains the
+  new case in its no-op arm (storage / bookmarks / saved filters
+  don't affect the sessions sidebar).
+
+**Future work.**
+- ⌘1…⌘9 keyboard shortcuts per preset for power users.
+- Sync presets across teammates via a shared JSON export (would
+  need `Filter`-to-JSON Codable on top of the existing struct).

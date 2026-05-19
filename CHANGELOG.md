@@ -14,7 +14,11 @@ When releasing:
 
 ## [Unreleased]
 
-_Nothing yet._
+### Added
+- **Saved filter presets.** Click the ★ button at the leading edge of
+  the filter bar to save the current level/include/exclude combination
+  under a name. Apply with one click; delete on hover; the icon fills
+  in when an active preset matches the current filter.
 
 ## [1.0.2] - 2026-05-19
 

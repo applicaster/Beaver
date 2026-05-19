@@ -58,6 +58,11 @@ final class LogFeedViewModel {
     /// via the store's `.bookmarksChanged` change stream.
     private(set) var bookmarkedIds: Set<Int64> = []
 
+    /// All filter presets the user has saved, alphabetical by name.
+    /// Refreshed via the store's `.savedFiltersChanged` broadcast and
+    /// surfaced in the ★ menu next to the filter bar.
+    private(set) var savedFilters: [SavedFilter] = []
+
     /// Visual-only highlight term. Doesn't filter rows — just paints
     /// matches in the visible page. Matches the old Logger's "Search &
     /// highlight" field, separate from the include/exclude filters.
@@ -128,6 +133,7 @@ final class LogFeedViewModel {
         requestReload()
         Task { await self.subscribeToChanges() }
         Task { await self.reloadBookmarks() }
+        Task { await self.reloadSavedFilters() }
     }
 
     deinit {
@@ -254,6 +260,8 @@ final class LogFeedViewModel {
                     self.requestReload()
                 case .bookmarksChanged(let sid) where sid == self.sessionId:
                     await self.reloadBookmarks()
+                case .savedFiltersChanged:
+                    await self.reloadSavedFilters()
                 default:
                     break
                 }
@@ -315,6 +323,49 @@ final class LogFeedViewModel {
             bookmarkedIds = try await store.bookmarkedEventIds(sessionId: sessionId)
         } catch {
             print("reloadBookmarks: \(error)")
+        }
+    }
+
+    // MARK: - Saved filter presets
+
+    /// Apply a preset wholesale. Overwrites `filter`; leaves the
+    /// separate `highlight` field alone since highlight is a
+    /// session-local visual aid, not part of the persisted preset.
+    func applySavedFilter(_ saved: SavedFilter) {
+        filter = saved.filter
+    }
+
+    /// Persist the current `filter` under `name`. Upserts — saving a
+    /// second time with the same name overwrites cleanly. Empty names
+    /// are rejected at the store boundary.
+    func saveCurrentFilter(as name: String) {
+        let snapshot = filter
+        Task { [weak self] in
+            do {
+                try await self?.store.upsertSavedFilter(name: name, filter: snapshot)
+            } catch {
+                print("saveCurrentFilter: \(error)")
+            }
+        }
+    }
+
+    /// Remove a preset by id. The `.savedFiltersChanged` broadcast
+    /// reloads the in-memory list.
+    func deleteSavedFilter(id: Int64) {
+        Task { [weak self] in
+            do {
+                try await self?.store.deleteSavedFilter(id: id)
+            } catch {
+                print("deleteSavedFilter: \(error)")
+            }
+        }
+    }
+
+    private func reloadSavedFilters() async {
+        do {
+            savedFilters = try await store.savedFilters()
+        } catch {
+            print("reloadSavedFilters: \(error)")
         }
     }
 

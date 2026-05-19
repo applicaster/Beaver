@@ -71,6 +71,10 @@ private struct LogFeedFilterBar: View {
 
     var body: some View {
         HStack(spacing: 10) {
+            // Saved-filter presets. Star icon shows the user's named
+            // filter combinations + "Save current filter…". See D24.
+            SavedFiltersMenu(vm: vm)
+
             // Level popup — single button showing the current level;
             // click opens a menu of all five.
             LevelMenuButton(vm: vm)
@@ -276,6 +280,218 @@ private struct MatchNavigator: View {
         }
         let current = (vm.currentMatchIndex ?? 0) + 1
         return "\(current)/\(vm.matchCount)"
+    }
+}
+
+// MARK: - Saved filter presets
+
+/// Star menu at the leading edge of the filter bar. Lists the user's
+/// saved filter combinations; click one to apply, "Save current
+/// filter…" persists the current Filter under a name, hover-revealed
+/// trash deletes. See D24 for the rationale; storage CRUD lives on
+/// LogStore.
+private struct SavedFiltersMenu: View {
+    @Bindable var vm: LogFeedViewModel
+
+    @State private var isPopoverShown = false
+    @State private var isHovered = false
+    @State private var savePromptShown = false
+    @State private var newName: String = ""
+
+    var body: some View {
+        Button {
+            isPopoverShown = true
+        } label: {
+            Image(systemName: hasMatchingActiveFilter
+                  ? "star.fill"
+                  : "star")
+                .font(.system(size: 14, weight: .regular))
+                .foregroundStyle(hasMatchingActiveFilter ? Color.yellow : .secondary)
+                .frame(width: 28, height: 28)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(isHovered ? Color.secondary.opacity(0.15) : Color.clear)
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+        .help(hasMatchingActiveFilter
+              ? "Saved filter applied — click to manage"
+              : "Saved filter presets")
+        .popover(isPresented: $isPopoverShown, arrowEdge: .bottom) {
+            popoverContent
+                .frame(width: 280)
+                .padding(.vertical, 6)
+        }
+        .sheet(isPresented: $savePromptShown) {
+            saveSheet
+        }
+    }
+
+    /// True if any saved preset's stored filter matches what's
+    /// currently in `vm.filter`. Drives the filled-star indicator
+    /// so the user can tell at a glance "I'm running a preset"
+    /// versus "I've ad-hoc'd it".
+    private var hasMatchingActiveFilter: Bool {
+        vm.savedFilters.contains { $0.filter == vm.filter }
+    }
+
+    @ViewBuilder
+    private var popoverContent: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if vm.savedFilters.isEmpty {
+                Text("No saved filters")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+            } else {
+                ForEach(vm.savedFilters) { saved in
+                    SavedFilterRow(
+                        saved: saved,
+                        isActive: saved.filter == vm.filter,
+                        onApply: {
+                            vm.applySavedFilter(saved)
+                            isPopoverShown = false
+                        },
+                        onDelete: {
+                            vm.deleteSavedFilter(id: saved.id)
+                        }
+                    )
+                }
+                Divider().padding(.vertical, 4)
+            }
+
+            Button {
+                newName = ""
+                isPopoverShown = false
+                // Small delay so the popover dismiss animation
+                // finishes before the sheet slides up. Without it
+                // the sheet can race the popover's exit transition
+                // and land off-screen on slower machines.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    savePromptShown = true
+                }
+            } label: {
+                Label("Save current filter…", systemImage: "plus.circle")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(vm.filter.isEmpty)
+            .help(vm.filter.isEmpty
+                  ? "No filter to save — set a level, search, or exclude term first"
+                  : "Persist the current filter under a name")
+        }
+    }
+
+    @ViewBuilder
+    private var saveSheet: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Save current filter").font(.headline)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Name").font(.caption).foregroundStyle(.secondary)
+                TextField("e.g. Errors only, no analytics", text: $newName)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { commitSave() }
+            }
+
+            // Show what's being saved so the user can sanity-check
+            // before committing the name.
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Filter preview").font(.caption).foregroundStyle(.secondary)
+                Text(filterSummary(vm.filter))
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(3)
+            }
+
+            HStack {
+                Spacer()
+                Button("Cancel") { savePromptShown = false }
+                    .keyboardShortcut(.cancelAction)
+                Button("Save") { commitSave() }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(newName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(20)
+        .frame(width: 380)
+    }
+
+    private func commitSave() {
+        let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        vm.saveCurrentFilter(as: trimmed)
+        savePromptShown = false
+    }
+
+    private func filterSummary(_ f: Filter) -> String {
+        var parts: [String] = ["≥ \(f.minLevel.displayName)"]
+        if let s = f.search {
+            parts.append(f.searchIsRegex ? "match /\(s)/" : "match \"\(s)\"")
+        }
+        if let s = f.exclude {
+            parts.append(f.excludeIsRegex ? "exclude /\(s)/" : "exclude \"\(s)\"")
+        }
+        return parts.joined(separator: "  •  ")
+    }
+}
+
+/// One row in the saved-filters popover. Click anywhere applies the
+/// preset; the trash icon (revealed on hover) deletes it.
+private struct SavedFilterRow: View {
+    let saved: SavedFilter
+    let isActive: Bool
+    let onApply: () -> Void
+    let onDelete: () -> Void
+
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: onApply) {
+            HStack(spacing: 8) {
+                Image(systemName: isActive ? "checkmark.circle.fill" : "circle")
+                    .font(.caption)
+                    .foregroundStyle(isActive ? Color.accentColor : .secondary)
+                    .frame(width: 16)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(saved.name)
+                        .font(.system(size: 13))
+                    Text(filterCaption(saved.filter))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 6)
+                Button(role: .destructive, action: onDelete) {
+                    Image(systemName: "trash")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+                .buttonStyle(.plain)
+                .help("Delete this saved filter")
+                .opacity(isHovered ? 1 : 0)
+                .allowsHitTesting(isHovered)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .contentShape(Rectangle())
+            .background(isHovered ? Color.accentColor.opacity(0.08) : Color.clear)
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+    }
+
+    private func filterCaption(_ f: Filter) -> String {
+        var parts: [String] = ["≥\(f.minLevel.displayName)"]
+        if let s = f.search { parts.append("+\"\(s)\"") }
+        if let s = f.exclude { parts.append("−\"\(s)\"") }
+        return parts.joined(separator: " ")
     }
 }
 

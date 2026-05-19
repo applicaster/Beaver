@@ -23,6 +23,7 @@ public actor LogStore {
         case sessionsCleared
         case storageUpdated(sessionId: Int64, namespace: StorageSnapshot.Namespace)
         case bookmarksChanged(sessionId: Int64)
+        case savedFiltersChanged
     }
 
     public enum Source {
@@ -530,6 +531,95 @@ public actor LogStore {
             fullArgs.append(eventId)
             return try Int.fetchOne(db, sql: sql, arguments: StatementArguments(fullArgs)) ?? 0
         }
+    }
+
+    // MARK: - Saved filters
+
+    /// All persisted filter presets, alphabetical by name.
+    public func savedFilters() async throws -> [SavedFilter] {
+        try await dbQueue.read { db in
+            try Row.fetchAll(
+                db,
+                sql: """
+                    SELECT id, name, min_level, search, search_rx, exclude, exclude_rx
+                    FROM saved_filter
+                    ORDER BY name COLLATE NOCASE
+                """
+            ).map(Self.makeSavedFilter)
+        }
+    }
+
+    /// Insert a preset, or update the existing one if `name` is taken
+    /// (upsert by name). The schema has a UNIQUE index on `name`, so
+    /// the "save as" UX maps cleanly onto INSERT OR REPLACE.
+    @discardableResult
+    public func upsertSavedFilter(
+        name: String,
+        filter: Filter
+    ) async throws -> SavedFilter {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            // Invariant should be enforced by the UI's Save button
+            // being disabled when the name field is empty.
+            throw NSError(
+                domain: "LogStore.SavedFilter",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Saved-filter name must not be empty."]
+            )
+        }
+        let id = try await dbQueue.write { db in
+            try db.execute(
+                sql: """
+                    INSERT INTO saved_filter
+                      (name, min_level, search, search_rx, exclude, exclude_rx)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(name) DO UPDATE SET
+                      min_level  = excluded.min_level,
+                      search     = excluded.search,
+                      search_rx  = excluded.search_rx,
+                      exclude    = excluded.exclude,
+                      exclude_rx = excluded.exclude_rx
+                """,
+                arguments: [
+                    trimmed,
+                    filter.minLevel.rawValue,
+                    filter.search,
+                    filter.searchIsRegex ? 1 : 0,
+                    filter.exclude,
+                    filter.excludeIsRegex ? 1 : 0,
+                ]
+            )
+            // Need the id after upsert — fetch it back by name.
+            return try Int64.fetchOne(
+                db,
+                sql: "SELECT id FROM saved_filter WHERE name = ?",
+                arguments: [trimmed]
+            ) ?? -1
+        }
+        broadcast(.savedFiltersChanged)
+        return SavedFilter(id: id, name: trimmed, filter: filter)
+    }
+
+    public func deleteSavedFilter(id: Int64) async throws {
+        try await dbQueue.write { db in
+            try db.execute(
+                sql: "DELETE FROM saved_filter WHERE id = ?",
+                arguments: [id]
+            )
+        }
+        broadcast(.savedFiltersChanged)
+    }
+
+    private static func makeSavedFilter(_ row: Row) -> SavedFilter {
+        let level = LogLevel(rawValue: row["min_level"] as String) ?? .verbose
+        let filter = Filter(
+            minLevel: level,
+            search: row["search"] as String?,
+            searchIsRegex: ((row["search_rx"] as Int?) ?? 0) != 0,
+            exclude: row["exclude"] as String?,
+            excludeIsRegex: ((row["exclude_rx"] as Int?) ?? 0) != 0
+        )
+        return SavedFilter(id: row["id"], name: row["name"], filter: filter)
     }
 
     // MARK: - Storage snapshots
