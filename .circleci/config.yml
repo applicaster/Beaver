@@ -31,10 +31,15 @@ version: 2.1
 executors:
   macos:
     macos:
-      # Match your local Xcode version. CircleCI's available list:
+      # Pick from CircleCI's currently-supported list:
       # https://circleci.com/docs/using-macos/#supported-xcode-versions
-      xcode: "26.0.0"
-    resource_class: macos.m1.medium.gen1
+      # Xcode 16.x is the most recent stable as of writing. Bump when
+      # CircleCI announces support for newer versions.
+      xcode: "16.2.0"
+    # Resource class intentionally omitted — let CircleCI pick the
+    # current default. Explicit names like `macos.m1.medium.gen1` get
+    # renamed periodically and break the config. If builds are slow,
+    # set this to one of the values listed at the URL above.
 
 jobs:
   build-and-test:
