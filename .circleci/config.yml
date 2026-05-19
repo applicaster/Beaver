@@ -31,15 +31,13 @@ version: 2.1
 executors:
   macos:
     macos:
-      # Pick from CircleCI's currently-supported list:
-      # https://circleci.com/docs/using-macos/#supported-xcode-versions
-      # Xcode 16.x is the most recent stable as of writing. Bump when
-      # CircleCI announces support for newer versions.
-      xcode: "16.2.0"
-    # Resource class intentionally omitted — let CircleCI pick the
-    # current default. Explicit names like `macos.m1.medium.gen1` get
-    # renamed periodically and break the config. If builds are slow,
-    # set this to one of the values listed at the URL above.
+      # Matches ZappAppleBuilder's pinned Xcode (the canonical
+      # Applicaster CI config). Bump together with that project so
+      # the build environments stay aligned.
+      xcode: "26.2.0"
+    # The new-style M4 Pro resource class (CircleCI renamed away from
+    # `macos.m1.*.gen1`). Same as ZappAppleBuilder uses.
+    resource_class: m4pro.medium
 
 jobs:
   build-and-test:
