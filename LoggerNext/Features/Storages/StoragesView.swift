@@ -94,10 +94,9 @@ private struct StoragesContent: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Context strip pulled from the SDK's applicaster.v2
-            // metadata: "Miami Heat 11.0.1 · iPhone 15 Pro Max ·
-            // iOS 26.4.2". Only renders when there's data.
-            StoragesContextHeader(context: vm.appContext)
+            // Device/app context now lives in the sidebar's top
+            // card (see SidebarDeviceCard in MainWindow) so it's
+            // visible across every tab instead of just here.
 
             StoragesTopBar(
                 vm: vm,
@@ -240,104 +239,6 @@ private struct StoragesContent: View {
         guard let data = vm.exportAllAsJSON() else { return }
         exportDocument = JSONExportDocument(data: data)
         showingExporter = true
-    }
-}
-
-// MARK: - Context header
-
-/// Slim "what am I looking at" strip at the top of the Storages
-/// view. Reads from `vm.appContext`, which pulls from the SDK's
-/// applicaster.v2 metadata namespace. Renders as
-///
-///   📱 Miami Heat 11.0.1   ·   iPhone 15 Pro Max   ·   iOS 26.4.2
-///
-/// and disappears entirely (Group of EmptyView) when no metadata
-/// is available so non-Applicaster apps don't see a stub strip.
-private struct StoragesContextHeader: View {
-    let context: StoragesViewModel.AppContext?
-
-    var body: some View {
-        if let ctx = context, ctx.isNonEmpty {
-            HStack(spacing: 10) {
-                Image(systemName: "iphone")
-                    .foregroundStyle(.secondary)
-                    .font(.system(size: 13))
-
-                // App name + version
-                if let name = ctx.appName {
-                    HStack(spacing: 6) {
-                        Text(name)
-                            .fontWeight(.semibold)
-                        if let v = ctx.appVersion {
-                            Text(v)
-                                .foregroundStyle(.secondary)
-                                .monospacedDigit()
-                        }
-                    }
-                }
-
-                if ctx.appName != nil && ctx.deviceModel != nil {
-                    bullet
-                }
-
-                // Device model
-                if let device = ctx.deviceModel {
-                    Text(device)
-                        .foregroundStyle(.secondary)
-                }
-
-                if ctx.deviceModel != nil && ctx.osVersion != nil {
-                    bullet
-                }
-
-                // Platform + OS version
-                if let os = ctx.osVersion {
-                    HStack(spacing: 4) {
-                        if let p = ctx.platform {
-                            Text(p).foregroundStyle(.secondary)
-                        }
-                        Text(os)
-                            .foregroundStyle(.secondary)
-                            .monospacedDigit()
-                    }
-                }
-
-                Spacer()
-            }
-            .font(.caption)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 6)
-            .frame(maxWidth: .infinity)
-            .background(.bar)
-            // Whole strip is right-click copyable so the user can
-            // paste the device fingerprint into a bug report in
-            // one move.
-            .contextMenu {
-                Button("Copy device fingerprint") {
-                    copyFingerprint()
-                }
-            }
-        }
-    }
-
-    private var bullet: some View {
-        Text("·")
-            .foregroundStyle(.tertiary)
-    }
-
-    private func copyFingerprint() {
-        guard let ctx = context else { return }
-        var parts: [String] = []
-        if let n = ctx.appName {
-            parts.append(n + (ctx.appVersion.map { " \($0)" } ?? ""))
-        }
-        if let d = ctx.deviceModel { parts.append(d) }
-        if let os = ctx.osVersion {
-            parts.append((ctx.platform ?? "OS") + " " + os)
-        }
-        let joined = parts.joined(separator: " · ")
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(joined, forType: .string)
     }
 }
 

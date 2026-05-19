@@ -109,13 +109,24 @@ struct MainWindow: View {
 
     @ViewBuilder
     private var sidebar: some View {
-        List(selection: $selectedTab) {
-            Label("Log feed", systemImage: "list.bullet.rectangle")
-                .tag(Tab.logFeed)
-            Label("Storages",  systemImage: "externaldrive")
-                .tag(Tab.storages)
-            Label("Sessions",  systemImage: "clock.arrow.circlepath")
-                .tag(Tab.sessions)
+        VStack(spacing: 0) {
+            // Device / app context card — pulled from the SDK's
+            // applicaster.v2 metadata via storagesVM. Lives in the
+            // sidebar so it's visible across every tab and fills
+            // what would otherwise be empty space above the nav
+            // items. Hidden entirely when there's no metadata.
+            if let ctx = storagesVM?.appContext, ctx.isNonEmpty {
+                SidebarDeviceCard(context: ctx)
+            }
+
+            List(selection: $selectedTab) {
+                Label("Log feed", systemImage: "list.bullet.rectangle")
+                    .tag(Tab.logFeed)
+                Label("Storages",  systemImage: "externaldrive")
+                    .tag(Tab.storages)
+                Label("Sessions",  systemImage: "clock.arrow.circlepath")
+                    .tag(Tab.sessions)
+            }
         }
         .navigationTitle("Beaver")
     }
@@ -404,6 +415,88 @@ struct MainWindow: View {
 /// of the old Logger app where each toolbar button shows its purpose
 /// underneath the symbol. Optional `tint` lets destructive actions
 /// (e.g., Clear) render in red so the danger is visible at a glance.
+/// Compact "what device + app am I looking at" card that sits at
+/// the top of the sidebar. Reads from
+/// `StoragesViewModel.AppContext` (populated as soon as the first
+/// `storage.list` response comes back from the SDK) and renders:
+///
+///     [icon] Miami Heat            11.0.1
+///            iPhone 15 Pro Max
+///            iOS 26.4.2
+///
+/// Right-click → "Copy device fingerprint" pastes the same info
+/// as a single line into the clipboard for bug reports.
+private struct SidebarDeviceCard: View {
+    let context: StoragesViewModel.AppContext
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Image(systemName: "iphone.gen3")
+                    .font(.system(size: 12, weight: .regular))
+                    .foregroundStyle(.secondary)
+
+                Text(context.appName ?? "—")
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+
+                Spacer(minLength: 4)
+
+                if let v = context.appVersion {
+                    Text(v)
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+
+            if let device = context.deviceModel {
+                Text(device)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+
+            if let os = context.osVersion {
+                Text("\(context.platform ?? "OS") \(os)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color.secondary.opacity(0.10))
+        )
+        .padding(.horizontal, 10)
+        .padding(.top, 8)
+        .padding(.bottom, 4)
+        .contextMenu {
+            Button("Copy device fingerprint") {
+                copyFingerprint()
+            }
+        }
+    }
+
+    private func copyFingerprint() {
+        var parts: [String] = []
+        if let n = context.appName {
+            parts.append(n + (context.appVersion.map { " \($0)" } ?? ""))
+        }
+        if let d = context.deviceModel { parts.append(d) }
+        if let os = context.osVersion {
+            parts.append((context.platform ?? "OS") + " " + os)
+        }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(parts.joined(separator: " · "),
+                                       forType: .string)
+    }
+}
+
 private struct ToolbarButtonLabel: View {
     let systemImage: String
     let title: String
