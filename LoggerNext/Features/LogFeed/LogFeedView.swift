@@ -33,6 +33,7 @@ struct LogFeedView: View {
 
 private struct LogFeedContent: View {
     @Bindable var vm: LogFeedViewModel
+    @Environment(AppEnvironment.self) private var env
 
     var body: some View {
         VStack(spacing: 0) {
@@ -55,6 +56,16 @@ private struct LogFeedContent: View {
             if let eventId = notification.object as? Int64 {
                 vm.jumpToBookmark(eventId: eventId)
             }
+        }
+        // Mirror the active filter to env so MainWindow's Export
+        // toolbar action can scope its query to the rows currently
+        // shown in the table (D26). Initialize on appear in case
+        // the view mounts with a non-empty filter (saved-preset
+        // selection survives session switches).
+        .onAppear { env.activeFilter = vm.filter }
+        .onDisappear { env.activeFilter = .none }
+        .onChange(of: vm.filter) { _, newValue in
+            env.activeFilter = newValue
         }
     }
 

@@ -129,10 +129,12 @@ struct MainWindow: View {
                 Task { await prepareExport() }
             } label: {
                 ToolbarButtonLabel(systemImage: "square.and.arrow.up",
-                                   title: "Export")
+                                   title: hasFilter ? "Export (filtered)" : "Export")
             }
             .buttonStyle(.plain)
-            .help("Save the visible events to a JSON file")
+            .help(hasFilter
+                  ? "Save only the events matching the current filter to a JSON file. Clear the filter to export everything."
+                  : "Save every event in the current session to a JSON file. Set a filter first to narrow the export.")
             .disabled(!hasEvents)
         }
         ToolbarItem(placement: .primaryAction) {
@@ -222,6 +224,13 @@ struct MainWindow: View {
         env.viewingSessionId != nil && env.viewingEventCount > 0
     }
 
+    /// True iff the user has narrowed the Log feed with any filter.
+    /// Drives the Export button's label ("Export" vs "Export (filtered)")
+    /// so the user knows what they're about to ship.
+    private var hasFilter: Bool {
+        !env.activeFilter.isEmpty
+    }
+
     private var navigationTitle: String {
         switch selectedTab {
         case .logFeed:  "Log feed"
@@ -268,13 +277,18 @@ struct MainWindow: View {
 
     private func prepareExport() async {
         guard let sid = env.viewingSessionId else { return }
-        // Pull every event in the session for export. Filter-aware export
-        // ("Export filtered view") is a follow-up — see DECISIONS.md D7.
-        // Cap the limit at 1M as defensive bound; sessions beyond that
-        // need a streaming export path anyway.
+        // Filter-aware export (D26). `env.activeFilter` mirrors the
+        // Log-feed view model's current filter. Passing it through
+        // means clicking Export ships exactly the rows the user is
+        // looking at — narrow the view down with the filter pills
+        // first, then Export emits just those events. Clear the
+        // filter to export the whole session.
+        //
+        // Cap the limit at 1M as defensive bound; sessions beyond
+        // that need a streaming export path anyway.
         let events = (try? await env.store.events(
             sessionId: sid,
-            filter: .none,
+            filter: env.activeFilter,
             offset: 0,
             limit: 1_000_000
         )) ?? []

@@ -38,6 +38,12 @@ public final class AppEnvironment {
     /// command-bar popover.
     public var availableCommands: [CommandHint] = []
 
+    /// Mirror of the active `LogFeedViewModel.filter`. The Log-feed
+    /// view keeps this in sync via an `.onChange` modifier so the
+    /// toolbar's Export action (in `MainWindow`) can scope its query
+    /// to the rows the user is currently looking at — see D26.
+    public var activeFilter: Filter = .none
+
     public init(store: LogStore, server: WSServer) {
         self.store = store
         self.server = server

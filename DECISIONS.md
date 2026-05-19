@@ -916,3 +916,45 @@ not part of the persisted preset.
 - ⌘1…⌘9 keyboard shortcuts per preset for power users.
 - Sync presets across teammates via a shared JSON export (would
   need `Filter`-to-JSON Codable on top of the existing struct).
+
+---
+
+## D26. Export respects the active Log-feed filter
+
+**Status:** Accepted (2026-05-19)
+
+**Decision.** The toolbar's Export action emits only the events
+matching the currently-active Log-feed filter. If no filter is set
+the behavior is identical to before (whole session). The button
+label flips between `Export` and `Export (filtered)` so the user
+sees what they're about to ship.
+
+**Why.**
+- The realistic export use case is "narrowed to N relevant rows,
+  want to share THOSE with a colleague" — never "give me 50,000
+  events in one zip". Filter-aware export turns the common case
+  from a copy/paste workflow into one click.
+- The store's `events(sessionId:filter:offset:limit:)` query already
+  takes a filter; piping `vm.filter` through is mechanical.
+- D7 specifically noted this as a "follow-up" — the time was now.
+
+**Alternatives considered.**
+- *Two separate buttons* (Export all / Export filtered). More
+  discoverable but doubles the toolbar surface; rejected.
+- *Confirmation dialog asking "filtered or all?"*. Friction tax on
+  every export; rejected.
+- *Implicit always-filtered behavior with no UI hint*. Surprising
+  if the user forgot they had a filter set. Adding the label flip
+  is the cheapest way to make the behavior visible.
+
+**Implications.**
+- `AppEnvironment.activeFilter: Filter` — new state, mirror of
+  `LogFeedViewModel.filter`. The Log-feed view syncs it via
+  `.onAppear` / `.onChange` / `.onDisappear` so the env always
+  reflects the visible feed (or `.none` when the feed isn't shown).
+- `MainWindow.prepareExport` reads `env.activeFilter` instead of
+  passing `.none` to the store query.
+- `MainWindow.hasFilter` drives the button label + tooltip swap.
+- Bookmarks, Storages, and the Clear action are unaffected —
+  Clear still wipes the whole session (a destructive op shouldn't
+  silently inherit a filter).

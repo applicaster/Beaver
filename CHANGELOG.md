@@ -15,6 +15,12 @@ When releasing:
 ## [Unreleased]
 
 ### Added
+- **Filter-aware Export.** The toolbar's Export action now respects
+  the active Log-feed filter. Narrow the view with level/search/exclude
+  pills, click Export, and the resulting JSON contains only the rows
+  you're looking at. Button label changes to "Export (filtered)" when
+  a filter is active so it's clear what's being shipped. Clear the
+  filter to export the whole session as before.
 - **Saved filter presets.** Click the ★ button at the leading edge of
   the filter bar to save the current level/include/exclude combination
   under a name. Apply with one click; delete on hover; the icon fills
