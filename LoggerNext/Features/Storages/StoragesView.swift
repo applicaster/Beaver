@@ -268,38 +268,47 @@ private struct StoragesTopBar: View {
             }
             .fixedSize()
 
-            // "+ Add key" — adds a top-level key in the current layer.
-            Button(action: onAddKey) {
-                Label("Add key", systemImage: "plus.circle")
+            // Editing affordances only make sense when the viewed
+            // session IS the live session — for a past session the
+            // device that recorded it is gone, so add / reload /
+            // auto-refresh are no-ops. Hide them entirely rather
+            // than presenting them as disabled-tease.
+            if isViewingLiveSession {
+                // "+ Add key" — adds a top-level key in the current layer.
+                Button(action: onAddKey) {
+                    Label("Add key", systemImage: "plus.circle")
+                }
+                .disabled(!isClientConnected)
+                .help(isClientConnected
+                      ? "Add a top-level key in the current layer"
+                      : "Reconnect the device to add a key")
             }
-            .disabled(!isClientConnected)
-            .help(isClientConnected
-                  ? "Add a top-level key in the current layer"
-                  : "Connect a device to add a key")
 
             Spacer()
 
-            Toggle(isOn: $vm.autoRefreshEnabled) {
-                Label("Auto-refresh", systemImage: "arrow.triangle.2.circlepath")
-                    .labelStyle(.titleAndIcon)
-            }
-            .toggleStyle(.switch)
-            .controlSize(.small)
-            .fixedSize()
-            .disabled(!isClientConnected)
-            .help(isClientConnected
-                  ? "Re-fetch every \(Int(vm.autoRefreshInterval))s"
-                  : "Connect a device to enable auto-refresh")
+            if isViewingLiveSession {
+                Toggle(isOn: $vm.autoRefreshEnabled) {
+                    Label("Auto-refresh", systemImage: "arrow.triangle.2.circlepath")
+                        .labelStyle(.titleAndIcon)
+                }
+                .toggleStyle(.switch)
+                .controlSize(.small)
+                .fixedSize()
+                .disabled(!isClientConnected)
+                .help(isClientConnected
+                      ? "Re-fetch every \(Int(vm.autoRefreshInterval))s"
+                      : "Reconnect the device to enable auto-refresh")
 
-            Button {
-                vm.requestRefresh(via: env.server)
-            } label: {
-                Label("Reload", systemImage: "arrow.clockwise")
+                Button {
+                    vm.requestRefresh(via: env.server)
+                } label: {
+                    Label("Reload", systemImage: "arrow.clockwise")
+                }
+                .disabled(!isClientConnected)
+                .help(isClientConnected
+                      ? "Re-fetch the device's storage snapshot now"
+                      : "Reconnect the device to refresh")
             }
-            .disabled(!isClientConnected)
-            .help(isClientConnected
-                  ? "Re-fetch the device's storage snapshot now"
-                  : "Connect a device to refresh")
 
             Button {
                 onExport()
@@ -327,6 +336,14 @@ private struct StoragesTopBar: View {
     private var isClientConnected: Bool {
         if case .clientConnected = env.serverState { return true }
         return false
+    }
+
+    /// True only when the session this view is bound to is the same
+    /// session the WebSocket is currently feeding live. False for
+    /// past sessions even if a new device has connected since.
+    /// Drives whether device-editing affordances render at all.
+    private var isViewingLiveSession: Bool {
+        env.currentSessionId == vm.sessionId
     }
 }
 
@@ -420,14 +437,28 @@ private struct StoragesOutline: View {
     @ViewBuilder
     private var emptyState: some View {
         let trimmed = vm.searchTerm.trimmingCharacters(in: .whitespaces)
-        let message: String = trimmed.isEmpty
-            ? "No \(vm.selectedNamespace.displayName.lowercased()) data. Click Reload to fetch from the device."
-            : "No keys or values match \"\(trimmed)\"."
+        let message: String
+        if !trimmed.isEmpty {
+            message = "No keys or values match \"\(trimmed)\"."
+        } else if env.currentSessionId == vm.sessionId {
+            // Live session, no snapshot yet → user can fetch.
+            message = "No \(vm.selectedNamespace.displayName.lowercased()) data. Click Reload to fetch from the device."
+        } else {
+            // Past session with no captured snapshot for this
+            // layer. Reload won't do anything (the device that
+            // recorded this session is gone), so don't promise it.
+            message = "No \(vm.selectedNamespace.displayName.lowercased()) data was captured during this session."
+        }
         ContentUnavailableView(
             "Nothing to show",
             systemImage: trimmed.isEmpty ? "tray" : "magnifyingglass",
             description: Text(message)
         )
+        // Parent LazyVStack uses `.leading` alignment which would
+        // pin this content to the left. `.frame(maxWidth: .infinity)`
+        // restores the center alignment ContentUnavailableView
+        // assumes.
+        .frame(maxWidth: .infinity)
         .padding(.top, 32)
     }
 }
@@ -516,6 +547,14 @@ private struct NamespaceRow: View {
         return false
     }
 
+    /// Editing affordances only render when the viewed session is
+    /// the same one the device is currently streaming — for past
+    /// sessions, add / delete have no live target so we hide them
+    /// rather than show non-functional buttons.
+    private var isViewingLiveSession: Bool {
+        env.currentSessionId == vm.sessionId
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
@@ -529,6 +568,7 @@ private struct NamespaceRow: View {
                         parent: record,
                         child: child,
                         isClientConnected: isClientConnected,
+                        isLiveSession: isViewingLiveSession,
                         rowIndex: idx,
                         onCopy: { copyValue(of: child) },
                         onDelete: {
@@ -640,40 +680,45 @@ private struct NamespaceRow: View {
                   ? "Copy all keys inside as JSON"
                   : "Copy this value")
 
-            if record.isContainer {
-                // Containers (namespaces) — only [add]. No delete
-                // because the SDK has no command to remove an
-                // entire namespace; the user has to delete its
-                // inner keys one by one via the InnerKeyRow trash.
-                Button {
-                    onAddInside(record, namespace)
-                } label: {
-                    Image(systemName: "plus.circle")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 22, height: 22)
+            // Editing affordances (add / delete) hidden for past
+            // sessions — the device that recorded the session is
+            // gone, so writes would silently fail.
+            if isViewingLiveSession {
+                if record.isContainer {
+                    // Containers (namespaces) — only [add]. No delete
+                    // because the SDK has no command to remove an
+                    // entire namespace; the user has to delete its
+                    // inner keys one by one via the InnerKeyRow trash.
+                    Button {
+                        onAddInside(record, namespace)
+                    } label: {
+                        Image(systemName: "plus.circle")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 22, height: 22)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!isClientConnected)
+                    .help(isClientConnected
+                          ? "Add a key inside \(record.key)"
+                          : "Reconnect the device to add a key")
+                } else {
+                    // Scalar top-level key — straight delete, no
+                    // subscope. SDK: `storage.<ns>.delete <key>`.
+                    Button(role: .destructive) {
+                        onDelete(record, namespace)
+                    } label: {
+                        Image(systemName: "trash")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.red)
+                            .frame(width: 22, height: 22)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!isClientConnected)
+                    .help(isClientConnected
+                          ? "Delete this top-level key"
+                          : "Reconnect the device to delete")
                 }
-                .buttonStyle(.plain)
-                .disabled(!isClientConnected)
-                .help(isClientConnected
-                      ? "Add a key inside \(record.key)"
-                      : "Connect a device to add a key")
-            } else {
-                // Scalar top-level key — straight delete, no
-                // subscope. SDK: `storage.<ns>.delete <key>`.
-                Button(role: .destructive) {
-                    onDelete(record, namespace)
-                } label: {
-                    Image(systemName: "trash")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.red)
-                        .frame(width: 22, height: 22)
-                }
-                .buttonStyle(.plain)
-                .disabled(!isClientConnected)
-                .help(isClientConnected
-                      ? "Delete this top-level key"
-                      : "Connect a device to delete")
             }
         }
         .opacity(isHovered ? 1 : 0.55)
@@ -747,6 +792,10 @@ private struct InnerKeyRow: View {
     let parent: StorageRecord
     let child: StorageRecord
     let isClientConnected: Bool
+    /// True only when the session being viewed is the live one.
+    /// Hides the delete button for past sessions where writes
+    /// to the device aren't possible.
+    let isLiveSession: Bool
     /// 0-based index inside the parent's children, used to draw
     /// zebra-stripe backgrounds. Doesn't affect functionality.
     let rowIndex: Int
@@ -820,17 +869,21 @@ private struct InnerKeyRow: View {
                 .buttonStyle(.plain)
                 .help("Copy this value")
 
-                Button(role: .destructive, action: onDelete) {
-                    Image(systemName: "trash")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.red)
-                        .frame(width: 22, height: 22)
+                // Hidden entirely for past sessions — see comments
+                // above on isLiveSession.
+                if isLiveSession {
+                    Button(role: .destructive, action: onDelete) {
+                        Image(systemName: "trash")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.red)
+                            .frame(width: 22, height: 22)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!isClientConnected)
+                    .help(isClientConnected
+                          ? "Delete this key inside \(parent.key)"
+                          : "Reconnect the device to delete")
                 }
-                .buttonStyle(.plain)
-                .disabled(!isClientConnected)
-                .help(isClientConnected
-                      ? "Delete this key inside \(parent.key)"
-                      : "Connect a device to delete")
             }
             .opacity(isHovered ? 1 : 0)
             .allowsHitTesting(isHovered)
