@@ -503,6 +503,30 @@ public actor LogStore {
         }
     }
 
+    /// Find the event in the session (respecting the current filter)
+    /// whose `timestamp_ms` is closest to `targetMillis`. Used by the
+    /// "Jump to Time" toolbar action — "the app crashed at 14:13:42" →
+    /// scroll to the nearest visible event. Returns nil if no events
+    /// match the filter.
+    public func nearestEventId(
+        sessionId: Int64,
+        targetMillis: Int64,
+        filter: Filter
+    ) async throws -> Int64? {
+        try await dbQueue.read { db in
+            let (whereClause, args) = Self.where(filter: filter, sessionId: sessionId)
+            let sql = """
+                SELECT id FROM event
+                \(whereClause)
+                ORDER BY ABS(timestamp_ms - ?) ASC, id ASC
+                LIMIT 1
+            """
+            var fullArgs = args
+            fullArgs.append(targetMillis)
+            return try Int64.fetchOne(db, sql: sql, arguments: StatementArguments(fullArgs))
+        }
+    }
+
     /// Returns the zero-based offset of `eventId` in the filtered
     /// ordering. Used by jump-to-match to figure out which page-window
     /// position to scroll to.

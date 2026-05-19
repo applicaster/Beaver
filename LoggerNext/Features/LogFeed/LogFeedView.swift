@@ -57,6 +57,13 @@ private struct LogFeedContent: View {
                 vm.jumpToBookmark(eventId: eventId)
             }
         }
+        .onReceive(
+            NotificationCenter.default.publisher(for: .loggerNextJumpToTime)
+        ) { notification in
+            if let target = notification.object as? Date {
+                vm.jumpToTime(target)
+            }
+        }
         // Mirror the active filter to env so MainWindow's Export
         // toolbar action can scope its query to the rows currently
         // shown in the table (D26). Initialize on appear in case

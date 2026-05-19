@@ -15,6 +15,11 @@ When releasing:
 ## [Unreleased]
 
 ### Added
+- **Jump to Time** toolbar button. Click → pick a target time → table
+  scrolls to the event with the closest timestamp. Respects the active
+  filter, so "what happened at 14:13:42?" inside a `level≥warning` view
+  snaps to the nearest warning around that time. Sets Pause so the
+  jump doesn't get yanked away by streaming events.
 - **Filter-aware Export.** The toolbar's Export action now respects
   the active Log-feed filter. Narrow the view with level/search/exclude
   pills, click Export, and the resulting JSON contains only the rows

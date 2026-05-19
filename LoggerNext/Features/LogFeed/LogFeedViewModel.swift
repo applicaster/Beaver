@@ -332,6 +332,29 @@ final class LogFeedViewModel {
         Task { await jumpTo(eventId: eventId) }
     }
 
+    /// Jump to the event whose timestamp is closest to `target`,
+    /// respecting the active filter. Pauses follow-tail so the
+    /// jump isn't immediately undone by tail-scroll. Used by the
+    /// "Jump to Time" toolbar action (D27).
+    func jumpToTime(_ target: Date) {
+        Task { [weak self] in
+            guard let self else { return }
+            let millis = Int64(target.timeIntervalSince1970 * 1000)
+            do {
+                let id = try await store.nearestEventId(
+                    sessionId: sessionId,
+                    targetMillis: millis,
+                    filter: filter
+                )
+                guard let id else { return }
+                isPaused = true
+                await jumpTo(eventId: id)
+            } catch {
+                print("jumpToTime: \(error)")
+            }
+        }
+    }
+
     private func reloadBookmarks() async {
         do {
             bookmarkedIds = try await store.bookmarkedEventIds(sessionId: sessionId)

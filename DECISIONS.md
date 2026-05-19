@@ -958,3 +958,51 @@ sees what they're about to ship.
 - Bookmarks, Storages, and the Clear action are unaffected —
   Clear still wipes the whole session (a destructive op shouldn't
   silently inherit a filter).
+
+---
+
+## D27. Jump-to-Time toolbar action
+
+**Status:** Accepted (2026-05-19)
+
+**Decision.** A new "Jump To Time" toolbar button opens a popover
+with a `DatePicker` and a Jump action. On Jump, the active
+`LogFeedViewModel` finds the event whose `timestamp_ms` is closest
+to the target (respecting the current filter) and scrolls to it.
+Pause is set during the jump so the destination isn't immediately
+yanked away by streaming events.
+
+**Why.**
+- Crash investigations have a recurring shape — "the app died at
+  14:13:42; what was Beaver showing right then?" Today the answer
+  is scroll-by-feel through hundreds of rows. A scoped jump is the
+  shortest path from question to context.
+- Respecting the active filter is the right default: if the user
+  has already narrowed to a subsystem, they're saying "show me what
+  THIS subsystem was doing around then." Clearing the filter
+  before jumping is a one-click escape if they want the broader
+  view.
+
+**Alternatives considered.**
+- *Time-range filter (hide events outside a window).* More
+  powerful but heavier UI; the common case is a point query, not a
+  range. Range-filtering can be added later as a separate D entry.
+- *Scrubber along the table edge.* Visual but vague — "scroll to
+  14:13:42" is precise, "scroll to ~3/4 of the way through" isn't.
+- *Cmd-G with time syntax.* Tempting (typed `14:13:42` in the
+  highlight field jumps), but conflates two distinct user
+  intents (highlight matching text vs scroll to a time).
+
+**Implications.**
+- New `LogStore.nearestEventId(sessionId:targetMillis:filter:)` —
+  single SELECT ordered by `ABS(timestamp_ms - target)`. O(N) per
+  query but with N capped by the session's event count and
+  short-circuited by `LIMIT 1`.
+- New `LogFeedViewModel.jumpToTime(_:)` — wraps the store query,
+  pauses the feed, and routes through the existing `jumpTo(eventId:)`
+  scroll path.
+- New `loggerNextJumpToTime` `NotificationCenter` name + listener
+  in `LogFeedContent` — same pattern as `loggerNextJumpToBookmark`.
+- New `JumpToTimePopover` view + toolbar item in `MainWindow`.
+  The picker seeds to "now" each time the popover opens so the
+  user typically just adjusts hours/minutes.

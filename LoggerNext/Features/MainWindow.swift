@@ -18,6 +18,8 @@ struct MainWindow: View {
     @State private var exportDocument: JSONExportDocument?
     @State private var showingBookmarks = false
     @State private var bookmarksSnapshot: [BookmarkedEvent] = []
+    @State private var showingTimeJump = false
+    @State private var jumpTarget: Date = Date()
 
     enum Tab: Hashable {
         case logFeed
@@ -182,6 +184,28 @@ struct MainWindow: View {
                         }
                     }
                 )
+            }
+        }
+        ToolbarItem(placement: .primaryAction) {
+            Button {
+                jumpTarget = Date()
+                showingTimeJump = true
+            } label: {
+                ToolbarButtonLabel(systemImage: "clock.arrow.circlepath",
+                                   title: "Jump To Time")
+            }
+            .buttonStyle(.plain)
+            .help("Scroll to the event closest to a specific time")
+            .disabled(!hasEvents)
+            .popover(isPresented: $showingTimeJump, arrowEdge: .bottom) {
+                JumpToTimePopover(target: $jumpTarget) {
+                    let when = jumpTarget
+                    showingTimeJump = false
+                    NotificationCenter.default.post(
+                        name: .loggerNextJumpToTime,
+                        object: when
+                    )
+                }
             }
         }
         ToolbarItem(placement: .primaryAction) {
@@ -437,6 +461,12 @@ extension Notification.Name {
     /// clicked in the toolbar popover. LogFeedView listens for it and
     /// jumps the active session's view model to the event.
     static let loggerNextJumpToBookmark = Notification.Name("LoggerNextJumpToBookmark")
+
+    /// Posted with `object: Date` when the user picks a target time in
+    /// the "Jump to Time" toolbar popover. LogFeedView listens for it
+    /// and tells the active view model to scroll to the nearest event
+    /// (respecting the active filter). See D27.
+    static let loggerNextJumpToTime = Notification.Name("LoggerNextJumpToTime")
 }
 
 private struct BookmarksPopover: View {
@@ -469,6 +499,51 @@ private struct BookmarksPopover: View {
                 .frame(width: 360, height: 320)
             }
         }
+    }
+}
+
+// MARK: - Jump-to-Time popover
+
+/// Tiny popover with a DatePicker scoped to time of day. The user
+/// picks a moment, hits Jump, and the active LogFeedViewModel
+/// scrolls to the event whose timestamp is closest (D27).
+///
+/// Picker uses the current date as a base — for sessions that span
+/// midnight the user can still enter the correct calendar day via
+/// the full date picker style. Most debug sessions are same-day,
+/// so we open with the "now" seed which the user typically just
+/// adjusts the HH:MM:SS on.
+private struct JumpToTimePopover: View {
+    @Binding var target: Date
+    let onJump: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Jump to time")
+                .font(.headline)
+            Text("Scrolls to the event with the closest timestamp. Respects the active filter.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            DatePicker(
+                "Target time",
+                selection: $target,
+                displayedComponents: [.date, .hourAndMinute]
+            )
+            .datePickerStyle(.field)
+            .labelsHidden()
+
+            HStack {
+                Button("Now") { target = Date() }
+                    .help("Reset to the current time")
+                Spacer()
+                Button("Jump") { onJump() }
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(16)
+        .frame(width: 320)
     }
 }
 
