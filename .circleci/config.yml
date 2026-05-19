@@ -232,9 +232,23 @@ jobs:
               NOTES="Auto-released from $(git rev-parse --short HEAD)."
             fi
 
-            # 4. Publish the GitHub Release with the notarized zip.
+            # 4. Make a stable-named copy. GitHub's
+            #    /releases/latest/download/<asset> endpoint only
+            #    works with a fixed filename, so the install
+            #    landing page (docs/index.html) and any team
+            #    members who bookmark the URL hit the same name
+            #    across versions:
+            #
+            #      https://github.com/applicaster/Beaver/releases/latest/download/Beaver.zip
+            #
+            #    The versioned copy is kept too so old appcast
+            #    entries and direct-version downloads still work.
+            cp "build/Beaver-${BEAVER_VERSION}.zip" "build/Beaver.zip"
+
+            # 5. Publish the GitHub Release with both zips.
             gh release create "${BEAVER_VERSION}" \
               "build/Beaver-${BEAVER_VERSION}.zip" \
+              "build/Beaver.zip" \
               --title "Beaver ${BEAVER_VERSION}" \
               --notes "${NOTES}" \
               --repo applicaster/Beaver

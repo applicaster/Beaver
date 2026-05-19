@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Beaver — Applicaster SDK debug companion</title>
+<meta name="description"
+      content="Beaver is a macOS app for inspecting and controlling Applicaster's
+               mobile SDKs over WebSocket. Live log feed, storages browser,
+               command bar, and auto-updates via Sparkle.">
+
+<!-- Hand-written single-file landing page. No JS — every interaction
+     is a plain <a href>. Looks decent in dark mode via prefers-color-scheme. -->
+
+<style>
+  :root {
+    --bg:        #fbfbfd;
+    --bg-card:   #ffffff;
+    --fg:        #1d1d1f;
+    --fg-muted:  #6e6e73;
+    --accent:    #0066ff;   /* matches the macOS .accentColor */
+    --border:    #e5e5ea;
+    --shadow:    rgba(0, 0, 0, 0.06);
+    --chip-bg:   rgba(0, 102, 255, 0.10);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:       #1c1c1e;
+      --bg-card:  #2c2c2e;
+      --fg:       #f5f5f7;
+      --fg-muted: #aeaeb2;
+      --accent:   #4d92ff;
+      --border:   #3a3a3c;
+      --shadow:   rgba(0, 0, 0, 0.4);
+      --chip-bg:  rgba(77, 146, 255, 0.18);
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text",
+                 "Helvetica Neue", Helvetica, Arial, sans-serif;
+    color: var(--fg);
+    background: var(--bg);
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  main { max-width: 720px; margin: 0 auto; padding: 80px 24px 96px; }
+
+  /* Hero */
+  .hero h1 {
+    font-size: clamp(40px, 6vw, 56px);
+    line-height: 1.05;
+    letter-spacing: -0.02em;
+    margin: 0 0 12px;
+    font-weight: 700;
+  }
+  .hero .tag {
+    font-size: 19px;
+    color: var(--fg-muted);
+    margin: 0 0 36px;
+    max-width: 560px;
+  }
+
+  /* Download button */
+  .download {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--accent);
+    color: white;
+    padding: 14px 24px;
+    border-radius: 12px;
+    font-size: 17px;
+    font-weight: 600;
+    text-decoration: none;
+    box-shadow: 0 6px 18px var(--shadow);
+    transition: transform 0.12s ease, box-shadow 0.12s ease;
+  }
+  .download:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 8px 22px var(--shadow);
+  }
+  .download:active { transform: translateY(0); }
+  .download svg { width: 18px; height: 18px; }
+
+  .meta {
+    color: var(--fg-muted);
+    font-size: 14px;
+    margin: 14px 0 0;
+  }
+  .meta a { color: var(--fg-muted); }
+
+  /* Features grid */
+  .features {
+    margin-top: 72px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+  @media (max-width: 640px) {
+    .features { grid-template-columns: 1fr; }
+  }
+  .feature {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 22px 22px 24px;
+  }
+  .feature h3 {
+    font-size: 16px;
+    margin: 0 0 6px;
+    font-weight: 600;
+  }
+  .feature p {
+    margin: 0;
+    color: var(--fg-muted);
+    font-size: 14.5px;
+    line-height: 1.55;
+  }
+
+  /* Install steps */
+  .install {
+    margin-top: 64px;
+    border-top: 1px solid var(--border);
+    padding-top: 40px;
+  }
+  .install h2 {
+    font-size: 24px;
+    margin: 0 0 18px;
+    letter-spacing: -0.01em;
+  }
+  .install ol {
+    padding-left: 22px;
+    color: var(--fg);
+    font-size: 16px;
+  }
+  .install li { margin-bottom: 10px; }
+  .install code {
+    background: var(--chip-bg);
+    color: var(--accent);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+    font-size: 14px;
+  }
+
+  /* Footer */
+  footer {
+    margin-top: 64px;
+    padding-top: 24px;
+    border-top: 1px solid var(--border);
+    color: var(--fg-muted);
+    font-size: 13px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 18px;
+    justify-content: space-between;
+  }
+  footer a { color: var(--fg-muted); text-decoration: underline; }
+  footer a:hover { color: var(--fg); }
+</style>
+</head>
+<body>
+<main>
+
+  <section class="hero">
+    <h1>Beaver</h1>
+    <p class="tag">
+      A macOS app for inspecting and controlling Applicaster's mobile SDKs
+      over WebSocket. Live log feed, storages browser, command bar — and
+      it stays up to date automatically.
+    </p>
+
+    <a class="download"
+       href="https://github.com/applicaster/Beaver/releases/latest/download/Beaver.zip">
+      <!-- Download arrow icon -->
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 3v13"/>
+        <path d="M6 11l6 6 6-6"/>
+        <path d="M5 21h14"/>
+      </svg>
+      Download for macOS
+    </a>
+
+    <p class="meta">
+      Universal binary · macOS 14 or later ·
+      <a href="https://github.com/applicaster/Beaver/releases/latest">release notes</a>
+    </p>
+  </section>
+
+  <section class="features">
+    <div class="feature">
+      <h3>Live log feed</h3>
+      <p>Stream events from any connected client. Filter, exclude, search,
+         highlight, jump to time, bookmark, and export — by JSON or filtered.</p>
+    </div>
+    <div class="feature">
+      <h3>Storages browser</h3>
+      <p>Inspect Session, Local, and Keychain storage. Expand namespaces,
+         peek at long values, add or remove keys directly from the desktop.</p>
+    </div>
+    <div class="feature">
+      <h3>Command bar</h3>
+      <p>Send any SDK console command to the connected device. Discoverable
+         catalog of commands with inline syntax help.</p>
+    </div>
+    <div class="feature">
+      <h3>Auto-updating</h3>
+      <p>Sparkle-powered updates land in-place. New releases are
+         Ed25519-signed by CI; only Applicaster-built binaries are accepted.</p>
+    </div>
+  </section>
+
+  <section class="install">
+    <h2>Install</h2>
+    <ol>
+      <li>Click <strong>Download for macOS</strong>. You'll get
+          <code>Beaver.zip</code>.</li>
+      <li>Unzip and drag <code>Beaver.app</code> into
+          <code>/Applications</code>.</li>
+      <li>Launch it. macOS may prompt once — the app is notarized by Apple,
+          so a single approval is all it takes.</li>
+      <li>From the second launch onward, updates arrive automatically via
+          <a href="https://sparkle-project.org/">Sparkle</a>. There's also
+          <em>Beaver → Check for Updates…</em> in the menu bar.</li>
+    </ol>
+  </section>
+
+  <footer>
+    <div>
+      Internal Applicaster tool ·
+      <a href="https://github.com/applicaster/Beaver">source on GitHub</a>
+    </div>
+    <div>
+      Auto-updates: <a href="appcast.xml">appcast.xml</a>
+    </div>
+  </footer>
+
+</main>
+</body>
+</html>

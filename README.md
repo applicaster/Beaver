@@ -48,14 +48,24 @@ mobile client at it.
 
 ## Install (end users)
 
-Latest release: **https://github.com/applicaster/Beaver/releases/latest**
+**One-click install URL** — always the newest signed + notarized build:
 
-1. Download `Beaver-X.Y.Z.zip` from the **Assets** section of the
-   release page (NOT "Source code"). The zip is signed + notarized
-   by Apple; macOS Gatekeeper accepts it on first launch.
+> **https://applicaster.github.io/Beaver/**
+
+Or skip the landing page and go straight to the download:
+
+> **https://github.com/applicaster/Beaver/releases/latest/download/Beaver.zip**
+
+1. Click the link. You'll get `Beaver.zip` (universal binary, signed
+   + notarized by Apple — Gatekeeper accepts it on first launch).
 2. Unzip → drag `Beaver.app` into `/Applications`.
 3. Launch it. The toolbar's **Copy IP** button gives you the
    `<your-mac-ip>:9080` address to point your mobile SDK at.
+
+From the second launch onward, Sparkle picks up new releases
+automatically. You can also pick a specific version from
+[the releases page](https://github.com/applicaster/Beaver/releases)
+if you ever need to pin one.
 
 ## Release (publishing a new version)
 
