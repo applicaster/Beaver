@@ -109,24 +109,13 @@ struct MainWindow: View {
 
     @ViewBuilder
     private var sidebar: some View {
-        VStack(spacing: 0) {
-            // Device / app context card — pulled from the SDK's
-            // applicaster.v2 metadata via storagesVM. Lives in the
-            // sidebar so it's visible across every tab and fills
-            // what would otherwise be empty space above the nav
-            // items. Hidden entirely when there's no metadata.
-            if let ctx = storagesVM?.appContext, ctx.isNonEmpty {
-                SidebarDeviceCard(context: ctx)
-            }
-
-            List(selection: $selectedTab) {
-                Label("Log feed", systemImage: "list.bullet.rectangle")
-                    .tag(Tab.logFeed)
-                Label("Storages",  systemImage: "externaldrive")
-                    .tag(Tab.storages)
-                Label("Sessions",  systemImage: "clock.arrow.circlepath")
-                    .tag(Tab.sessions)
-            }
+        List(selection: $selectedTab) {
+            Label("Log feed", systemImage: "list.bullet.rectangle")
+                .tag(Tab.logFeed)
+            Label("Storages",  systemImage: "externaldrive")
+                .tag(Tab.storages)
+            Label("Sessions",  systemImage: "clock.arrow.circlepath")
+                .tag(Tab.sessions)
         }
         .navigationTitle("Beaver")
     }
@@ -182,6 +171,16 @@ struct MainWindow: View {
 
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
+        // Leading edge: device / app context. Hidden entirely
+        // until the SDK has reported its applicaster.v2 metadata.
+        // Sits at the same vertical height as the right-side
+        // toolbar buttons so the toolbar reads as one consistent
+        // strip rather than left-padded space.
+        ToolbarItem(placement: .navigation) {
+            if let ctx = storagesVM?.appContext, ctx.isNonEmpty {
+                ToolbarDeviceBadge(context: ctx)
+            }
+        }
         ToolbarItem(placement: .primaryAction) {
             Button {
                 showingImporter = true
@@ -415,74 +414,66 @@ struct MainWindow: View {
 /// of the old Logger app where each toolbar button shows its purpose
 /// underneath the symbol. Optional `tint` lets destructive actions
 /// (e.g., Clear) render in red so the danger is visible at a glance.
-/// Compact "what device + app am I looking at" card that sits at
-/// the top of the sidebar. Reads from
-/// `StoragesViewModel.AppContext` (populated as soon as the first
-/// `storage.list` response comes back from the SDK) and renders:
+/// Compact "what device + app am I looking at" badge that lives
+/// on the leading edge of the main toolbar (placement
+/// `.navigation`). Reads from `StoragesViewModel.AppContext`
+/// (populated as soon as the first `storage.list` response comes
+/// back from the SDK) and renders as two stacked lines, vertically
+/// matching the right-side toolbar buttons:
 ///
-///     [icon] Miami Heat            11.0.1
-///            iPhone 15 Pro Max
-///            iOS 26.4.2
+///     [icon] Miami Heat
+///            11.0.1 · iPhone 15 Pro Max · iOS 26.4.2
 ///
 /// Right-click → "Copy device fingerprint" pastes the same info
 /// as a single line into the clipboard for bug reports.
-private struct SidebarDeviceCard: View {
+private struct ToolbarDeviceBadge: View {
     let context: StoragesViewModel.AppContext
 
+    /// Single muted subtitle line: `<version> · <device> · <OS> <ver>`.
+    /// Each piece is skipped if missing, so e.g. an SDK that doesn't
+    /// report a device model still produces a clean subtitle.
+    private var subtitle: String {
+        var parts: [String] = []
+        if let v = context.appVersion { parts.append(v) }
+        if let d = context.deviceModel { parts.append(d) }
+        if let os = context.osVersion {
+            parts.append((context.platform ?? "OS") + " " + os)
+        }
+        return parts.joined(separator: " · ")
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Image(systemName: "iphone.gen3")
-                    .font(.system(size: 12, weight: .regular))
-                    .foregroundStyle(.secondary)
+        HStack(spacing: 6) {
+            Image(systemName: "iphone.gen3")
+                .font(.system(size: 14))
+                .foregroundStyle(.secondary)
 
+            VStack(alignment: .leading, spacing: 1) {
                 Text(context.appName ?? "—")
-                    .font(.subheadline.weight(.semibold))
+                    .font(.system(size: 12, weight: .semibold))
                     .lineLimit(1)
-                    .truncationMode(.tail)
-
-                Spacer(minLength: 4)
-
-                if let v = context.appVersion {
-                    Text(v)
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-            }
-
-            if let device = context.deviceModel {
-                Text(device)
-                    .font(.caption)
+                Text(subtitle)
+                    .font(.system(size: 10))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.tail)
-            }
-
-            if let os = context.osVersion {
-                Text("\(context.platform ?? "OS") \(os)")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
             }
         }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color.secondary.opacity(0.10))
-        )
-        .padding(.horizontal, 10)
-        .padding(.top, 8)
-        .padding(.bottom, 4)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 2)
+        .contentShape(Rectangle())
+        .help(fingerprint)
         .contextMenu {
             Button("Copy device fingerprint") {
-                copyFingerprint()
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(fingerprint, forType: .string)
             }
         }
     }
 
-    private func copyFingerprint() {
+    /// One-line string used by both the help tooltip and the
+    /// right-click copy action.
+    private var fingerprint: String {
         var parts: [String] = []
         if let n = context.appName {
             parts.append(n + (context.appVersion.map { " \($0)" } ?? ""))
@@ -491,9 +482,7 @@ private struct SidebarDeviceCard: View {
         if let os = context.osVersion {
             parts.append((context.platform ?? "OS") + " " + os)
         }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(parts.joined(separator: " · "),
-                                       forType: .string)
+        return parts.joined(separator: " · ")
     }
 }
 
