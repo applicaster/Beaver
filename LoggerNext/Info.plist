@@ -3,28 +3,75 @@
 <plist version="1.0">
 <dict>
     <!--
-      Sparkle keys. We keep this file alongside Xcode's auto-generated
-      Info.plist (GENERATE_INFOPLIST_FILE = YES) because Xcode's
-      INFOPLIST_KEY_* build settings silently drop third-party keys
-      from the final plist. INFOPLIST_FILE points at this file and
-      Xcode merges its contents on top of the generated keys.
+      Full Info.plist for Beaver. We can't rely on Xcode's
+      GENERATE_INFOPLIST_FILE because it silently drops third-party
+      keys (Sparkle's SUFeedURL / SUPublicEDKey). With the generator
+      disabled, every key needs to live here. Variable substitution
+      (`$(MARKETING_VERSION)` etc.) is performed at build time so the
+      CI version-bump pipeline doesn't have to touch this file.
 
-      SUPublicEDKey is the Ed25519 public key generated locally via
-      Sparkle's `generate_keys` tool. The matching private key lives
-      in Anton's login Keychain (local dev signing) and CircleCI's
-      SPARKLE_PRIVATE_KEY_BASE64 env var (CI signing). Don't change
-      this string without also rotating both private-key locations
-      and re-signing every published appcast entry — installed Beaver
-      copies trust THIS key to validate update enclosures.
-
-      SUFeedURL is also set programmatically via
-      BeaverUpdaterDelegate.feedURLString(for:) — having it here too
-      gives Sparkle a backstop if the delegate ever fails to attach.
+      See DECISIONS.md D22 / D25 for the rebrand + Sparkle history.
     -->
-    <key>SUFeedURL</key>
-    <string>https://applicaster.github.io/Beaver/appcast.xml</string>
 
+    <!-- ── Apple-managed identity ───────────────────────────────── -->
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+
+    <key>CFBundleExecutable</key>
+    <string>$(EXECUTABLE_NAME)</string>
+
+    <key>CFBundleIdentifier</key>
+    <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+
+    <key>CFBundlePackageType</key>
+    <string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
+
+    <key>CFBundleShortVersionString</key>
+    <string>$(MARKETING_VERSION)</string>
+
+    <key>CFBundleVersion</key>
+    <string>$(CURRENT_PROJECT_VERSION)</string>
+
+    <key>LSMinimumSystemVersion</key>
+    <string>$(MACOSX_DEPLOYMENT_TARGET)</string>
+
+    <key>NSHighResolutionCapable</key>
+    <true/>
+
+    <!-- ── User-visible brand ───────────────────────────────────── -->
+    <!-- CFBundleDisplayName is what Finder, Apple menu, and the
+         window title use. CFBundleName is the short ≤15-char name.
+         Both set to "Beaver" — see D21 for the rebrand split between
+         user-facing name and internal codename. -->
+    <key>CFBundleDisplayName</key>
+    <string>Beaver</string>
+
+    <key>CFBundleName</key>
+    <string>Beaver</string>
+
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.productivity</string>
+
+    <key>NSHumanReadableCopyright</key>
+    <string></string>
+
+    <!-- ── Sparkle auto-update ──────────────────────────────────── -->
+    <!-- SUPublicEDKey is the Ed25519 public key Sparkle uses to
+         verify update enclosures. The matching private key lives in
+         Anton's login Keychain (local dev signing) and CircleCI's
+         SPARKLE_PRIVATE_KEY_BASE64 env var (CI signing). Rotating
+         this key means re-signing every published appcast entry —
+         all installed copies trust THIS key. -->
     <key>SUPublicEDKey</key>
     <string>ZYuSQ24/sz+w72KMK+mISy+FZvnv+QJGuiDs9DH4cs8=</string>
+
+    <!-- SUFeedURL is also provided programmatically by
+         BeaverUpdaterDelegate.feedURLString(for:); having it here
+         too gives Sparkle a backstop if the delegate ever fails. -->
+    <key>SUFeedURL</key>
+    <string>https://applicaster.github.io/Beaver/appcast.xml</string>
 </dict>
 </plist>
