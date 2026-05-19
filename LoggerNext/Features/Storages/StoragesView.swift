@@ -445,14 +445,14 @@ private struct NamespaceTab: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 6) {
+            HStack(spacing: 8) {
                 Text(namespace.displayName.uppercased())
-                    .font(.caption.weight(.semibold))
+                    .font(.subheadline.weight(.semibold))
                 if count > 0 {
                     Text("\(count)")
-                        .font(.caption2.monospacedDigit())
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 1)
+                        .font(.caption.monospacedDigit().weight(.semibold))
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2)
                         .background(
                             Capsule().fill(isSelected
                                            ? Color.white.opacity(0.25)
@@ -460,17 +460,17 @@ private struct NamespaceTab: View {
                         )
                 }
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 7)
             .foregroundStyle(isSelected ? Color.white : color)
             .background(
-                RoundedRectangle(cornerRadius: 6)
+                RoundedRectangle(cornerRadius: 8)
                     .fill(isSelected
                           ? color
                           : (isHovered ? color.opacity(0.12) : Color.clear))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 6)
+                RoundedRectangle(cornerRadius: 8)
                     .strokeBorder(color.opacity(isSelected ? 0 : 0.5), lineWidth: 1)
             )
         }
@@ -512,12 +512,16 @@ private struct NamespaceRow: View {
         VStack(alignment: .leading, spacing: 0) {
             header
             if isExpanded, let children = record.children, !children.isEmpty {
-                ForEach(children) { child in
+                // Index is threaded through for zebra striping —
+                // every other row gets a subtle background so the
+                // eye can lock onto key:value pairs in long lists.
+                ForEach(Array(children.enumerated()), id: \.element.id) { idx, child in
                     InnerKeyRow(
                         namespace: namespace,
                         parent: record,
                         child: child,
                         isClientConnected: isClientConnected,
+                        rowIndex: idx,
                         onCopy: { copyValue(of: child) },
                         onDelete: {
                             onDeleteInside(namespace, record.key, child.key)
@@ -583,7 +587,7 @@ private struct NamespaceRow: View {
             return valueText
         }
         if record.isContainer {
-            return record.itemCount == 1 ? "1 item" : "\(record.itemCount) items"
+            return record.itemCount == 1 ? "1 key" : "\(record.itemCount) keys"
         }
         return ""
     }
@@ -681,14 +685,32 @@ private struct InnerKeyRow: View {
     let parent: StorageRecord
     let child: StorageRecord
     let isClientConnected: Bool
+    /// 0-based index inside the parent's children, used to draw
+    /// zebra-stripe backgrounds. Doesn't affect functionality.
+    let rowIndex: Int
     let onCopy: () -> Void
     let onDelete: () -> Void
 
     @State private var isHovered = false
+    @State private var showingFullValue = false
+
+    /// True when the row content is likely to be truncated and
+    /// worth surfacing an expand affordance for. Short scalars
+    /// (numbers, bools, null, short strings) fit comfortably and
+    /// don't need it; long strings and any container do.
+    private var canExpand: Bool {
+        switch child.kind {
+        case .string(let s): return s.count > 60
+        case .object, .array: return true
+        default:              return false
+        }
+    }
 
     var body: some View {
         HStack(spacing: 6) {
-            // Indent past the parent's chevron gutter.
+            // Indent past the parent's chevron gutter so the inner
+            // key:value column aligns visually under the namespace
+            // row's key label.
             Color.clear.frame(width: 30)
 
             JSONSyntax.row(
@@ -696,7 +718,10 @@ private struct InnerKeyRow: View {
                 isArrayIndex: child.key.looksLikeJSONArrayIndex,
                 kind: child.kind
             )
-            .font(.system(.caption, design: .monospaced))
+            // .callout monospaced (13pt) — readable at standard
+            // zoom without dominating the layout. Was .caption
+            // (12pt) which felt cramped over long lists.
+            .font(.system(.callout, design: .monospaced))
             .textSelection(.enabled)
             .lineLimit(1)
             .truncationMode(.tail)
@@ -704,20 +729,39 @@ private struct InnerKeyRow: View {
             Spacer(minLength: 6)
 
             HStack(spacing: 4) {
+                if canExpand {
+                    Button {
+                        showingFullValue = true
+                    } label: {
+                        Image(systemName: "rectangle.expand.vertical")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 22, height: 22)
+                    }
+                    .buttonStyle(.plain)
+                    .help(child.kind.isContainer
+                          ? "Show pretty-printed JSON"
+                          : "Show full value")
+                    .popover(isPresented: $showingFullValue,
+                             arrowEdge: .leading) {
+                        StorageValuePopover(record: child)
+                    }
+                }
+
                 Button(action: onCopy) {
                     Image(systemName: "doc.on.doc")
-                        .font(.system(size: 11))
+                        .font(.system(size: 12))
                         .foregroundStyle(.secondary)
-                        .frame(width: 20, height: 20)
+                        .frame(width: 22, height: 22)
                 }
                 .buttonStyle(.plain)
                 .help("Copy this value")
 
                 Button(role: .destructive, action: onDelete) {
                     Image(systemName: "trash")
-                        .font(.system(size: 11))
+                        .font(.system(size: 12))
                         .foregroundStyle(.red)
-                        .frame(width: 20, height: 20)
+                        .frame(width: 22, height: 22)
                 }
                 .buttonStyle(.plain)
                 .disabled(!isClientConnected)
@@ -729,10 +773,116 @@ private struct InnerKeyRow: View {
             .allowsHitTesting(isHovered)
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 3)
-        .background(isHovered ? Color.secondary.opacity(0.06) : Color.clear)
+        // Vertical breathing room: was 3, now 6. Long namespaces
+        // (50+ keys) read as a comfortable list instead of a wall.
+        .padding(.vertical, 6)
+        .background(rowBackground)
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }
+    }
+
+    /// Hover wins over zebra (hover band needs to be visible);
+    /// otherwise alternate rows get a subtle tint so the eye can
+    /// scan key:value pairs without counting lines.
+    @ViewBuilder
+    private var rowBackground: some View {
+        if isHovered {
+            Color.secondary.opacity(0.10)
+        } else if rowIndex.isMultiple(of: 2) {
+            Color.clear
+        } else {
+            Color.secondary.opacity(0.04)
+        }
+    }
+}
+
+// MARK: - Full-value popover
+
+/// Shown when the user clicks the expand affordance on a long
+/// inner row. Renders the full value in a scrollable monospaced
+/// view so base64 blobs, JWT payloads, stringified JSON, etc.
+/// can be read end-to-end. For container values (objects /
+/// arrays) the body is pretty-printed JSON.
+private struct StorageValuePopover: View {
+    let record: StorageRecord
+
+    /// What goes in the scrollable body — raw string for scalars,
+    /// pretty JSON for containers.
+    private var bodyText: String {
+        switch record.kind {
+        case .string(let s):  return s
+        case .number(let n):  return n
+        case .bool(let b):    return b ? "true" : "false"
+        case .null:           return "null"
+        case .object, .array: return StorageRecord.serializeJSON(record)
+        }
+    }
+
+    private var charCount: Int { bodyText.count }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Text("\"\(record.key)\"")
+                    .font(.headline.monospaced())
+                    .foregroundStyle(JSONSyntax.keyColor)
+                    .textSelection(.enabled)
+                Text("·")
+                    .foregroundStyle(.secondary)
+                Text(kindLabel)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+                if record.kind.isContainer {
+                    Text("·")
+                        .foregroundStyle(.secondary)
+                    Text(record.itemCount == 1 ? "1 key" : "\(record.itemCount) keys")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("·")
+                        .foregroundStyle(.secondary)
+                    Text(charCount == 1 ? "1 char" : "\(charCount) chars")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(bodyText, forType: .string)
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                }
+                .buttonStyle(.borderless)
+                .help(record.kind.isContainer
+                      ? "Copy pretty-printed JSON"
+                      : "Copy value")
+            }
+
+            Divider()
+
+            ScrollView {
+                Text(bodyText)
+                    .font(.system(.callout, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 4)
+            }
+        }
+        .padding(14)
+        .frame(width: 540, height: 380)
+    }
+
+    /// One-word kind label for the header chip — "string",
+    /// "object", "array", "number", "bool", "null".
+    private var kindLabel: String {
+        switch record.kind {
+        case .string: return "string"
+        case .number: return "number"
+        case .bool:   return "bool"
+        case .null:   return "null"
+        case .object: return "object"
+        case .array:  return "array"
+        }
     }
 }
 
