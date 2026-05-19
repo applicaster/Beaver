@@ -20,34 +20,29 @@ struct StoragesView: View {
     /// VM is owned by `MainWindow` (keyed by `viewingSessionId`)
     /// so per-tab state — selected layer, expanded namespaces,
     /// search term, auto-refresh toggle — survives tab switches.
-    /// Optional because the user may not have a session selected.
-    let vm: StoragesViewModel?
+    /// MainWindow renders `ConnectionPlaceholder` instead of this
+    /// view when no session is active, so the VM is always
+    /// concrete here.
+    @Bindable var vm: StoragesViewModel
 
     @Environment(AppEnvironment.self) private var env
 
     var body: some View {
-        Group {
-            if env.viewingSessionId == nil {
-                ContentUnavailableView(
-                    "No session selected",
-                    systemImage: "externaldrive",
-                    description: Text("Connect a device or pick a past session from the sidebar.")
-                )
-            } else if let vm {
-                StoragesContent(vm: vm)
-            } else {
-                ProgressView("Loading session…")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+        StoragesContent(vm: vm)
+            // Refresh from the device whenever the user pops back
+            // to this tab — the in-memory snapshot may have gone
+            // stale while they were in the Log feed. No-op if no
+            // client is connected; `WSServer.send` silently drops
+            // in that case and the UI keeps showing whatever's
+            // cached on disk.
+            //
+            // Note: MainWindow already fires the *initial*
+            // storage.list when the session is created, so the
+            // common "open the app + connect" flow doesn't depend
+            // on this.
+            .onAppear {
+                vm.requestRefresh(via: env.server)
             }
-        }
-        // Refresh from the device whenever the user pops back to
-        // this tab — the in-memory snapshot may have gone stale
-        // while they were in the Log feed. No-op if no client is
-        // connected; `WSServer.send` silently drops in that case
-        // and the UI keeps showing whatever's cached on disk.
-        .onAppear {
-            vm?.requestRefresh(via: env.server)
-        }
     }
 }
 

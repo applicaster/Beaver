@@ -81,6 +81,13 @@ struct MainWindow: View {
                 // StoragesViewModel.bootstrap() docstring.
                 await fresh.bootstrap()
                 storagesVM = fresh
+                // Auto-fetch the first storage snapshot so the user
+                // doesn't have to click Reload to see anything.
+                // No-op if no client is connected; safe to call
+                // regardless of which tab the user is currently
+                // viewing — the snapshot lands in the store and
+                // both this VM and any future visit pick it up.
+                fresh.requestRefresh(via: env.server)
             }
         }
         .fileImporter(
@@ -132,7 +139,16 @@ struct MainWindow: View {
                     ConnectionPlaceholder(state: env.serverState)
                 }
             case .storages:
-                StoragesView(vm: storagesVM)
+                // Same pattern as Log feed above: when no session
+                // is active the tab shows ConnectionPlaceholder so
+                // the visual idiom matches across tabs and there's
+                // no centered-vs-top-aligned layout jump when a
+                // session arrives.
+                if let vm = storagesVM {
+                    StoragesView(vm: vm)
+                } else {
+                    ConnectionPlaceholder(state: env.serverState)
+                }
             case .sessions:
                 SessionsView(onOpenInLogFeed: { _ in
                     // The row already mutated `env.viewingSessionId`
