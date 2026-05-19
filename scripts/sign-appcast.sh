@@ -72,17 +72,45 @@ fi
 #   sparkle:edSignature="abc…" length="6373894"
 # We embed that verbatim into the <enclosure> attribute list.
 
-echo "▸ Signing $(basename "$ZIP_PATH")…"
+echo "▸ Signing $(basename "$ZIP_PATH")… (using $SIGN_UPDATE)"
+SIGN_STDERR=$(mktemp)
+KEY_FILE=""
+cleanup() {
+    rm -f "$SIGN_STDERR"
+    [ -n "$KEY_FILE" ] && [ -f "$KEY_FILE" ] && rm -f "$KEY_FILE"
+}
+trap cleanup EXIT
+
+# Modern sign_update doesn't take the private key as a command-line
+# string. It reads either from `-f <file>` or, by default, from the
+# macOS login keychain. So in the CI path we decode the env var back
+# into a temp file and pass it via -f.
 if [ -n "${SPARKLE_PRIVATE_KEY_BASE64:-}" ]; then
-    SIG_LINE="$("$SIGN_UPDATE" -p "$SPARKLE_PRIVATE_KEY_BASE64" "$ZIP_PATH")"
+    KEY_FILE="$(mktemp)"
+    chmod 600 "$KEY_FILE"
+    # Strip any whitespace/newlines that pbcopy or CircleCI's text
+    # field might have added before decoding — base64 -d on macOS
+    # tolerates it, but Linux's variant is stricter.
+    printf '%s' "$SPARKLE_PRIVATE_KEY_BASE64" \
+        | tr -d '[:space:]' \
+        | base64 --decode > "$KEY_FILE"
+    KEY_BYTES="$(wc -c <"$KEY_FILE" | tr -d '[:space:]')"
+    echo "   key source: SPARKLE_PRIVATE_KEY_BASE64 → ${KEY_FILE} (${KEY_BYTES} bytes)"
+    SIG_LINE="$("$SIGN_UPDATE" -f "$KEY_FILE" "$ZIP_PATH" 2>"$SIGN_STDERR" || true)"
 else
-    SIG_LINE="$("$SIGN_UPDATE" "$ZIP_PATH")"
+    echo "   key source: macOS login keychain"
+    SIG_LINE="$("$SIGN_UPDATE" "$ZIP_PATH" 2>"$SIGN_STDERR" || true)"
 fi
 
 if [ -z "$SIG_LINE" ] || ! echo "$SIG_LINE" | grep -q "edSignature"; then
-    echo "❌ sign_update produced unexpected output: $SIG_LINE" >&2
+    echo "❌ sign_update failed." >&2
+    echo "   stdout: ${SIG_LINE:-<empty>}" >&2
+    echo "   stderr: $(cat "$SIGN_STDERR")" >&2
+    echo "   tool:   $SIGN_UPDATE" >&2
+    "$SIGN_UPDATE" --help 2>&1 | head -30 >&2 || true
     exit 1
 fi
+echo "   signature: $SIG_LINE"
 
 # ─── Gather metadata for the <item> block ─────────────────────────────
 
