@@ -44,11 +44,30 @@ final class StoragesViewModel {
     /// selected.
     var selection: SelectionKey?
 
-    /// Which namespace sections are expanded in the outline view.
-    /// Default: all three open.
-    var expandedNamespaces: Set<StorageSnapshot.Namespace> = Set(
-        StorageSnapshot.Namespace.allCases
-    )
+    /// Per-record expansion state inside the current storage layer.
+    /// Keyed by `"<wireKey>:<recordId>"` so the set survives tab
+    /// switches without leaking expand state across layers.
+    var expandedRecordKeys: Set<String> = []
+
+    func isExpanded(record: StorageRecord,
+                    in namespace: StorageSnapshot.Namespace) -> Bool {
+        expandedRecordKeys.contains(expansionKey(record, namespace))
+    }
+
+    func toggleExpansion(record: StorageRecord,
+                         in namespace: StorageSnapshot.Namespace) {
+        let key = expansionKey(record, namespace)
+        if expandedRecordKeys.contains(key) {
+            expandedRecordKeys.remove(key)
+        } else {
+            expandedRecordKeys.insert(key)
+        }
+    }
+
+    private func expansionKey(_ r: StorageRecord,
+                              _ ns: StorageSnapshot.Namespace) -> String {
+        "\(ns.wireKey):\(r.id)"
+    }
 
     /// Substring filter applied to the visible records — matches the
     /// top-level row OR any nested descendant by key or value.
@@ -163,27 +182,34 @@ final class StoragesViewModel {
     /// updates from ANY source, including auto-refresh from other VMs);
     /// this delayed reload covers the edge case where the broadcast
     /// arrives before the consumer Task has woken up.
-    /// Push a new value into the device's storage for the currently
-    /// selected namespace. SDK contract (CommandRegistry):
+    /// Push a new value into the device's storage. SDK contract
+    /// (CommandRegistry):
     ///   storage.<wireKey>.set <key> <value> [namespace]
-    /// We omit the optional trailing `[namespace]` — it's an
-    /// SDK-internal subscope rarely needed during debugging.
+    /// The trailing `[namespace]` is the SDK's per-storage SUBSCOPE —
+    /// e.g., `storage.local.set foo bar applicaster.v2` writes
+    /// `foo: bar` inside the `applicaster.v2` subscope. Passing
+    /// `parent = nil` writes at the top level.
     ///
     /// After the SDK applies the write it emits a log event back; we
-    /// also fire a `storage.list` refresh so the table picks up the
-    /// new state without the user clicking Reload.
+    /// also fire a `storage.list` refresh so the UI picks up the new
+    /// state without the user clicking Reload.
     func setValue(
         in namespace: StorageSnapshot.Namespace,
+        parent: String? = nil,
         key: String,
         value: String,
         via server: WSServer
     ) {
         let trimmedKey = key.trimmingCharacters(in: .whitespaces)
         guard !trimmedKey.isEmpty else { return }
+        let trimmedParentRaw = parent?.trimmingCharacters(in: .whitespaces) ?? ""
+        let trimmedParent: String? = trimmedParentRaw.isEmpty ? nil : trimmedParentRaw
         // The SDK's parser is space-separated. Spaces inside `value`
-        // would be lost unless we quote — but the SDK doesn't document
-        // any quoting rule. Document this limitation in the UI.
-        let cmd = "storage.\(namespace.wireKey).set \(trimmedKey) \(value)"
+        // get split apart with no quoting — UI surfaces a warning.
+        var cmd = "storage.\(namespace.wireKey).set \(trimmedKey) \(value)"
+        if let trimmedParent {
+            cmd += " \(trimmedParent)"
+        }
         Task { [weak self] in
             await server.send(command: cmd)
             try? await Task.sleep(for: .milliseconds(400))
@@ -191,18 +217,23 @@ final class StoragesViewModel {
         }
     }
 
-    /// Remove a key from the device's storage for the given namespace.
-    /// SDK contract: `storage.<wireKey>.delete <key> [namespace]`.
-    /// Refreshes after the command completes (same belt-and-braces
-    /// pattern as setValue).
+    /// Remove a key from the device's storage. SDK contract:
+    /// `storage.<wireKey>.delete <key> [namespace]`. `parent` maps
+    /// to the trailing subscope (nil = top-level).
     func deleteValue(
         in namespace: StorageSnapshot.Namespace,
+        parent: String? = nil,
         key: String,
         via server: WSServer
     ) {
         let trimmedKey = key.trimmingCharacters(in: .whitespaces)
         guard !trimmedKey.isEmpty else { return }
-        let cmd = "storage.\(namespace.wireKey).delete \(trimmedKey)"
+        let trimmedParentRaw = parent?.trimmingCharacters(in: .whitespaces) ?? ""
+        let trimmedParent: String? = trimmedParentRaw.isEmpty ? nil : trimmedParentRaw
+        var cmd = "storage.\(namespace.wireKey).delete \(trimmedKey)"
+        if let trimmedParent {
+            cmd += " \(trimmedParent)"
+        }
         Task { [weak self] in
             await server.send(command: cmd)
             try? await Task.sleep(for: .milliseconds(400))

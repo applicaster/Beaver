@@ -73,16 +73,44 @@ private struct StoragesContent: View {
         let namespace: StorageSnapshot.Namespace
         var id: String { "\(namespace.rawValue):\(record.id)" }
     }
+
+    /// Inner-row delete uses (namespace, parentKey, childKey) — we
+    /// don't have a `StorageRecord` reference for these because they
+    /// come straight from the row view; only the strings are needed
+    /// to build the `storage.<ns>.delete <key> <namespace>` command.
+    struct InnerDeleteTarget: Identifiable {
+        let namespace: StorageSnapshot.Namespace
+        let parentKey: String
+        let childKey: String
+        var id: String { "\(namespace.rawValue):\(parentKey):\(childKey)" }
+    }
+
+    /// Add-key flow. When pre-filled with `parentKey`, the sheet is
+    /// in "add-inside" mode (the SDK's optional 3rd argument carries
+    /// the parent's name as a subscope). When `parentKey` is nil,
+    /// the sheet is in "add a top-level namespace" mode.
+    struct AddKeyContext: Identifiable {
+        let namespace: StorageSnapshot.Namespace
+        let parentKey: String?
+        var id: String { "\(namespace.rawValue):\(parentKey ?? "<root>")" }
+    }
+
     @State private var pendingEdit: EditTarget?
     @State private var pendingDelete: EditTarget?
-    @State private var showingAddKey = false
+    @State private var pendingInnerDelete: InnerDeleteTarget?
+    @State private var pendingAdd: AddKeyContext?
 
     var body: some View {
         VStack(spacing: 0) {
             StoragesTopBar(
                 vm: vm,
                 onExport: { Task { await prepareExport() } },
-                onAddKey: { showingAddKey = true }
+                onAddKey: {
+                    pendingAdd = AddKeyContext(
+                        namespace: vm.selectedNamespace,
+                        parentKey: nil
+                    )
+                }
             )
             Divider()
             StoragesSearchBar(vm: vm)
@@ -97,6 +125,21 @@ private struct StoragesContent: View {
                     onDelete: { record, namespace in
                         vm.selectedNamespace = namespace
                         pendingDelete = EditTarget(record: record, namespace: namespace)
+                    },
+                    onAddInside: { record, namespace in
+                        vm.selectedNamespace = namespace
+                        pendingAdd = AddKeyContext(
+                            namespace: namespace,
+                            parentKey: record.key
+                        )
+                    },
+                    onDeleteInside: { namespace, parentKey, childKey in
+                        vm.selectedNamespace = namespace
+                        pendingInnerDelete = InnerDeleteTarget(
+                            namespace: namespace,
+                            parentKey: parentKey,
+                            childKey: childKey
+                        )
                     }
                 )
                 .frame(minWidth: 400, maxWidth: .infinity, maxHeight: .infinity)
@@ -124,7 +167,9 @@ private struct StoragesContent: View {
                 onCancel: { pendingEdit = nil }
             )
         }
-        // Delete confirmation — also keyed off the row's namespace.
+        // Top-level delete confirmation — wipes a whole namespace
+        // entry. The SDK leaves any nested subscope behind, but the
+        // outer key is gone immediately.
         .confirmationDialog(
             "Delete \"\(pendingDelete?.record.key ?? "")\" from \(pendingDelete?.namespace.displayName ?? "")?",
             isPresented: Binding(
@@ -143,20 +188,52 @@ private struct StoragesContent: View {
         } message: { _ in
             Text("The value is removed on the device immediately. Other devices won't see the change until they reconnect.")
         }
-        // Add key sheet
-        .sheet(isPresented: $showingAddKey) {
+        // Inner-row delete confirmation. SDK contract:
+        //   storage.<wireKey>.delete <childKey> <parentKey>
+        // The trailing `parentKey` is the SDK's subscope, so the
+        // delete is scoped to the namespace we expanded.
+        .confirmationDialog(
+            "Delete \"\(pendingInnerDelete?.childKey ?? "")\" from \(pendingInnerDelete?.parentKey ?? "")?",
+            isPresented: Binding(
+                get: { pendingInnerDelete != nil },
+                set: { if !$0 { pendingInnerDelete = nil } }
+            ),
+            presenting: pendingInnerDelete
+        ) { target in
+            Button("Delete", role: .destructive) {
+                let ns      = target.namespace
+                let parent  = target.parentKey
+                let child   = target.childKey
+                pendingInnerDelete = nil
+                vm.deleteValue(
+                    in: ns,
+                    parent: parent,
+                    key: child,
+                    via: env.server
+                )
+            }
+            Button("Cancel", role: .cancel) { pendingInnerDelete = nil }
+        } message: { _ in
+            Text("Removes one key inside the namespace on the device. The namespace itself stays.")
+        }
+        // Add-key sheet. Identifiable trigger so the same view powers
+        // both top-bar "+ Add key" (parentKey = nil → top-level) and
+        // per-row "+ inside namespace" (parentKey = the namespace).
+        .sheet(item: $pendingAdd) { ctx in
             AddStorageKeySheet(
-                initialNamespace: vm.selectedNamespace,
-                onSave: { namespace, key, value in
+                initialNamespace: ctx.namespace,
+                initialParent: ctx.parentKey,
+                onSave: { namespace, parent, key, value in
                     vm.setValue(
                         in: namespace,
+                        parent: parent,
                         key: key,
                         value: value,
                         via: env.server
                     )
-                    showingAddKey = false
+                    pendingAdd = nil
                 },
-                onCancel: { showingAddKey = false }
+                onCancel: { pendingAdd = nil }
             )
         }
         // Periodic auto-refresh loop. Re-fires when the toggle flips
@@ -201,15 +278,30 @@ private struct StoragesTopBar: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            // Namespaces are now the outline section headers, so the
-            // chip row is gone. The only thing left on the leading
-            // edge is the global "Add key" action.
+            // Storage-layer tabs (D30 brings these back). Tapping a
+            // chip switches the layer below. The outline that follows
+            // shows only this layer's top-level keys ("namespaces").
+            HStack(spacing: 6) {
+                ForEach(StorageSnapshot.Namespace.allCases, id: \.self) { ns in
+                    NamespaceTab(
+                        namespace: ns,
+                        isSelected: vm.selectedNamespace == ns,
+                        count: vm.recordCount(in: ns)
+                    ) {
+                        vm.selectedNamespace = ns
+                        vm.selection = nil
+                    }
+                }
+            }
+            .fixedSize()
+
+            // "+ Add key" — adds a top-level key in the current layer.
             Button(action: onAddKey) {
                 Label("Add key", systemImage: "plus.circle")
             }
             .disabled(!isClientConnected)
             .help(isClientConnected
-                  ? "Add a new key/value to the device's storage"
+                  ? "Add a top-level key in the current layer"
                   : "Connect a device to add a key")
 
             Spacer()
@@ -303,50 +395,82 @@ private struct StoragesSearchBar: View {
 // tab-style chip row in the top bar. Section headers in
 // `NamespaceSection` now carry the same color cue.
 
-// MARK: - Outline (sections per namespace)
+// MARK: - Outline (single layer, expandable namespaces)
 
-/// Replaces the old single-namespace Table with a sectioned list:
-/// each of the three namespaces is a collapsible section whose
-/// rows are its top-level keys. Hovering a row reveals Edit + Delete
-/// icons on the right — same affordance pattern as the Sessions
-/// list — and clicking the row's body sets the detail-pane selection.
+/// Shows the top-level "namespace" rows for the currently-selected
+/// storage layer (Session / Local / Keychain). Each row is
+/// expandable: click the chevron to reveal the namespace's one-level
+/// children as inline `key: value` rows. The right-side detail pane
+/// still drives full-depth browsing for arbitrarily nested values.
 ///
-/// All three sections start expanded; the user can collapse the
-/// ones they're not looking at via the chevron in each header.
+/// Per-row actions:
+///   • Namespace (container) row: copy-as-JSON + add-key-inside + delete
+///   • Namespace (scalar)    row: copy-value + delete
+///   • Inner key/value row:        copy-value + delete-inside-namespace
 private struct StoragesOutline: View {
     @Bindable var vm: StoragesViewModel
     @Environment(AppEnvironment.self) private var env
     let onEdit: (StorageRecord, StorageSnapshot.Namespace) -> Void
     let onDelete: (StorageRecord, StorageSnapshot.Namespace) -> Void
+    let onAddInside: (StorageRecord, StorageSnapshot.Namespace) -> Void
+    let onDeleteInside: (
+        _ namespace: StorageSnapshot.Namespace,
+        _ parentKey: String,
+        _ childKey: String
+    ) -> Void
+
+    private var records: [StorageRecord] {
+        vm.filteredRecords(in: vm.selectedNamespace)
+    }
 
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
-                ForEach(StorageSnapshot.Namespace.allCases, id: \.self) { ns in
-                    NamespaceSection(
-                        vm: vm,
-                        namespace: ns,
-                        onEdit: onEdit,
-                        onDelete: onDelete
-                    )
-                    Divider()
+                if records.isEmpty {
+                    emptyState
+                } else {
+                    ForEach(records) { record in
+                        NamespaceRow(
+                            vm: vm,
+                            namespace: vm.selectedNamespace,
+                            record: record,
+                            onEdit: onEdit,
+                            onDelete: onDelete,
+                            onAddInside: onAddInside,
+                            onDeleteInside: onDeleteInside
+                        )
+                        Divider().opacity(0.3)
+                    }
                 }
                 Spacer(minLength: 0)
             }
         }
     }
+
+    @ViewBuilder
+    private var emptyState: some View {
+        let trimmed = vm.searchTerm.trimmingCharacters(in: .whitespaces)
+        let message: String = trimmed.isEmpty
+            ? "No \(vm.selectedNamespace.displayName.lowercased()) data. Click Reload to fetch from the device."
+            : "No keys or values match \"\(trimmed)\"."
+        ContentUnavailableView(
+            "Nothing to show",
+            systemImage: trimmed.isEmpty ? "tray" : "magnifyingglass",
+            description: Text(message)
+        )
+        .padding(.top, 32)
+    }
 }
 
-/// One collapsible section (header + rows) for a namespace.
-private struct NamespaceSection: View {
-    @Bindable var vm: StoragesViewModel
-    let namespace: StorageSnapshot.Namespace
-    let onEdit: (StorageRecord, StorageSnapshot.Namespace) -> Void
-    let onDelete: (StorageRecord, StorageSnapshot.Namespace) -> Void
+// MARK: - Layer tab chip (Session / Local / Keychain)
 
-    private var isExpanded: Bool { vm.expandedNamespaces.contains(namespace) }
-    private var records: [StorageRecord] { vm.filteredRecords(in: namespace) }
-    private var totalCount: Int { vm.recordCount(in: namespace) }
+private struct NamespaceTab: View {
+    let namespace: StorageSnapshot.Namespace
+    let isSelected: Bool
+    let count: Int
+    let action: () -> Void
+
+    @State private var isHovered = false
 
     private var color: Color {
         switch namespace {
@@ -357,82 +481,65 @@ private struct NamespaceSection: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            header
-            if isExpanded {
-                if records.isEmpty {
-                    emptyState
-                } else {
-                    ForEach(records) { record in
-                        StorageOutlineRow(
-                            vm: vm,
-                            namespace: namespace,
-                            record: record,
-                            onEdit: onEdit,
-                            onDelete: onDelete
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Text(namespace.displayName.uppercased())
+                    .font(.caption.weight(.semibold))
+                if count > 0 {
+                    Text("\(count)")
+                        .font(.caption2.monospacedDigit())
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(
+                            Capsule().fill(isSelected
+                                           ? Color.white.opacity(0.25)
+                                           : color.opacity(0.15))
                         )
-                    }
                 }
             }
-        }
-    }
-
-    @ViewBuilder
-    private var header: some View {
-        Button {
-            if isExpanded {
-                vm.expandedNamespaces.remove(namespace)
-            } else {
-                vm.expandedNamespaces.insert(namespace)
-            }
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "chevron.right")
-                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 12)
-                Text(namespace.displayName.uppercased())
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(color)
-                Text("\(totalCount)")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 1)
-                    .background(Capsule().fill(color.opacity(0.15)))
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .contentShape(Rectangle())
-            .background(color.opacity(0.04))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .foregroundStyle(isSelected ? Color.white : color)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(isSelected
+                          ? color
+                          : (isHovered ? color.opacity(0.12) : Color.clear))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .strokeBorder(color.opacity(isSelected ? 0 : 0.5), lineWidth: 1)
+            )
         }
         .buttonStyle(.plain)
-    }
-
-    @ViewBuilder
-    private var emptyState: some View {
-        Text(vm.searchTerm.trimmingCharacters(in: .whitespaces).isEmpty
-             ? "No keys in this namespace."
-             : "No keys match \"\(vm.searchTerm)\".")
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 36)
-            .padding(.vertical, 8)
+        .onHover { isHovered = $0 }
     }
 }
 
-/// One row in an outline section.
-private struct StorageOutlineRow: View {
+// MARK: - Namespace row (top-level key in the current layer)
+
+/// One row in the outline. Renders the namespace's name + a tail of
+/// action icons; if it's expanded, its one-level inner key/value
+/// children render directly underneath, indented.
+private struct NamespaceRow: View {
     @Bindable var vm: StoragesViewModel
     let namespace: StorageSnapshot.Namespace
     let record: StorageRecord
     let onEdit: (StorageRecord, StorageSnapshot.Namespace) -> Void
     let onDelete: (StorageRecord, StorageSnapshot.Namespace) -> Void
+    let onAddInside: (StorageRecord, StorageSnapshot.Namespace) -> Void
+    let onDeleteInside: (
+        _ namespace: StorageSnapshot.Namespace,
+        _ parentKey: String,
+        _ childKey: String
+    ) -> Void
 
     @Environment(AppEnvironment.self) private var env
     @State private var isHovered = false
+
+    private var isExpanded: Bool {
+        vm.isExpanded(record: record, in: namespace)
+    }
 
     private var isSelected: Bool {
         vm.selection?.namespace == namespace &&
@@ -445,80 +552,141 @@ private struct StorageOutlineRow: View {
     }
 
     var body: some View {
-        HStack(spacing: 10) {
-            // 36pt of leading indent so rows align past the chevron
-            // gutter in the section header.
-            Spacer().frame(width: 24)
+        VStack(alignment: .leading, spacing: 0) {
+            header
+            if isExpanded, let children = record.children, !children.isEmpty {
+                ForEach(children) { child in
+                    InnerKeyRow(
+                        namespace: namespace,
+                        parent: record,
+                        child: child,
+                        isClientConnected: isClientConnected,
+                        onCopy: { copyValue(of: child) },
+                        onDelete: {
+                            onDeleteInside(namespace, record.key, child.key)
+                        }
+                    )
+                }
+            }
+        }
+        .background(isSelected ? Color.accentColor.opacity(0.10) : Color.clear)
+    }
 
+    @ViewBuilder
+    private var header: some View {
+        HStack(spacing: 8) {
+            chevron
             VStack(alignment: .leading, spacing: 1) {
                 Text(record.key)
-                    .font(.body)
-                    .foregroundStyle(.primary)
-                valueSummary
+                    .font(.body.weight(.medium))
+                Text(summaryLine)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.tail)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            // Hover-revealed Edit + Delete. Edit is scalar-only;
-            // containers (object/array) show Delete only.
-            HStack(spacing: 4) {
-                if !record.isContainer {
-                    Button {
-                        onEdit(record, namespace)
-                    } label: {
-                        Image(systemName: "pencil")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 22, height: 22)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(!isClientConnected)
-                    .help(isClientConnected
-                          ? "Edit this value on the device"
-                          : "Connect a device to edit")
-                }
-                Button(role: .destructive) {
-                    onDelete(record, namespace)
-                } label: {
-                    Image(systemName: "trash")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.red)
-                        .frame(width: 22, height: 22)
-                }
-                .buttonStyle(.plain)
-                .disabled(!isClientConnected)
-                .help(isClientConnected
-                      ? "Delete this key from the device"
-                      : "Connect a device to delete")
-            }
-            .opacity(isHovered ? 1 : 0)
-            .allowsHitTesting(isHovered)
+            Spacer(minLength: 8)
+            actions
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 4)
+        .padding(.vertical, 6)
         .background(rowBackground)
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }
         .onTapGesture {
             vm.selection = .init(namespace: namespace, recordId: record.id)
-            vm.selectedNamespace = namespace
         }
     }
 
     @ViewBuilder
-    private var valueSummary: some View {
-        if let text = record.valueText {
-            Text(text)
-        } else if record.isContainer {
-            Text(record.itemCount == 1
-                 ? "1 item"
-                 : "\(record.itemCount) items")
+    private var chevron: some View {
+        if record.isContainer {
+            Button {
+                vm.toggleExpansion(record: record, in: namespace)
+            } label: {
+                Image(systemName: "chevron.right")
+                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 14, height: 14)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
         } else {
-            Text("")
+            // Reserve the same gutter so scalar / container rows align.
+            Color.clear.frame(width: 14, height: 14)
         }
+    }
+
+    private var summaryLine: String {
+        if let valueText = record.valueText {
+            return valueText
+        }
+        if record.isContainer {
+            return record.itemCount == 1 ? "1 item" : "\(record.itemCount) items"
+        }
+        return ""
+    }
+
+    @ViewBuilder
+    private var actions: some View {
+        HStack(spacing: 4) {
+            Button(action: { copyNamespaceContents() }) {
+                Image(systemName: "doc.on.doc")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 22, height: 22)
+            }
+            .buttonStyle(.plain)
+            .help(record.isContainer
+                  ? "Copy all keys inside as JSON"
+                  : "Copy this value")
+
+            if record.isContainer {
+                Button {
+                    onAddInside(record, namespace)
+                } label: {
+                    Image(systemName: "plus.circle")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 22, height: 22)
+                }
+                .buttonStyle(.plain)
+                .disabled(!isClientConnected)
+                .help(isClientConnected
+                      ? "Add a key inside \(record.key)"
+                      : "Connect a device to add a key")
+            } else {
+                Button {
+                    onEdit(record, namespace)
+                } label: {
+                    Image(systemName: "pencil")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 22, height: 22)
+                }
+                .buttonStyle(.plain)
+                .disabled(!isClientConnected)
+                .help(isClientConnected
+                      ? "Edit this value on the device"
+                      : "Connect a device to edit")
+            }
+
+            Button(role: .destructive) {
+                onDelete(record, namespace)
+            } label: {
+                Image(systemName: "trash")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.red)
+                    .frame(width: 22, height: 22)
+            }
+            .buttonStyle(.plain)
+            .disabled(!isClientConnected)
+            .help(isClientConnected
+                  ? "Delete this top-level key"
+                  : "Connect a device to delete")
+        }
+        .opacity(isHovered ? 1 : 0.55)
     }
 
     @ViewBuilder
@@ -530,6 +698,88 @@ private struct StorageOutlineRow: View {
         } else {
             Color.clear
         }
+    }
+
+    private func copyNamespaceContents() {
+        let payload = StorageRecord.serializeJSON(record)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(payload, forType: .string)
+    }
+
+    private func copyValue(of child: StorageRecord) {
+        let payload: String
+        switch child.kind {
+        case .string(let s): payload = s
+        case .number(let n): payload = n
+        case .bool(let b):   payload = b ? "true" : "false"
+        case .null:          payload = "null"
+        case .object, .array:
+            payload = StorageRecord.serializeJSON(child)
+        }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(payload, forType: .string)
+    }
+}
+
+// MARK: - Inner key/value row (one level inside a namespace)
+
+private struct InnerKeyRow: View {
+    let namespace: StorageSnapshot.Namespace
+    let parent: StorageRecord
+    let child: StorageRecord
+    let isClientConnected: Bool
+    let onCopy: () -> Void
+    let onDelete: () -> Void
+
+    @State private var isHovered = false
+
+    var body: some View {
+        HStack(spacing: 6) {
+            // Indent past the parent's chevron gutter.
+            Color.clear.frame(width: 30)
+
+            JSONSyntax.row(
+                key: child.key,
+                isArrayIndex: child.key.looksLikeJSONArrayIndex,
+                kind: child.kind
+            )
+            .font(.system(.caption, design: .monospaced))
+            .textSelection(.enabled)
+            .lineLimit(1)
+            .truncationMode(.tail)
+
+            Spacer(minLength: 6)
+
+            HStack(spacing: 4) {
+                Button(action: onCopy) {
+                    Image(systemName: "doc.on.doc")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 20, height: 20)
+                }
+                .buttonStyle(.plain)
+                .help("Copy this value")
+
+                Button(role: .destructive, action: onDelete) {
+                    Image(systemName: "trash")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.red)
+                        .frame(width: 20, height: 20)
+                }
+                .buttonStyle(.plain)
+                .disabled(!isClientConnected)
+                .help(isClientConnected
+                      ? "Delete this key inside \(parent.key)"
+                      : "Connect a device to delete")
+            }
+            .opacity(isHovered ? 1 : 0)
+            .allowsHitTesting(isHovered)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 3)
+        .background(isHovered ? Color.secondary.opacity(0.06) : Color.clear)
+        .contentShape(Rectangle())
+        .onHover { isHovered = $0 }
     }
 }
 
@@ -768,12 +1018,23 @@ private struct EditStorageValueSheet: View {
     }
 }
 
-/// Sheet for adding a brand-new key. Namespace defaults to whichever
-/// chip is currently selected so the common flow ("add a key here")
-/// is one click.
+/// Sheet for adding a new key. Operates in two modes:
+///
+/// • Top-level (`initialParent == nil`): user picks a layer and a
+///   key/value. The SDK creates a brand-new namespace if needed.
+/// • Add-inside (`initialParent == "applicaster.v2"`): namespace +
+///   layer are locked and shown as a header; the user only types
+///   the inner key + value. The SDK puts the new pair inside that
+///   parent namespace via its 3rd-arg subscope.
+///
+/// The save callback receives (namespace, parent, key, value); the
+/// parent is `nil` for top-level adds and the parent key for
+/// add-inside adds. The caller hands those straight to
+/// `vm.setValue(in:parent:key:value:via:)`.
 private struct AddStorageKeySheet: View {
     let initialNamespace: StorageSnapshot.Namespace
-    let onSave: (StorageSnapshot.Namespace, String, String) -> Void
+    let initialParent: String?
+    let onSave: (StorageSnapshot.Namespace, String?, String, String) -> Void
     let onCancel: () -> Void
 
     @State private var namespace: StorageSnapshot.Namespace = .local
@@ -784,25 +1045,59 @@ private struct AddStorageKeySheet: View {
         !key.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
+    private var isInside: Bool { initialParent != nil }
+
+    private var commandPreview: String {
+        var cmd = "storage.\(namespace.wireKey).set \(key) \(value)"
+        if let parent = initialParent, !parent.isEmpty {
+            cmd += " \(parent)"
+        }
+        return cmd
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Add key").font(.headline)
+            Text(isInside ? "Add key inside \(initialParent!)" : "Add key")
+                .font(.headline)
 
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Namespace").font(.caption).foregroundStyle(.secondary)
-                Picker("Namespace", selection: $namespace) {
-                    ForEach(StorageSnapshot.Namespace.allCases, id: \.self) { ns in
-                        Text(ns.displayName).tag(ns)
-                    }
+            if isInside {
+                // Add-inside mode: namespace + parent are fixed.
+                HStack(spacing: 8) {
+                    Text(namespace.displayName.uppercased())
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill(Color.secondary.opacity(0.15))
+                        )
+                    Text("·").foregroundStyle(.secondary)
+                    Text(initialParent ?? "")
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                    Spacer()
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
+            } else {
+                // Top-level mode: user picks the layer.
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Namespace").font(.caption).foregroundStyle(.secondary)
+                    Picker("Namespace", selection: $namespace) {
+                        ForEach(StorageSnapshot.Namespace.allCases, id: \.self) { ns in
+                            Text(ns.displayName).tag(ns)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                }
             }
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("Key").font(.caption).foregroundStyle(.secondary)
-                TextField("e.g. featureFlag.premium", text: $key)
-                    .textFieldStyle(.roundedBorder)
+                TextField(
+                    isInside ? "e.g. premium" : "e.g. featureFlag.premium",
+                    text: $key
+                )
+                .textFieldStyle(.roundedBorder)
             }
 
             VStack(alignment: .leading, spacing: 6) {
@@ -811,9 +1106,9 @@ private struct AddStorageKeySheet: View {
                     .textFieldStyle(.roundedBorder)
             }
 
-            // Live preview of the command we'll send so the power
-            // user knows exactly what's about to fly over the wire.
-            Text("Sends: storage.\(namespace.wireKey).set \(key) \(value)")
+            // Live preview of the exact command we'll send so the
+            // power user can sanity-check before pressing Save.
+            Text("Sends: \(commandPreview)")
                 .font(.system(.caption2, design: .monospaced))
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
@@ -824,7 +1119,12 @@ private struct AddStorageKeySheet: View {
                 Button("Cancel", role: .cancel, action: onCancel)
                     .keyboardShortcut(.cancelAction)
                 Button("Save") {
-                    onSave(namespace, key.trimmingCharacters(in: .whitespaces), value)
+                    onSave(
+                        namespace,
+                        initialParent,
+                        key.trimmingCharacters(in: .whitespaces),
+                        value
+                    )
                 }
                 .keyboardShortcut(.defaultAction)
                 .disabled(!canSave)

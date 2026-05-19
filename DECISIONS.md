@@ -1127,3 +1127,89 @@ renders the selected key's value tree.
 
 The wire protocol is unchanged. Edit/Delete still pipe through
 `storage.<wireKey>.set / .delete` (D28).
+
+---
+
+## D30. Storages — tabs back + expandable namespaces
+
+**Status:** Accepted (2026-05-19), revises D29
+
+**Decision.** Restructure the Storages screen one more time:
+
+1. **Layer tabs at the top** (Session / Local / Keychain), back the
+   way they were in the old Logger app. One layer is visible at a
+   time. This restores the original mental model where the chip
+   colour tells you instantly what storage you're looking at.
+2. **One namespace per row** in the layer's outline. Each row is
+   expandable: click the chevron to reveal its inner `key: value`
+   children inline. The detail pane on the right still drives full
+   recursive browsing for arbitrarily nested values.
+3. **Per-row actions, two flavours:**
+   - **Namespace (container) row**: `[copy-all-as-JSON]`
+     `[add-key-inside]` `[trash]` — copy serializes the whole
+     subtree, add-inside opens the sheet with parent pre-filled,
+     trash removes the entire namespace.
+   - **Namespace (scalar) row**: `[copy-value]` `[pencil-edit]`
+     `[trash]` — same as before (D28).
+   - **Inner key row**: `[copy-value]` `[trash]` — copies the
+     child's literal value (or its JSON subtree), trash deletes
+     just that one key from inside the parent namespace.
+
+**Why.** Pure response to user feedback after living with D29 for an
+afternoon: *"Session/Local/Keychain should go to tabs like was
+before. Namespaces (`applicaster.v2`, `continue-watching`, etc.)
+must be expandable with items inside."* The D29 all-three-at-once
+outline was useful for power users debugging cross-layer state but
+got in the way of the common case — *"show me my flags in the local
+namespace and let me flip one."*
+
+**Why expandable inner rows (and not just the detail pane)?** Two
+clicks vs. one. With one click on the chevron the user can see
+*every* key/value inside the namespace at a glance — no need to
+click into each one to inspect. The detail pane is still there for
+nested-JSON browsing, but the common "I just want to see my five
+feature flags" case is one click.
+
+**Wire protocol.** Unchanged from D28. The SDK's
+`storage.<wireKey>.set/delete` already accepts an optional 3rd-arg
+subscope, which is exactly what "the parent namespace" means in
+this UI. So `[add-key-inside]` on `applicaster.v2` builds
+`storage.local.set premium true applicaster.v2`. We just hand the
+parent key to `vm.setValue(in:parent:key:value:via:)`.
+
+**Implications.**
+- `StoragesViewModel`:
+  - Restored `selectedNamespace` as the active layer tab.
+  - Added `expandedRecordKeys: Set<String>` keyed by
+    `"<wireKey>:<recordId>"` so expand state survives tab
+    switches without leaking across layers.
+  - `setValue` and `deleteValue` gained an optional
+    `parent: String?` parameter — appended as the SDK's 3rd-arg
+    subscope when non-nil.
+- `StoragesView`:
+  - `StoragesTopBar` restored `NamespaceTab` chip row.
+  - `StoragesOutline` rewritten to show only the current layer's
+    top-level records, with four callbacks (edit, delete,
+    add-inside, delete-inside).
+  - New `NamespaceRow` view (top-level key + actions + expanded
+    inline children) + `InnerKeyRow` view (one-level child with
+    hover-revealed copy/delete).
+  - `AddStorageKeySheet` now takes `initialParent: String?` and
+    runs in two modes: "Add key" (parent = nil, user picks layer)
+    or "Add key inside &lt;parent&gt;" (parent + layer locked,
+    user types key + value only).
+  - New `pendingInnerDelete: InnerDeleteTarget?` state +
+    confirmation dialog for inner-row deletes.
+- D29's `NamespaceSection` + `StorageOutlineRow` views deleted
+  (no longer used).
+
+**Trade-offs.**
+- We lose D29's "see all three layers at once" affordance. The
+  three-tab pattern means a power user looking for a key across
+  layers has to switch tabs. Considered acceptable because the
+  search filter still spans the current tab, and the new design
+  optimises for the common case (working inside one layer) over
+  the rare one.
+- Expand state lives in the VM, not on disk. So which namespaces
+  are expanded resets on app relaunch. Acceptable until anyone
+  complains.

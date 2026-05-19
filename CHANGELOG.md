@@ -15,14 +15,22 @@ When releasing:
 ## [Unreleased]
 
 ### Changed
-- **Storages tab redesigned as an outline view (D29).** All three
-  namespaces (Session / Local / Keychain) now show as collapsible
-  sections in a single list instead of the old tab-style chip row.
-  Each row has hover-revealed Edit + Delete buttons; the detail
-  pane on the right shows the selected key's value. You can collapse
-  the sections you're not using to keep the view focused.
+- **Storages tab restructured (D30 — revises D29).** Session /
+  Local / Keychain are back as **tabs at the top** (one layer
+  visible at a time). Inside each tab, every **namespace**
+  (`applicaster.v2`, `continue-watching`, etc.) is now an
+  **expandable row**: click the chevron to see its inner
+  `key: value` pairs inline. Per-row icons follow the structure:
+  namespace rows have **copy-all-as-JSON / add-key-inside / trash**;
+  inner key rows have **copy-value / trash**. The right-side detail
+  pane still drives full recursive browsing for nested values.
 
 ### Added
+- **Add / delete keys inside a namespace.** The "+" button on a
+  namespace row opens the Add-key sheet with the parent
+  pre-filled; the trash button on an inner row deletes just that
+  one key. Both use the SDK's existing 3rd-arg subscope on
+  `storage.<wireKey>.set/delete`, no protocol changes.
 - **Storage edit / delete / add (D6).** The Storages detail pane now
   has Edit and Delete buttons for top-level keys, plus an "Add key"
   button in the top bar. Hits the SDK's existing
