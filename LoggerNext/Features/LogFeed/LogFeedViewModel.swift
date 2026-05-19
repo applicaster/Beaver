@@ -18,14 +18,19 @@ final class LogFeedViewModel {
     var filter: Filter = .none {
         didSet {
             guard oldValue != filter else { return }
-            // Clear stale references that the upcoming reload might
-            // invalidate. SwiftUI Table on macOS occasionally throws
-            // "Index out of range" when the data is replaced while
-            // a selection points at a row about to disappear (the
-            // internal NSTableView indexes a now-empty array during
-            // the transition). Resetting up front avoids the race.
+            // SwiftUI Table on macOS Tahoe occasionally panics
+            // (`NSRangeException: range field {N, -M}`) inside
+            // NSTableView's row-height diff when the underlying
+            // data goes from one large set to another large but
+            // different set in a single update. Walking through an
+            // empty intermediate state turns one buggy "M → N diff"
+            // into two safe "M → 0 deletes" + "0 → N inserts" passes.
+            //
+            // Also clear stale references that the reload would
+            // invalidate (selection / match cursor).
             selectedEventId = nil
             currentMatchIndex = nil
+            page = []
             requestReload()
             scheduleMatchRecompute()
         }
