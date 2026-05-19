@@ -19,7 +19,6 @@ struct MainWindow: View {
     @State private var showingBookmarks = false
     @State private var bookmarksSnapshot: [BookmarkedEvent] = []
     @State private var showingTimeJump = false
-    @State private var jumpTarget: Date = Date()
 
     enum Tab: Hashable {
         case logFeed
@@ -188,22 +187,20 @@ struct MainWindow: View {
         }
         ToolbarItem(placement: .primaryAction) {
             Button {
-                jumpTarget = Date()
                 showingTimeJump = true
             } label: {
                 ToolbarButtonLabel(systemImage: "clock.arrow.circlepath",
                                    title: "Jump To Time")
             }
             .buttonStyle(.plain)
-            .help("Scroll to the event closest to a specific time")
+            .help("Scroll to the event closest to a typed time (HH:MM:SS[.mmm])")
             .disabled(!hasEvents)
             .popover(isPresented: $showingTimeJump, arrowEdge: .bottom) {
-                JumpToTimePopover(target: $jumpTarget) {
-                    let when = jumpTarget
+                JumpToTimePopover { date in
                     showingTimeJump = false
                     NotificationCenter.default.post(
                         name: .loggerNextJumpToTime,
-                        object: when
+                        object: date
                     )
                 }
             }
@@ -504,46 +501,106 @@ private struct BookmarksPopover: View {
 
 // MARK: - Jump-to-Time popover
 
-/// Tiny popover with a DatePicker scoped to time of day. The user
-/// picks a moment, hits Jump, and the active LogFeedViewModel
-/// scrolls to the event whose timestamp is closest (D27).
-///
-/// Picker uses the current date as a base — for sessions that span
-/// midnight the user can still enter the correct calendar day via
-/// the full date picker style. Most debug sessions are same-day,
-/// so we open with the "now" seed which the user typically just
-/// adjusts the HH:MM:SS on.
+/// Tiny popover with a typed time field. The user enters a time of
+/// day like `14:13:42` or `14:13:42.565` (milliseconds optional but
+/// honored when present), hits Jump, and the active
+/// LogFeedViewModel scrolls to the event whose timestamp is closest.
+/// Date is implicitly "today" — works fine for live debugging, the
+/// common case. See D27.
 private struct JumpToTimePopover: View {
-    @Binding var target: Date
-    let onJump: () -> Void
+    let onJump: (Date) -> Void
+
+    @State private var input: String = ""
+    @State private var parseError: String? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Jump to time")
-                .font(.headline)
-            Text("Scrolls to the event with the closest timestamp. Respects the active filter.")
+            Text("Jump to time").font(.headline)
+            Text("Enter HH:MM:SS or HH:MM:SS.mmm. Today's date is assumed. Respects the active filter.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            DatePicker(
-                "Target time",
-                selection: $target,
-                displayedComponents: [.date, .hourAndMinute]
-            )
-            .datePickerStyle(.field)
-            .labelsHidden()
+            VStack(alignment: .leading, spacing: 6) {
+                TextField("14:13:42 or 14:13:42.565", text: $input)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.body, design: .monospaced))
+                    .onSubmit(submit)
+                    .onChange(of: input) { _, _ in parseError = nil }
+                if let parseError {
+                    Text(parseError)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+            }
 
             HStack {
-                Button("Now") { target = Date() }
-                    .help("Reset to the current time")
+                Button("Now") { input = JumpToTimePopover.formatNow() }
+                    .help("Insert the current time of day")
                 Spacer()
-                Button("Jump") { onJump() }
+                Button("Jump", action: submit)
                     .keyboardShortcut(.defaultAction)
+                    .disabled(input.trimmingCharacters(in: .whitespaces).isEmpty)
             }
         }
         .padding(16)
-        .frame(width: 320)
+        .frame(width: 340)
+        .onAppear {
+            if input.isEmpty { input = JumpToTimePopover.formatNow() }
+        }
+    }
+
+    private func submit() {
+        let raw = input.trimmingCharacters(in: .whitespaces)
+        guard let date = JumpToTimePopover.parse(raw) else {
+            parseError = "Couldn't parse \"\(raw)\". Use HH:MM:SS or HH:MM:SS.mmm."
+            return
+        }
+        parseError = nil
+        onJump(date)
+    }
+
+    // MARK: - Parsing
+
+    /// Parse `HH:MM`, `HH:MM:SS`, or `HH:MM:SS.mmm` into a Date on
+    /// today. Returns nil if any field is out of range or the shape
+    /// doesn't match. Tolerates leading/trailing whitespace; the
+    /// caller already trims.
+    static func parse(_ raw: String) -> Date? {
+        // Split off the optional .ms suffix from the seconds field.
+        var seconds = 0
+        var milliseconds = 0
+        let timeAndMs = raw.split(separator: ".", maxSplits: 1, omittingEmptySubsequences: false)
+        let timePart = String(timeAndMs[0])
+        if timeAndMs.count == 2 {
+            // Accept 1–4 ms digits; pad / truncate to 3 for nanos.
+            let msDigits = String(timeAndMs[1]).prefix(3).padding(toLength: 3, withPad: "0", startingAt: 0)
+            guard let m = Int(msDigits), m >= 0, m < 1000 else { return nil }
+            milliseconds = m
+        }
+
+        let pieces = timePart.split(separator: ":")
+        guard pieces.count == 2 || pieces.count == 3 else { return nil }
+        guard let h = Int(pieces[0]), h >= 0, h < 24 else { return nil }
+        guard let m = Int(pieces[1]), m >= 0, m < 60 else { return nil }
+        if pieces.count == 3 {
+            guard let s = Int(pieces[2]), s >= 0, s < 60 else { return nil }
+            seconds = s
+        }
+
+        var comps = Calendar.current.dateComponents([.year, .month, .day], from: Date())
+        comps.hour = h
+        comps.minute = m
+        comps.second = seconds
+        comps.nanosecond = milliseconds * 1_000_000
+        return Calendar.current.date(from: comps)
+    }
+
+    static func formatNow() -> String {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm:ss.SSS"
+        f.locale = .init(identifier: "en_US_POSIX")
+        return f.string(from: Date())
     }
 }
 
