@@ -755,17 +755,19 @@ private struct InnerKeyRow: View {
 
 // MARK: - Add-key sheet
 
-/// Sheet for adding a new key. Operates in two modes:
+/// Sheet for adding a new key. The storage layer (Session / Local
+/// / Keychain) is *not* picked here — it's inherited from
+/// whichever tab the user already has selected on the main
+/// screen. The sheet has two modes:
 ///
-/// • Top-level (`initialParent == nil`): user picks a storage
-///   layer, types a key + value, and may *optionally* type a
-///   namespace (subscope). If the namespace field is empty, the
-///   SDK writes the pair at the layer's root; if filled, the
-///   pair lands inside that subscope (creating it if it doesn't
-///   already exist).
-/// • Add-inside (`initialParent == "applicaster.v2"`): layer +
-///   namespace are pre-filled and locked. The user only types
-///   the inner key + value.
+/// • Top-level (`initialParent == nil`): the user types a key +
+///   value and may *optionally* type a namespace (subscope). If
+///   the namespace field is empty, the SDK writes the pair at the
+///   layer's root; if filled, the pair lands inside that subscope
+///   (creating it if it doesn't already exist).
+/// • Add-inside (`initialParent == "applicaster.v2"`): the
+///   namespace is pre-filled and locked. The user only types the
+///   inner key + value.
 ///
 /// The save callback receives (layer, namespace, key, value); the
 /// namespace is `nil` if the optional field was empty. The caller
@@ -777,7 +779,6 @@ private struct AddStorageKeySheet: View {
     let onSave: (StorageSnapshot.Namespace, String?, String, String) -> Void
     let onCancel: () -> Void
 
-    @State private var namespace: StorageSnapshot.Namespace = .local
     @State private var key: String = ""
     @State private var value: String = ""
     /// User-typed subscope for top-level mode. Trimmed and folded
@@ -800,50 +801,56 @@ private struct AddStorageKeySheet: View {
     }
 
     private var commandPreview: String {
-        var cmd = "storage.\(namespace.wireKey).set \(key) \(value)"
+        var cmd = "storage.\(initialNamespace.wireKey).set \(key) \(value)"
         if let parent = resolvedParent {
             cmd += " \(parent)"
         }
         return cmd
     }
 
+    /// Colour cue per storage layer — matches the NamespaceTab
+    /// chips on the main screen so the sheet feels anchored to
+    /// the tab the user clicked Add-key from.
+    private var layerColor: Color {
+        switch initialNamespace {
+        case .session:  .blue
+        case .local:    .purple
+        case .keychain: .green
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text(isInside ? "Add key inside \(initialParent!)" : "Add key")
-                .font(.headline)
+            // Title + a small chip naming the active layer (read-only).
+            // Removes the segmented picker since the user already
+            // chose a layer by clicking its tab on the main screen.
+            HStack(spacing: 10) {
+                Text(isInside ? "Add key inside \(initialParent!)" : "Add key")
+                    .font(.headline)
+                Spacer()
+                Text(initialNamespace.displayName.uppercased())
+                    .font(.caption.weight(.semibold))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .foregroundStyle(layerColor)
+                    .background(
+                        Capsule()
+                            .fill(layerColor.opacity(0.12))
+                    )
+                    .overlay(
+                        Capsule()
+                            .strokeBorder(layerColor.opacity(0.45), lineWidth: 1)
+                    )
+                    .help("Adding to the \(initialNamespace.displayName) storage. To use a different storage, close this sheet and switch tabs.")
+            }
 
             if isInside {
-                // Add-inside mode: layer + namespace are fixed.
-                HStack(spacing: 8) {
-                    Text(namespace.displayName.uppercased())
-                        .font(.caption.weight(.semibold))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(
-                            RoundedRectangle(cornerRadius: 4)
-                                .fill(Color.secondary.opacity(0.15))
-                        )
-                    Text("·").foregroundStyle(.secondary)
+                // Add-inside mode: namespace is fixed.
+                HStack(spacing: 6) {
+                    Text("Namespace").font(.caption).foregroundStyle(.secondary)
                     Text(initialParent ?? "")
                         .font(.caption.monospaced())
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                }
-            } else {
-                // Top-level mode: user picks the storage layer.
-                // Labeled "Storages" (matches the tab row at the
-                // top of the main screen) so the word "Namespace"
-                // can be reserved for the optional subscope field
-                // below.
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Storages").font(.caption).foregroundStyle(.secondary)
-                    Picker("Storages", selection: $namespace) {
-                        ForEach(StorageSnapshot.Namespace.allCases, id: \.self) { ns in
-                            Text(ns.displayName).tag(ns)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
+                        .foregroundStyle(.primary)
                 }
             }
 
@@ -895,7 +902,7 @@ private struct AddStorageKeySheet: View {
                     .keyboardShortcut(.cancelAction)
                 Button("Save") {
                     onSave(
-                        namespace,
+                        initialNamespace,
                         resolvedParent,
                         key.trimmingCharacters(in: .whitespaces),
                         value
@@ -907,6 +914,5 @@ private struct AddStorageKeySheet: View {
         }
         .padding(20)
         .frame(width: 460)
-        .onAppear { namespace = initialNamespace }
     }
 }
