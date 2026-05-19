@@ -69,6 +69,17 @@ jobs:
     steps:
       - checkout
 
+      # ── Install the GitHub CLI — needed for release-exists check
+      #    and for publishing the release at the end. CircleCI macOS
+      #    images don't ship `gh` by default.
+      - run:
+          name: Install gh (GitHub CLI)
+          command: |
+            if ! command -v gh >/dev/null 2>&1; then
+              brew install gh
+            fi
+            gh --version
+
       # ── Read current MARKETING_VERSION from the pbxproj ─────────────
       - run:
           name: Resolve version
@@ -86,13 +97,20 @@ jobs:
       - run:
           name: Skip if release already exists
           command: |
-            # gh ships pre-installed on CircleCI macOS images. Auth via
-            # GITHUB_TOKEN env var (gh picks it up automatically).
-            if gh release view "${BEAVER_VERSION}" --repo applicaster/Beaver \
-                 >/dev/null 2>&1; then
+            # gh auth is GITHUB_TOKEN-based (env var picked up
+            # automatically). We separate "release exists" from "gh
+            # errored" by checking the exit code explicitly — otherwise
+            # a transient gh failure would look like "release missing"
+            # and trigger a duplicate publish attempt.
+            if gh release view "${BEAVER_VERSION}" \
+                 --repo applicaster/Beaver >/dev/null 2>&1; then
               echo "✅ Release ${BEAVER_VERSION} already exists. Halting."
               circleci-agent step halt
             fi
+            # Distinguish "not found" (expected) from "auth error"
+            # (must fail). A second call with --json forces gh to
+            # actually contact GitHub; auth failures surface here.
+            gh api /repos/applicaster/Beaver >/dev/null
             echo "Release ${BEAVER_VERSION} not found — proceeding."
 
       # ── Set up an ephemeral keychain with the Developer ID cert ─────
