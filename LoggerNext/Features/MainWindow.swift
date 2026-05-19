@@ -68,6 +68,27 @@ struct MainWindow: View {
             // first appearance.
             await env.refreshViewingEventCount()
         }
+        // Background bookmark subscription. Listens to
+        // .bookmarksChanged broadcasts for the active session and
+        // keeps `bookmarksSnapshot` continuously fresh, so the
+        // popover always shows current data — even if the popover
+        // was opened while the toggle's write was still in flight.
+        // Lifetime tied to MainWindow; one subscription per window.
+        .task {
+            let stream = await env.store.changes()
+            for await change in stream {
+                if case .bookmarksChanged(let sid) = change,
+                   sid == env.viewingSessionId {
+                    await refreshBookmarks()
+                }
+            }
+        }
+        // Initial fetch when the viewing session changes — covers
+        // the case where you switch to a session that already has
+        // bookmarks, before any new .bookmarksChanged fires.
+        .task(id: env.viewingSessionId) {
+            await refreshBookmarks()
+        }
         // Keep the per-session VMs in sync with the active session.
         // Fires on first appearance and whenever the user switches
         // sessions — but NOT on tab switches, because the task id
@@ -298,19 +319,39 @@ struct MainWindow: View {
         }
     }
 
-    private func prepareBookmarks() async {
+    /// Refresh `bookmarksSnapshot` from disk WITHOUT touching the
+    /// popover-presented flag. Used by both the toolbar button path
+    /// (where we then flip `showingBookmarks = true`) and the
+    /// background subscription that listens for `.bookmarksChanged`
+    /// broadcasts.
+    ///
+    /// Splitting the two responsibilities is what fixes the
+    /// "first-bookmark-not-shown" bug: previously a single
+    /// `prepareBookmarks` did both the read AND the present. When
+    /// the user toggled a bookmark and clicked the toolbar button
+    /// fast, the toolbar's read raced the write Task — got empty —
+    /// and the popover opened with stale data. With a background
+    /// subscription continuously updating the snapshot, the popover
+    /// always reflects the latest persisted state regardless of
+    /// scheduling order. SwiftUI re-renders the popover when
+    /// bookmarksSnapshot changes, so even a popover that opened on
+    /// stale data updates in place.
+    private func refreshBookmarks() async {
         guard let sid = env.viewingSessionId else {
-            print("[Bookmarks] prepare: no viewing session")
+            bookmarksSnapshot = []
             return
         }
         do {
             let bms = try await env.store.bookmarks(sessionId: sid)
-            print("[Bookmarks] prepare(viewingSession=\(sid)) -> \(bms.count)")
             bookmarksSnapshot = bms
         } catch {
-            print("[Bookmarks] prepare ERROR: \(error)")
+            print("[Bookmarks] refresh ERROR: \(error)")
             bookmarksSnapshot = []
         }
+    }
+
+    private func prepareBookmarks() async {
+        await refreshBookmarks()
         showingBookmarks = true
     }
 
