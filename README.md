@@ -66,25 +66,41 @@ and **manual from your Mac** (fallback when CI is unavailable).
 ### Automated (CircleCI on merge to main)
 
 `.circleci/config.yml` runs the full release pipeline on every push
-to `main`. It's idempotent — if the `MARKETING_VERSION` in the
-`pbxproj` already has a GitHub Release, the job halts cleanly.
-Otherwise it builds → signs → notarizes → tags → publishes.
+to `main`. CI decides the next version from the commit messages
+since the last tag (Conventional Commits–style), bumps the pbxproj,
+builds, signs, notarizes, tags, publishes, and updates the Sparkle
+appcast. **No local version bump needed.**
+
+**Commit-message convention (D23):**
+
+| Prefix on any commit since last tag | Bump | 1.0.3 becomes |
+|---|---|---|
+| `release:`         | major | 2.0.0 |
+| `feat:`            | minor | 1.1.0 |
+| (anything else, e.g. `fix:`, `chore:`) | patch | 1.0.4 |
+
+Highest-impact prefix in the range wins. A PR with one `feat:` and
+three `fix:` commits → minor bump.
 
 **Per-release workflow:**
 
 ```bash
-# 1. Move CHANGELOG.md items from [Unreleased] under a new section.
-$EDITOR CHANGELOG.md
+# 1. Make your changes. Commit with the right prefix.
+git commit -m "feat: saved filter presets"
+# or:  fix: typo in level menu
+# or:  release: drop macOS 14 support
 
-# 2. Bump the version (commits + tags locally).
-make bump VERSION=1.1.0
+# 2. (Optional) Add a CHANGELOG note under [Unreleased].
+#    CI extracts this as the GitHub Release body if present.
 
 # 3. Push.
-git push && git push --tags
+git push
 ```
 
-CircleCI does the rest in ~5 min. The release will appear at
-`https://github.com/applicaster/Beaver/releases/tag/1.1.0`.
+CircleCI does the rest in ~5-7 min. The release appears at
+`https://github.com/applicaster/Beaver/releases/latest`, and the
+Sparkle appcast picks it up so installed Beaver instances see the
+update on their next launch.
 
 **Required CircleCI environment variables** (set once under Project
 Settings → Environment Variables): `APPLE_ID`, `APPLE_APP_PASSWORD`,

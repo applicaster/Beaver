@@ -82,15 +82,16 @@ jobs:
 
       # ── Read current MARKETING_VERSION from the pbxproj ─────────────
       - run:
-          name: Resolve version
+          name: Compute next version from commit messages
           command: |
-            VERSION=$(grep -m1 'MARKETING_VERSION = ' \
-              LoggerNext.xcodeproj/project.pbxproj \
-              | sed 's/.*= //; s/;//' | tr -d '[:space:]')
+            # Convention (see DECISIONS.md D23):
+            #   release: → MAJOR  •  feat: → MINOR  •  anything else → PATCH
+            # Highest-impact prefix in commits since the last tag wins.
+            VERSION="$(./scripts/compute-next-version.sh --verbose)"
             if [ -z "$VERSION" ]; then
-              echo "❌ Could not read MARKETING_VERSION from pbxproj"; exit 1
+              echo "❌ compute-next-version.sh returned empty"; exit 1
             fi
-            echo "Building Beaver ${VERSION}"
+            echo "Releasing Beaver ${VERSION}"
             echo "export BEAVER_VERSION=${VERSION}" >> "$BASH_ENV"
 
       # ── Idempotency: skip if this version already has a Release ─────
@@ -144,6 +145,40 @@ jobs:
             rm -f /tmp/cert.p12
             security find-identity -v -p codesigning
 
+      # ── Apply the version bump to the pbxproj ───────────────────────
+      #
+      # MARKETING_VERSION feeds CFBundleShortVersionString in the .app's
+      # Info.plist (visible to users + Sparkle). CURRENT_PROJECT_VERSION
+      # feeds CFBundleVersion (the monotonic build number Sparkle uses
+      # to order updates). Both get bumped here so the build picks them
+      # up. The bump is committed after make release succeeds — that
+      # way a failed build doesn't leave behind an unreleased bump.
+      - run:
+          name: Apply version bump to pbxproj
+          command: |
+            set -euo pipefail
+            PBXPROJ="LoggerNext.xcodeproj/project.pbxproj"
+
+            # Skip if pbxproj already at the target version (manual
+            # bump path — compute-next-version.sh detected it).
+            CURRENT_MARKETING="$(grep -m1 'MARKETING_VERSION = ' "$PBXPROJ" \
+                | sed 's/.*= //; s/;//' | tr -d '[:space:]')"
+            if [ "$CURRENT_MARKETING" = "$BEAVER_VERSION" ]; then
+              echo "ℹ️  pbxproj already at ${BEAVER_VERSION}. Skipping bump."
+              exit 0
+            fi
+
+            echo "▸ Bumping MARKETING_VERSION ${CURRENT_MARKETING} → ${BEAVER_VERSION}"
+            sed -i.bak "s/MARKETING_VERSION = [0-9.]*;/MARKETING_VERSION = ${BEAVER_VERSION};/g" "$PBXPROJ"
+
+            CURRENT_BUILD="$(grep -m1 'CURRENT_PROJECT_VERSION = ' "$PBXPROJ" \
+                | sed 's/.*= //; s/;//' | tr -d '[:space:]')"
+            NEW_BUILD="$((CURRENT_BUILD + 1))"
+            echo "▸ Bumping CURRENT_PROJECT_VERSION ${CURRENT_BUILD} → ${NEW_BUILD}"
+            sed -i.bak "s/CURRENT_PROJECT_VERSION = ${CURRENT_BUILD};/CURRENT_PROJECT_VERSION = ${NEW_BUILD};/g" "$PBXPROJ"
+
+            rm -f "${PBXPROJ}.bak"
+
       # ── Build, sign, notarize, zip ──────────────────────────────────
       - run:
           name: make release
@@ -153,31 +188,51 @@ jobs:
           command: make release
           no_output_timeout: 15m
 
-      # ── Tag the commit, push the tag, publish the Release ──────────
+      # ── Commit the version bump, tag, push both, then publish ──────
       - run:
-          name: Tag + publish GitHub Release
+          name: Commit bump + tag + push + publish GitHub Release
           command: |
             set -euo pipefail
             git config user.name  "CircleCI"
             git config user.email "ci@applicaster.com"
 
-            # Tag the commit if not already tagged.
-            if ! git rev-parse "${BEAVER_VERSION}" >/dev/null 2>&1; then
-              git tag -a "${BEAVER_VERSION}" -m "Beaver ${BEAVER_VERSION}"
-              git push origin "${BEAVER_VERSION}"
+            REMOTE="https://x-access-token:${GITHUB_TOKEN}@github.com/applicaster/Beaver.git"
+            PBXPROJ="LoggerNext.xcodeproj/project.pbxproj"
+
+            # 1. Commit the pbxproj bump if the file is dirty.
+            if ! git diff --quiet "$PBXPROJ"; then
+              git add "$PBXPROJ"
+              git commit -m "version ${BEAVER_VERSION} [skip ci]"
+              git push "$REMOTE" HEAD:main
+            else
+              echo "ℹ️  pbxproj clean — no bump commit to push."
             fi
 
-            # Extract the [Unreleased] section from CHANGELOG.md as
-            # release notes. Falls back to a generic message.
-            NOTES=$(awk '
-              /^## \[Unreleased\]/   { capturing = 1; next }
-              /^## /                 { capturing = 0 }
+            # 2. Tag the (now possibly bump-) commit if not already tagged.
+            if ! git rev-parse "${BEAVER_VERSION}" >/dev/null 2>&1; then
+              git tag -a "${BEAVER_VERSION}" -m "Beaver ${BEAVER_VERSION}"
+              git push "$REMOTE" "${BEAVER_VERSION}"
+            fi
+
+            # 3. Extract release notes — try a versioned section first
+            #    (## [X.Y.Z]), fall back to [Unreleased].
+            NOTES=$(awk -v ver="${BEAVER_VERSION}" '
+              $0 ~ "^## \\[" ver "\\]"   { capturing = 1; next }
+              capturing && /^## /        { capturing = 0 }
               capturing
             ' CHANGELOG.md | sed '/./,$!d')
+            if [ -z "${NOTES}" ]; then
+              NOTES=$(awk '
+                /^## \[Unreleased\]/   { capturing = 1; next }
+                /^## /                 { capturing = 0 }
+                capturing
+              ' CHANGELOG.md | sed '/./,$!d')
+            fi
             if [ -z "${NOTES}" ]; then
               NOTES="Auto-released from $(git rev-parse --short HEAD)."
             fi
 
+            # 4. Publish the GitHub Release with the notarized zip.
             gh release create "${BEAVER_VERSION}" \
               "build/Beaver-${BEAVER_VERSION}.zip" \
               --title "Beaver ${BEAVER_VERSION}" \
@@ -204,8 +259,6 @@ jobs:
             git config user.email "ci@applicaster.com"
             git add docs/appcast.xml
             git commit -m "appcast: Beaver ${BEAVER_VERSION} [skip ci]"
-            # Use the GITHUB_TOKEN to push back over HTTPS without
-            # needing an SSH key on the runner.
             git push "https://x-access-token:${GITHUB_TOKEN}@github.com/applicaster/Beaver.git" \
                 HEAD:main
 

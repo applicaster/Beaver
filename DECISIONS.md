@@ -789,3 +789,73 @@ rebrand is implemented as:
 - If we ever do want a full rename (e.g., to fully decouple from the
   old Logger trademark), the path is documented here and is a
   one-time migration project rather than something to do reactively.
+
+---
+
+## D23. CI decides the version from commit messages
+
+**Status:** Accepted (2026-05-19)
+
+**Decision.** Stop bumping `MARKETING_VERSION` locally. Every push to
+`main` triggers CI, which scans the commit messages since the last
+release tag and computes the next version:
+
+| Prefix on any commit in the range  | Bump | 1.0.3 →   |
+|------------------------------------|------|-----------|
+| `release:` (or `release(scope):`)  | major | 2.0.0    |
+| `feat:`    (or `feat(scope):`)     | minor | 1.1.0    |
+| anything else (`fix:`, `chore:`, …) | patch | 1.0.4   |
+
+Highest-impact prefix wins. CI then bumps the pbxproj, runs
+`make release`, commits the bump with `[skip ci]` so it doesn't
+re-trigger the workflow, tags the commit, publishes the GitHub
+Release, and appends a signed `<item>` to the Sparkle appcast.
+
+The escape hatch — `make bump VERSION=X.Y.Z` followed by a push —
+still works: `scripts/compute-next-version.sh` detects that the
+pbxproj is already ahead of the last tag and respects the manual
+value rather than auto-bumping past it.
+
+**Why.**
+- Removes "did you remember to bump?" friction. The only thing
+  contributors do is commit + push. Everything else is automated.
+- Conventional Commits is the broadest convention in the ecosystem —
+  almost every engineer already recognises `feat:` / `fix:`. Adopting
+  it doesn't force learning anything new.
+- Couples version bumps to actual content. A typo fix that gets
+  merged shouldn't accidentally cut a `1.1.0` if the contributor
+  reflexively named the commit "feat" — but accepting that risk is
+  cheaper than the cost of forgetting to release at all.
+- Patch-by-default means low-churn PRs (`fix:`, `chore:`, `ci:`,
+  `docs:`) still ship as a new patch release. Combined with Sparkle,
+  every push gets to users automatically.
+
+**Alternatives considered.**
+- *Tag-triggered releases.* CI runs only on `git push --tags`. Cleaner
+  semantically but reintroduces the "I forgot to bump" problem and
+  makes hot-fix releases require local CLI steps.
+- *Manual version field in PR template.* Cleaner intent capture, but
+  requires every contributor to think about semver explicitly — the
+  whole point is to avoid that.
+- *No automation — keep `make ship` as the canonical path.* What we
+  had until D23. Works fine for a small team where one person ships
+  everything; doesn't scale.
+
+**Implications.**
+- New script `scripts/compute-next-version.sh` — pure function from
+  the git history + pbxproj to a version string. Importable into the
+  CI config or runnable from a developer's Mac for "what would the
+  next release be?" forecasting.
+- `.circleci/config.yml` adds a "Compute next version" step before
+  the existing "Skip if release already exists" idempotency gate, and
+  a "Apply version bump to pbxproj" step right before `make release`.
+- The bump commit lives on `main`, not on a release branch. It has
+  `[skip ci]` in the message; CircleCI honours that to avoid an
+  infinite re-trigger loop.
+- `make bump` and `make ship` remain — they're now emergency tooling
+  for the day CI is down or someone needs to cut an out-of-band patch
+  without going through main. Documented as the escape hatch in the
+  README.
+- Branch protection on `main`, if ever enabled, must allow the
+  `GITHUB_TOKEN` to push. Otherwise CI's bump commit + appcast push
+  will fail.
