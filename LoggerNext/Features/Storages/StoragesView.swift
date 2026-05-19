@@ -94,6 +94,11 @@ private struct StoragesContent: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // Context strip pulled from the SDK's applicaster.v2
+            // metadata: "Miami Heat 11.0.1 · iPhone 15 Pro Max ·
+            // iOS 26.4.2". Only renders when there's data.
+            StoragesContextHeader(context: vm.appContext)
+
             StoragesTopBar(
                 vm: vm,
                 onExport: { Task { await prepareExport() } },
@@ -235,6 +240,104 @@ private struct StoragesContent: View {
         guard let data = vm.exportAllAsJSON() else { return }
         exportDocument = JSONExportDocument(data: data)
         showingExporter = true
+    }
+}
+
+// MARK: - Context header
+
+/// Slim "what am I looking at" strip at the top of the Storages
+/// view. Reads from `vm.appContext`, which pulls from the SDK's
+/// applicaster.v2 metadata namespace. Renders as
+///
+///   📱 Miami Heat 11.0.1   ·   iPhone 15 Pro Max   ·   iOS 26.4.2
+///
+/// and disappears entirely (Group of EmptyView) when no metadata
+/// is available so non-Applicaster apps don't see a stub strip.
+private struct StoragesContextHeader: View {
+    let context: StoragesViewModel.AppContext?
+
+    var body: some View {
+        if let ctx = context, ctx.isNonEmpty {
+            HStack(spacing: 10) {
+                Image(systemName: "iphone")
+                    .foregroundStyle(.secondary)
+                    .font(.system(size: 13))
+
+                // App name + version
+                if let name = ctx.appName {
+                    HStack(spacing: 6) {
+                        Text(name)
+                            .fontWeight(.semibold)
+                        if let v = ctx.appVersion {
+                            Text(v)
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                        }
+                    }
+                }
+
+                if ctx.appName != nil && ctx.deviceModel != nil {
+                    bullet
+                }
+
+                // Device model
+                if let device = ctx.deviceModel {
+                    Text(device)
+                        .foregroundStyle(.secondary)
+                }
+
+                if ctx.deviceModel != nil && ctx.osVersion != nil {
+                    bullet
+                }
+
+                // Platform + OS version
+                if let os = ctx.osVersion {
+                    HStack(spacing: 4) {
+                        if let p = ctx.platform {
+                            Text(p).foregroundStyle(.secondary)
+                        }
+                        Text(os)
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+                }
+
+                Spacer()
+            }
+            .font(.caption)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity)
+            .background(.bar)
+            // Whole strip is right-click copyable so the user can
+            // paste the device fingerprint into a bug report in
+            // one move.
+            .contextMenu {
+                Button("Copy device fingerprint") {
+                    copyFingerprint()
+                }
+            }
+        }
+    }
+
+    private var bullet: some View {
+        Text("·")
+            .foregroundStyle(.tertiary)
+    }
+
+    private func copyFingerprint() {
+        guard let ctx = context else { return }
+        var parts: [String] = []
+        if let n = ctx.appName {
+            parts.append(n + (ctx.appVersion.map { " \($0)" } ?? ""))
+        }
+        if let d = ctx.deviceModel { parts.append(d) }
+        if let os = ctx.osVersion {
+            parts.append((ctx.platform ?? "OS") + " " + os)
+        }
+        let joined = parts.joined(separator: " · ")
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(joined, forType: .string)
     }
 }
 
@@ -563,6 +666,29 @@ private struct NamespaceRow: View {
                 vm.toggleExpansion(record: record, in: namespace)
             }
         }
+        // Right-click: power-user shortcuts. The toolbar copy
+        // icon copies the *contents*; this menu surfaces the
+        // less-common "I just want the key name" path.
+        .contextMenu {
+            Button {
+                copyKeyName()
+            } label: {
+                Label("Copy name", systemImage: "textformat")
+            }
+            if record.isContainer {
+                Button {
+                    copyNamespaceContents()
+                } label: {
+                    Label("Copy as JSON", systemImage: "curlybraces")
+                }
+            } else {
+                Button {
+                    copyScalarValue()
+                } label: {
+                    Label("Copy value", systemImage: "doc.on.doc")
+                }
+            }
+        }
     }
 
     @ViewBuilder
@@ -679,6 +805,31 @@ private struct NamespaceRow: View {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(payload, forType: .string)
     }
+
+    /// Just the namespace's key text — `"applicaster.v2"`, no
+    /// surrounding JSON. Used by the right-click "Copy name" menu
+    /// so the user can paste the namespace name into a query, a
+    /// bug report, an SDK command, etc.
+    private func copyKeyName() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(record.key, forType: .string)
+    }
+
+    /// Raw scalar payload (no JSON quoting). Mirrors `copyValue` but
+    /// for the namespace row itself when it happens to be a scalar.
+    private func copyScalarValue() {
+        let payload: String
+        switch record.kind {
+        case .string(let s): payload = s
+        case .number(let n): payload = n
+        case .bool(let b):   payload = b ? "true" : "false"
+        case .null:          payload = "null"
+        case .object, .array:
+            payload = StorageRecord.serializeJSON(record)
+        }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(payload, forType: .string)
+    }
 }
 
 // MARK: - Inner key/value row (one level inside a namespace)
@@ -782,6 +933,46 @@ private struct InnerKeyRow: View {
         .background(rowBackground)
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }
+        // Right-click → copy options. Mirrors NamespaceRow's
+        // pattern so the muscle memory is the same on both levels.
+        .contextMenu {
+            Button {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(child.key, forType: .string)
+            } label: {
+                Label("Copy key name", systemImage: "textformat")
+            }
+            Button(action: onCopy) {
+                Label("Copy value", systemImage: "doc.on.doc")
+            }
+            Button {
+                copyKeyValueLine()
+            } label: {
+                Label("Copy \"key\": value", systemImage: "text.alignleft")
+            }
+        }
+    }
+
+    /// Pastes a single line ready to drop into JSON or a config:
+    ///   `"foo": "bar"`. Convenient for "show me this key from
+    /// the device" Slack messages.
+    private func copyKeyValueLine() {
+        let valuePart: String
+        switch child.kind {
+        case .string(let s):
+            let escaped = s
+                .replacingOccurrences(of: "\\", with: "\\\\")
+                .replacingOccurrences(of: "\"", with: "\\\"")
+            valuePart = "\"\(escaped)\""
+        case .number(let n): valuePart = n
+        case .bool(let b):   valuePart = b ? "true" : "false"
+        case .null:          valuePart = "null"
+        case .object, .array:
+            valuePart = StorageRecord.serializeJSON(child)
+        }
+        let line = "\"\(child.key)\": \(valuePart)"
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(line, forType: .string)
     }
 
     /// Hover wins over zebra (hover band needs to be visible);

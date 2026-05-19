@@ -135,6 +135,72 @@ final class StoragesViewModel {
         !snapshots.isEmpty
     }
 
+    /// Snapshot of "what device + app am I looking at" pulled from
+    /// the SDK's well-known metadata namespace. Surfaced as a slim
+    /// header at the top of the Storages view so the user can tell
+    /// at a glance which build of which app is on the wire.
+    ///
+    /// All fields are optional — apps that don't write the standard
+    /// `applicaster.v2` namespace just don't get a header. Both
+    /// camelCase and snake_case variants of the device keys are
+    /// checked because the SDK has historically written both.
+    struct AppContext: Equatable, Sendable {
+        let appName: String?
+        let appVersion: String?
+        let deviceModel: String?
+        let platform: String?
+        let osVersion: String?
+
+        /// True if there's anything worth rendering — keeps the
+        /// header from showing as an empty bar when the standard
+        /// metadata namespace is missing.
+        var isNonEmpty: Bool {
+            appName != nil || deviceModel != nil ||
+                platform != nil || osVersion != nil
+        }
+    }
+
+    var appContext: AppContext? {
+        // Live SDK convention: `applicaster.v2` lives in session
+        // storage. If a future SDK moves it, fall back to local or
+        // keychain so we still show *something*.
+        let order: [StorageSnapshot.Namespace] = [.session, .local, .keychain]
+        for layer in order {
+            if let ctx = appContext(in: layer), ctx.isNonEmpty {
+                return ctx
+            }
+        }
+        return nil
+    }
+
+    private func appContext(in layer: StorageSnapshot.Namespace) -> AppContext? {
+        guard let snap = snapshots[layer] else { return nil }
+        let tops = StorageRecord.parseTopLevel(snap.dataJSON)
+        guard let v2 = tops.first(where: { $0.key == "applicaster.v2" }),
+              let children = v2.children else { return nil }
+
+        // Tiny closure that resolves a key inside applicaster.v2 to
+        // its `valueText`, with multi-key fallback for the device
+        // family (camelCase + snake_case).
+        func value(_ keys: String...) -> String? {
+            for k in keys {
+                if let v = children.first(where: { $0.key == k })?.valueText,
+                   !v.isEmpty {
+                    return v
+                }
+            }
+            return nil
+        }
+
+        return AppContext(
+            appName:     value("app_name"),
+            appVersion:  value("version_name"),
+            deviceModel: value("deviceModel", "device_model", "deviceName"),
+            platform:    value("platform"),
+            osVersion:   value("osVersion")
+        )
+    }
+
     // MARK: - Actions
 
     /// Send `storage.list` to the device. The response will come back
