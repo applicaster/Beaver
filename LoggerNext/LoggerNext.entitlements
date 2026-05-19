@@ -2,13 +2,23 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>com.apple.security.app-sandbox</key>
-	<true/>
-	<key>com.apple.security.network.server</key>
-	<true/>
-	<key>com.apple.security.network.client</key>
-	<true/>
-	<key>com.apple.security.files.user-selected.read-write</key>
-	<true/>
+    <!--
+      Beaver is a developer tool — it intentionally runs OUTSIDE the
+      App Sandbox so it can:
+
+      * Bind a TCP socket on port 9080 for incoming SDK connections
+        (the sandbox network.server entitlement works, but combined
+        with Sparkle's installer XPC the sandbox needs additional
+        mach-lookup exceptions that aren't worth the complexity)
+      * Let Sparkle launch its installer subprocess to apply updates
+        — Sparkle 2's XPC services can't bring themselves up under
+        a sandboxed parent without exception entitlements
+      * Read/write the user-selected files from Import / Export
+        without going through the security-scoped resource dance
+
+      Hardened runtime is still ON (set via ENABLE_HARDENED_RUNTIME
+      in the pbxproj), which is what notarization actually requires.
+      Sandbox is orthogonal to notarization.
+    -->
 </dict>
 </plist>
