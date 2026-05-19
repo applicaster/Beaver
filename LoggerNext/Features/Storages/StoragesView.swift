@@ -437,22 +437,10 @@ private struct StoragesOutline: View {
     @ViewBuilder
     private var emptyState: some View {
         let trimmed = vm.searchTerm.trimmingCharacters(in: .whitespaces)
-        let message: String
-        if !trimmed.isEmpty {
-            message = "No keys or values match \"\(trimmed)\"."
-        } else if env.currentSessionId == vm.sessionId {
-            // Live session, no snapshot yet → user can fetch.
-            message = "No \(vm.selectedNamespace.displayName.lowercased()) data. Click Reload to fetch from the device."
-        } else {
-            // Past session with no captured snapshot for this
-            // layer. Reload won't do anything (the device that
-            // recorded this session is gone), so don't promise it.
-            message = "No \(vm.selectedNamespace.displayName.lowercased()) data was captured during this session."
-        }
         ContentUnavailableView(
             "Nothing to show",
             systemImage: trimmed.isEmpty ? "tray" : "magnifyingglass",
-            description: Text(message)
+            description: Text(emptyStateMessage(searchTerm: trimmed))
         )
         // Parent LazyVStack uses `.leading` alignment which would
         // pin this content to the left. `.frame(maxWidth: .infinity)`
@@ -460,6 +448,24 @@ private struct StoragesOutline: View {
         // assumes.
         .frame(maxWidth: .infinity)
         .padding(.top, 32)
+    }
+
+    /// Pure string-returning helper so the ViewBuilder above stays
+    /// happy — SwiftUI's `@ViewBuilder` doesn't accept if/else
+    /// statements that assign to a `var`. Branches between three
+    /// cases:
+    ///   • non-empty search term → "no matches"
+    ///   • live session, no data → "click Reload"
+    ///   • past session, no data → "wasn't captured during this session"
+    private func emptyStateMessage(searchTerm trimmed: String) -> String {
+        if !trimmed.isEmpty {
+            return "No keys or values match \"\(trimmed)\"."
+        }
+        let layer = vm.selectedNamespace.displayName.lowercased()
+        if env.currentSessionId == vm.sessionId {
+            return "No \(layer) data. Click Reload to fetch from the device."
+        }
+        return "No \(layer) data was captured during this session."
     }
 }
 
