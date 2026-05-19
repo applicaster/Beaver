@@ -15,10 +15,14 @@ struct LoggerNextApp: App {
     /// runs the periodic appcast check, and presents the system
     /// "Update Available" dialog. Lives for the entire app lifetime.
     ///
-    /// The appcast URL and Ed25519 public key are configured in
-    /// build settings (`INFOPLIST_KEY_SUFeedURL` /
-    /// `INFOPLIST_KEY_SUPublicEDKey`) — see DECISIONS.md D22.
+    /// Public key is set via `INFOPLIST_KEY_SUPublicEDKey` build
+    /// setting. Feed URL is set programmatically via `updaterDelegate`
+    /// — Xcode's GENERATE_INFOPLIST_FILE doesn't reliably propagate
+    /// third-party `INFOPLIST_KEY_*` settings into the built plist,
+    /// so we provide the URL via SPUUpdaterDelegate.feedURLString(for:)
+    /// instead. See DECISIONS.md D22.
     private let updaterController: SPUStandardUpdaterController
+    private let updaterDelegate = BeaverUpdaterDelegate()
 
     init() {
         // Build the environment synchronously on the main actor.
@@ -39,7 +43,7 @@ struct LoggerNextApp: App {
         // item below.
         updaterController = SPUStandardUpdaterController(
             startingUpdater: true,
-            updaterDelegate: nil,
+            updaterDelegate: updaterDelegate,
             userDriverDelegate: nil
         )
 
@@ -212,6 +216,25 @@ private func ensureLiveSessionIfConnected(env: AppEnvironment) async {
     guard env.currentSessionId == nil else { return }
     if let session = try? await env.store.createSession(source: .live) {
         env.didConnectSession(session.id)
+    }
+}
+
+// MARK: - Sparkle updater delegate
+
+/// Provides the Sparkle appcast URL at runtime. We do this in code
+/// rather than via `INFOPLIST_KEY_SUFeedURL` because Xcode's
+/// GENERATE_INFOPLIST_FILE silently drops third-party plist keys
+/// from the build settings → built Info.plist pipeline. The Ed25519
+/// public key (`INFOPLIST_KEY_SUPublicEDKey`) IS reliably preserved
+/// because Sparkle reads it via a documented path, but the URL needs
+/// this delegate hook.
+///
+/// One source of truth, baked into the binary. If we ever need to
+/// move the appcast (e.g., off GitHub Pages), bump this string and
+/// ship a new version.
+private final class BeaverUpdaterDelegate: NSObject, SPUUpdaterDelegate {
+    func feedURLString(for updater: SPUUpdater) -> String? {
+        "https://applicaster.github.io/Beaver/appcast.xml"
     }
 }
 
