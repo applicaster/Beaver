@@ -59,7 +59,11 @@ final class SessionsViewModel {
                 guard let self else { return }
                 switch change {
                 case .sessionStarted, .sessionEnded,
-                     .sessionDeleted, .sessionsCleared:
+                     .sessionDeleted, .sessionsCleared,
+                     .sessionUpdated:
+                    // sessionUpdated covers device-info backfills
+                    // (see LogStore.harvestDeviceInfo) — refreshing
+                    // the list picks up the new app / device labels.
                     await self.reload()
                 case .appended, .cleared:
                     // Counts change; refresh in a debounced way later.
@@ -133,5 +137,27 @@ struct SessionListItem: Identifiable, Hashable {
         case .imported:
             return "doc.text"
         }
+    }
+
+    /// Optional inline "app name + version" used on the top line of
+    /// the row when the session has device fingerprint data
+    /// captured (see Schema.v3_session_device_info). Returns nil
+    /// for older sessions and imports that never logged an
+    /// `applicaster.v2` snapshot so the row falls back to the
+    /// existing date/label layout.
+    var appLabel: String? {
+        guard let name = session.appName else { return nil }
+        if let v = session.appVersion { return "\(name) \(v)" }
+        return name
+    }
+
+    /// Optional second muted subtitle line: device + OS.
+    var deviceLabel: String? {
+        var parts: [String] = []
+        if let d = session.deviceModel { parts.append(d) }
+        if let os = session.osVersion {
+            parts.append((session.platform ?? "OS") + " " + os)
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 }

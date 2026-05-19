@@ -443,7 +443,7 @@ private struct ToolbarDeviceBadge: View {
     }
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 8) {
             Image(systemName: "iphone.gen3")
                 .font(.system(size: 14))
                 .foregroundStyle(.secondary)
@@ -459,9 +459,18 @@ private struct ToolbarDeviceBadge: View {
                     .truncationMode(.tail)
             }
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 2)
-        .contentShape(Rectangle())
+        // Matches ConnectionIndicator's padding so the two
+        // toolbar clouds read as siblings.
+        .padding(.horizontal, 14)
+        .padding(.vertical, 5)
+        .background(
+            Capsule().fill(.bar)
+        )
+        .overlay(
+            Capsule()
+                .strokeBorder(Color.secondary.opacity(0.18), lineWidth: 1)
+        )
+        .contentShape(Capsule())
         .help(fingerprint)
         .contextMenu {
             Button("Copy device fingerprint") {
@@ -567,12 +576,25 @@ private struct ConnectionIndicator: View {
     let state: WSServer.State
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 8) {
             Circle()
                 .fill(color)
                 .frame(width: 8, height: 8)
             Text(label).font(.caption)
         }
+        // Extra inner padding so the pill reads as a proper
+        // capsule chip rather than text-with-a-dot. Matches the
+        // padding on ToolbarDeviceBadge so the two clouds at the
+        // leading and principal ends look like siblings.
+        .padding(.horizontal, 14)
+        .padding(.vertical, 5)
+        .background(
+            Capsule().fill(.bar)
+        )
+        .overlay(
+            Capsule()
+                .strokeBorder(Color.secondary.opacity(0.18), lineWidth: 1)
+        )
     }
 
     private var color: Color {

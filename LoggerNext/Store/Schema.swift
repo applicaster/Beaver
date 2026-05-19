@@ -138,6 +138,36 @@ enum Schema {
             """)
         }
 
+        migrator.registerMigration("v3_session_device_info") { db in
+            // Capture the connected device's identity on the session
+            // row itself so past sessions remember which app / device /
+            // OS they came from — surfaced both in the toolbar badge
+            // when re-opening an old session and in the SessionsView
+            // list rows.
+            //
+            // Pulled from the SDK's applicaster.v2 storage namespace
+            // the first time it arrives for a session. Plain TEXT
+            // columns (not a JSON blob) so future queries can group
+            // by deviceModel etc. without a JSON1 dance. All
+            // nullable: imported sessions and SDKs that don't write
+            // applicaster.v2 just leave them blank.
+            try db.execute(sql: """
+                ALTER TABLE session ADD COLUMN app_name      TEXT;
+            """)
+            try db.execute(sql: """
+                ALTER TABLE session ADD COLUMN app_version   TEXT;
+            """)
+            try db.execute(sql: """
+                ALTER TABLE session ADD COLUMN device_model  TEXT;
+            """)
+            try db.execute(sql: """
+                ALTER TABLE session ADD COLUMN platform      TEXT;
+            """)
+            try db.execute(sql: """
+                ALTER TABLE session ADD COLUMN os_version    TEXT;
+            """)
+        }
+
         return migrator
     }
 }

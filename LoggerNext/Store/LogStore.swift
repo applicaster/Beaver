@@ -20,6 +20,11 @@ public actor LogStore {
         case sessionStarted(Session)
         case sessionEnded(Session)
         case sessionDeleted(id: Int64)
+        /// Emitted when a session's *metadata* changes
+        /// (currently just the device-info fields populated from
+        /// applicaster.v2). Lets SessionsViewModel rebuild its
+        /// rows without having to subscribe to storageUpdated.
+        case sessionUpdated(Session)
         case sessionsCleared
         case storageUpdated(sessionId: Int64, namespace: StorageSnapshot.Namespace)
         case bookmarksChanged(sessionId: Int64)
@@ -158,6 +163,52 @@ public actor LogStore {
         let session = Session(id: id, startedAt: now, source: source, clientLabel: clientLabel)
         broadcast(.sessionStarted(session))
         return session
+    }
+
+    /// Record the connected device + app fingerprint on the session
+    /// row. Called the first time the SDK's `applicaster.v2` storage
+    /// namespace arrives for a session — see
+    /// `LogStore.applyStorageSnapshot` and the V3 schema migration.
+    ///
+    /// Only updates columns whose new value is non-nil so a later
+    /// snapshot that omits a field doesn't blow away earlier data.
+    /// Idempotent: re-calling with the same values is a no-op as
+    /// far as broadcasts are concerned, but we still do the UPDATE
+    /// for simplicity.
+    public func setSessionDeviceInfo(
+        id: Int64,
+        appName: String?,
+        appVersion: String?,
+        deviceModel: String?,
+        platform: String?,
+        osVersion: String?
+    ) async throws {
+        let updated: Session? = try await dbQueue.write { db in
+            try db.execute(
+                sql: """
+                    UPDATE session SET
+                        app_name     = COALESCE(?, app_name),
+                        app_version  = COALESCE(?, app_version),
+                        device_model = COALESCE(?, device_model),
+                        platform     = COALESCE(?, platform),
+                        os_version   = COALESCE(?, os_version)
+                    WHERE id = ?
+                """,
+                arguments: [
+                    appName, appVersion, deviceModel, platform, osVersion, id,
+                ]
+            )
+            return try Self.fetchSession(id: id, db: db)
+        }
+        if let updated {
+            // Use sessionEnded(…) broadcast? No — that has different
+            // semantics. The sessions list refreshes off
+            // `.sessionStarted` / `.sessionEnded` / `.sessionDeleted`
+            // / `.appended`. Device info doesn't fit any of those
+            // cleanly, so we piggyback on `.sessionUpdated` (added
+            // alongside this method).
+            broadcast(.sessionUpdated(updated))
+        }
     }
 
     public func endSession(_ id: Int64) async throws {
@@ -685,6 +736,45 @@ public actor LogStore {
             )
         }
         broadcast(.storageUpdated(sessionId: sessionId, namespace: namespace))
+
+        // Opportunistically harvest device + app metadata out of the
+        // session-storage snapshot. The SDK writes a well-known
+        // `applicaster.v2` namespace with app_name / version_name /
+        // deviceModel / platform / osVersion, etc. — see
+        // Schema.v3_session_device_info. Cheap parse; bails fast if
+        // the substring isn't even there.
+        if namespace == .session, dataJSON.contains("\"applicaster.v2\"") {
+            await harvestDeviceInfo(sessionId: sessionId, dataJSON: dataJSON)
+        }
+    }
+
+    /// Parse `applicaster.v2` out of the just-written snapshot and
+    /// patch the session row with the device fingerprint. Errors
+    /// here are non-fatal — the snapshot is already saved; the
+    /// session just won't have its device columns filled until the
+    /// next snapshot arrives.
+    private func harvestDeviceInfo(sessionId: Int64, dataJSON: String) async {
+        guard let data = dataJSON.data(using: .utf8),
+              let top = try? JSONSerialization.jsonObject(with: data)
+                            as? [String: Any],
+              let v2  = top["applicaster.v2"] as? [String: Any]
+        else { return }
+
+        func str(_ keys: String...) -> String? {
+            for k in keys {
+                if let v = v2[k] as? String, !v.isEmpty { return v }
+            }
+            return nil
+        }
+
+        try? await setSessionDeviceInfo(
+            id: sessionId,
+            appName:     str("app_name"),
+            appVersion:  str("version_name"),
+            deviceModel: str("deviceModel", "device_model", "deviceName"),
+            platform:    str("platform"),
+            osVersion:   str("osVersion")
+        )
     }
 
     public func latestStorageSnapshot(
@@ -709,13 +799,17 @@ public actor LogStore {
 
     // MARK: - Helpers
 
+    /// Shared SELECT list — kept in one place so the device-info
+    /// columns added in v3 are picked up everywhere.
+    private static let sessionColumns = """
+        id, started_at, ended_at, source, client_label,
+        app_name, app_version, device_model, platform, os_version
+    """
+
     private static func fetchSession(id: Int64, db: Database) throws -> Session? {
         try Row.fetchOne(
             db,
-            sql: """
-                SELECT id, started_at, ended_at, source, client_label
-                FROM session WHERE id = ?
-            """,
+            sql: "SELECT \(sessionColumns) FROM session WHERE id = ?",
             arguments: [id]
         ).map(makeSession)
     }
@@ -724,7 +818,7 @@ public actor LogStore {
         try Row.fetchAll(
             db,
             sql: """
-                SELECT id, started_at, ended_at, source, client_label
+                SELECT \(sessionColumns)
                 FROM session
                 ORDER BY started_at DESC
             """
@@ -742,7 +836,12 @@ public actor LogStore {
             startedAt: startedAt,
             endedAt: endedAt,
             source: Session.Source(rawValue: sourceRaw) ?? .live,
-            clientLabel: row["client_label"]
+            clientLabel: row["client_label"],
+            appName:     row["app_name"],
+            appVersion:  row["app_version"],
+            deviceModel: row["device_model"],
+            platform:    row["platform"],
+            osVersion:   row["os_version"]
         )
     }
 

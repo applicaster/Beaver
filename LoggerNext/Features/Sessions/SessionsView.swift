@@ -220,10 +220,24 @@ private struct SessionRow: View {
                             .padding(.vertical, 1)
                             .background(Capsule().fill(Color.green))
                     }
+                    if let app = item.appLabel {
+                        Text("·").foregroundStyle(.tertiary)
+                        Text(app)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                 }
                 Text(item.subtitle)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                if let device = item.deviceLabel {
+                    Text(device)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
             }
 
             Spacer(minLength: 8)
