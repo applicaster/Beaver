@@ -61,10 +61,14 @@ struct LoggerNextApp: App {
             CommandGroup(after: .appInfo) {
                 CheckForUpdatesView(updater: updaterController.updater)
                 Button("Copy WebSocket Address") {
-                    // Copy just `host:port` (no ws:// scheme).
-                    let address = "\(NetworkInterface.bestAddress() ?? "localhost"):9080"
+                    // Full ws://<ip>:9080 URL — matches the toolbar
+                    // "Copy IP" button. Both forms (with / without
+                    // scheme) work in the SDK; the prefixed form is
+                    // more directly pasteable.
+                    let host = NetworkInterface.bestAddress() ?? "localhost"
+                    let url = "ws://\(host):9080"
                     NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(address, forType: .string)
+                    NSPasteboard.general.setString(url, forType: .string)
                 }
                 .keyboardShortcut("c", modifiers: [.command, .shift])
             }

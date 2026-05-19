@@ -240,11 +240,14 @@ struct MainWindow: View {
     // MARK: - Toolbar actions
 
     private func copyWebSocketURL() {
-        // Copy just `host:port` (no ws:// scheme) — the mobile SDK
-        // wants the bare endpoint.
-        let address = "\(NetworkInterface.bestAddress() ?? "localhost"):9080"
+        // Copy the full ws://<ip>:9080 URL. The mobile SDK accepts
+        // both forms, but the prefixed form is what users paste into
+        // browser address bars / SDK init code, so it's the more
+        // useful default.
+        let host = NetworkInterface.bestAddress() ?? "localhost"
+        let url = "ws://\(host):9080"
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(address, forType: .string)
+        NSPasteboard.general.setString(url, forType: .string)
     }
 
     private func clearEvents() async {
