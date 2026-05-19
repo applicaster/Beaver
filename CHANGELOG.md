@@ -14,6 +14,11 @@ When releasing:
 ## [Unreleased]
 
 ### Added
+- **Auto-update via Sparkle 2.** Beaver now checks for updates on
+  launch and once per day, plus an explicit "Check for Updates…"
+  item in the Beaver menu. Updates are Ed25519-signed; only releases
+  built by Applicaster's CI are accepted by installed copies.
+  Appcast: https://applicaster.github.io/Beaver/appcast.xml
 - Hover-revealed red trash button on each Sessions row.
 - Footer "Delete all sessions…" (red) with confirmation dialog.
 - Right-click context menu on Sessions rows: Open in Log feed / Delete session.

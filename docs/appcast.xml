@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Sparkle appcast for Beaver. Lives on the gh-pages branch (or under
+  /docs on main; see DECISIONS.md D22) at:
+
+      https://applicaster.github.io/Beaver/appcast.xml
+
+  Sparkle in installed Beaver instances polls this URL once per
+  startup (and again every 24h) to discover available updates.
+
+  Each release adds one <item> to this file. The CI release job runs
+  Sparkle's `sign_update` on the produced .zip, captures the Ed25519
+  signature, and appends a fresh <item> here automatically — see
+  scripts/release.sh.
+
+  Seed state: empty. The first 1.0.0 release is on GitHub Releases
+  but is not in the appcast (was published before Sparkle landed),
+  so users on 1.0.0 will need to do one manual upgrade to get the
+  auto-update channel. From 1.1.0 onward, updates are automatic.
+-->
+<rss version="2.0"
+     xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle"
+     xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel>
+    <title>Beaver Releases</title>
+    <link>https://github.com/applicaster/Beaver/releases</link>
+    <description>Auto-update feed for the Beaver macOS app.</description>
+    <language>en</language>
+
+    <!--
+      ITEMS GET INSERTED ABOVE THIS COMMENT BY scripts/release.sh.
+      Newest item first. Example shape:
+
+      <item>
+        <title>Version 1.1.0</title>
+        <pubDate>Mon, 19 May 2026 12:00:00 +0000</pubDate>
+        <sparkle:version>2</sparkle:version>
+        <sparkle:shortVersionString>1.1.0</sparkle:shortVersionString>
+        <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+        <enclosure
+          url="https://github.com/applicaster/Beaver/releases/download/1.1.0/Beaver-1.1.0.zip"
+          sparkle:edSignature="<ed25519-sig-from-sign_update>"
+          length="<bytes-of-the-zip>"
+          type="application/octet-stream" />
+      </item>
+    -->
+  </channel>
+</rss>

@@ -3,12 +3,22 @@
 //  LoggerNext
 //
 
+import Sparkle
 import SwiftUI
 
 @main
 struct LoggerNextApp: App {
 
     @State private var env: AppEnvironment
+
+    /// Sparkle's standard controller — owns the updater process,
+    /// runs the periodic appcast check, and presents the system
+    /// "Update Available" dialog. Lives for the entire app lifetime.
+    ///
+    /// The appcast URL and Ed25519 public key are configured in
+    /// build settings (`INFOPLIST_KEY_SUFeedURL` /
+    /// `INFOPLIST_KEY_SUPublicEDKey`) — see DECISIONS.md D22.
+    private let updaterController: SPUStandardUpdaterController
 
     init() {
         // Build the environment synchronously on the main actor.
@@ -21,6 +31,17 @@ struct LoggerNextApp: App {
         }
         let server = WSServer(port: 9080)
         _env = State(initialValue: AppEnvironment(store: store, server: server))
+
+        // Sparkle: `startingUpdater: true` schedules the first
+        // appcast check shortly after launch. Subsequent checks run
+        // on Sparkle's default 24-hour interval; users can also
+        // trigger one manually via the "Check for Updates…" menu
+        // item below.
+        updaterController = SPUStandardUpdaterController(
+            startingUpdater: true,
+            updaterDelegate: nil,
+            userDriverDelegate: nil
+        )
 
         // Start the server and wire up the inbound pipeline.
         Task { [env = _env.wrappedValue] in
@@ -38,6 +59,7 @@ struct LoggerNextApp: App {
         .commands {
             CommandGroup(replacing: .newItem) { /* disable new window */ }
             CommandGroup(after: .appInfo) {
+                CheckForUpdatesView(updater: updaterController.updater)
                 Button("Copy WebSocket Address") {
                     // Copy just `host:port` (no ws:// scheme).
                     let address = "\(NetworkInterface.bestAddress() ?? "localhost"):9080"
