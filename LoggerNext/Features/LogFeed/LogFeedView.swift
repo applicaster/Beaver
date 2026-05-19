@@ -692,13 +692,23 @@ private struct LogFeedTable: View {
             // that's a one-shot user action).
             .onChange(of: vm.page.last?.id) { _, newLastId in
                 guard let newLastId else { return }
-                proxy.scrollTo(newLastId, anchor: .bottom)
+                // Defer one runloop so SwiftUI Table finishes
+                // committing the new `page` before we ask its
+                // internal NSTableView to scroll. Without this defer,
+                // applying a filter that replaces the whole page can
+                // panic with "Index out of range" when scrollTo races
+                // the data update.
+                DispatchQueue.main.async {
+                    proxy.scrollTo(newLastId, anchor: .bottom)
+                }
             }
             // Resuming from paused should snap to the latest row.
             // Same instant-scroll reasoning.
             .onChange(of: vm.isPaused) { _, paused in
                 guard !paused, let lastId = vm.page.last?.id else { return }
-                proxy.scrollTo(lastId, anchor: .bottom)
+                DispatchQueue.main.async {
+                    proxy.scrollTo(lastId, anchor: .bottom)
+                }
             }
             // Jump-to-match: when the view model signals a scroll
             // target (via Up/Down on the match navigator), center the

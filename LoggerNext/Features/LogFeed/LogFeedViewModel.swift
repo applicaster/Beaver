@@ -17,6 +17,15 @@ final class LogFeedViewModel {
 
     var filter: Filter = .none {
         didSet {
+            guard oldValue != filter else { return }
+            // Clear stale references that the upcoming reload might
+            // invalidate. SwiftUI Table on macOS occasionally throws
+            // "Index out of range" when the data is replaced while
+            // a selection points at a row about to disappear (the
+            // internal NSTableView indexes a now-empty array during
+            // the transition). Resetting up front avoids the race.
+            selectedEventId = nil
+            currentMatchIndex = nil
             requestReload()
             scheduleMatchRecompute()
         }
