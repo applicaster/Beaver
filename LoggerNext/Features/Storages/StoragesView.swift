@@ -757,16 +757,19 @@ private struct InnerKeyRow: View {
 
 /// Sheet for adding a new key. Operates in two modes:
 ///
-/// • Top-level (`initialParent == nil`): user picks a layer and a
-///   key/value. The SDK creates a brand-new namespace if needed.
-/// • Add-inside (`initialParent == "applicaster.v2"`): namespace +
-///   layer are locked and shown as a header; the user only types
-///   the inner key + value. The SDK puts the new pair inside that
-///   parent namespace via its 3rd-arg subscope.
+/// • Top-level (`initialParent == nil`): user picks a storage
+///   layer, types a key + value, and may *optionally* type a
+///   namespace (subscope). If the namespace field is empty, the
+///   SDK writes the pair at the layer's root; if filled, the
+///   pair lands inside that subscope (creating it if it doesn't
+///   already exist).
+/// • Add-inside (`initialParent == "applicaster.v2"`): layer +
+///   namespace are pre-filled and locked. The user only types
+///   the inner key + value.
 ///
-/// The save callback receives (namespace, parent, key, value); the
-/// parent is `nil` for top-level adds and the parent key for
-/// add-inside adds. The caller hands those straight to
+/// The save callback receives (layer, namespace, key, value); the
+/// namespace is `nil` if the optional field was empty. The caller
+/// hands those straight to
 /// `vm.setValue(in:parent:key:value:via:)`.
 private struct AddStorageKeySheet: View {
     let initialNamespace: StorageSnapshot.Namespace
@@ -777,6 +780,9 @@ private struct AddStorageKeySheet: View {
     @State private var namespace: StorageSnapshot.Namespace = .local
     @State private var key: String = ""
     @State private var value: String = ""
+    /// User-typed subscope for top-level mode. Trimmed and folded
+    /// to `nil` on save when empty.
+    @State private var manualParent: String = ""
 
     private var canSave: Bool {
         !key.trimmingCharacters(in: .whitespaces).isEmpty
@@ -784,9 +790,18 @@ private struct AddStorageKeySheet: View {
 
     private var isInside: Bool { initialParent != nil }
 
+    /// Active subscope considering both modes:
+    ///   • add-inside: always `initialParent`
+    ///   • top-level:  trimmed `manualParent`, nil if empty
+    private var resolvedParent: String? {
+        if let initialParent { return initialParent }
+        let trimmed = manualParent.trimmingCharacters(in: .whitespaces)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
     private var commandPreview: String {
         var cmd = "storage.\(namespace.wireKey).set \(key) \(value)"
-        if let parent = initialParent, !parent.isEmpty {
+        if let parent = resolvedParent {
             cmd += " \(parent)"
         }
         return cmd
@@ -798,7 +813,7 @@ private struct AddStorageKeySheet: View {
                 .font(.headline)
 
             if isInside {
-                // Add-inside mode: namespace + parent are fixed.
+                // Add-inside mode: layer + namespace are fixed.
                 HStack(spacing: 8) {
                     Text(namespace.displayName.uppercased())
                         .font(.caption.weight(.semibold))
@@ -815,10 +830,14 @@ private struct AddStorageKeySheet: View {
                     Spacer()
                 }
             } else {
-                // Top-level mode: user picks the layer.
+                // Top-level mode: user picks the storage layer.
+                // Labeled "Storages" (matches the tab row at the
+                // top of the main screen) so the word "Namespace"
+                // can be reserved for the optional subscope field
+                // below.
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Namespace").font(.caption).foregroundStyle(.secondary)
-                    Picker("Namespace", selection: $namespace) {
+                    Text("Storages").font(.caption).foregroundStyle(.secondary)
+                    Picker("Storages", selection: $namespace) {
                         ForEach(StorageSnapshot.Namespace.allCases, id: \.self) { ns in
                             Text(ns.displayName).tag(ns)
                         }
@@ -843,6 +862,25 @@ private struct AddStorageKeySheet: View {
                     .textFieldStyle(.roundedBorder)
             }
 
+            // Optional subscope — only shown in top-level mode.
+            // Leave blank to write at the layer's root; type a
+            // name to put the pair inside that subscope.
+            if !isInside {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 4) {
+                        Text("Namespace")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text("(optional)")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                    TextField("e.g. applicaster.v2 — leave empty for root",
+                              text: $manualParent)
+                        .textFieldStyle(.roundedBorder)
+                }
+            }
+
             // Live preview of the exact command we'll send so the
             // power user can sanity-check before pressing Save.
             Text("Sends: \(commandPreview)")
@@ -858,7 +896,7 @@ private struct AddStorageKeySheet: View {
                 Button("Save") {
                     onSave(
                         namespace,
-                        initialParent,
+                        resolvedParent,
                         key.trimmingCharacters(in: .whitespaces),
                         value
                     )
