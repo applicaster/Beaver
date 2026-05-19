@@ -1213,3 +1213,65 @@ parent key to `vm.setValue(in:parent:key:value:via:)`.
 - Expand state lives in the VM, not on disk. So which namespaces
   are expanded resets on app relaunch. Acceptable until anyone
   complains.
+
+---
+
+## D31. Storages — drop namespace-delete and right-side detail pane
+
+**Status:** Accepted (2026-05-19), follows D30
+
+**Decision.** Two simplifications, both driven by user feedback the
+same afternoon D30 landed:
+
+1. **Container (namespace) rows can no longer be deleted from the
+   UI.** Only `[copy-all-as-JSON]` and `[add-key-inside]` show on
+   namespace rows. Top-level scalar rows still get `[copy] [delete]`.
+   Inner key:value rows still get `[copy] [delete]`.
+2. **The right-side detail pane is gone.** Every value is visible
+   by expanding the namespace row inline; deeper structures are
+   surfaced via the row's copy-as-JSON button.
+
+**Why drop namespace-delete?** The Applicaster iOS SDK doesn't
+expose a "wipe a whole namespace" command. `storage.local.delete
+<key>` removes one key at a time; there's no
+`storage.local.delete-all <namespace>`. Surfacing a trash icon that
+silently fails (or that requires N round-trips to clear N keys)
+is a worse UX than not surfacing it at all. Users who really want
+to clear a namespace can do it via the inner-row trash on each
+child, one at a time — which is the SDK's actual model.
+
+**Why drop the detail pane?** Once every namespace row expands
+inline to show its `key: value` children, the detail pane is
+redundant for the 99% case. For the rare deep-nesting case
+(stringified JSON several levels deep), the namespace row's
+copy-as-JSON button still gets the full subtree into the user's
+clipboard. Removing the pane reclaims ~30% of horizontal screen
+space for the actual content.
+
+**Implications.**
+- `StoragesViewModel` loses `SelectionKey`, `selection`,
+  `selectedRecord`, and `selectedRecordNamespace`. `clearLocalCache`
+  also clears `expandedRecordKeys` so a re-imported snapshot
+  starts collapsed.
+- `StoragesView` loses `StoragesDetail`, `StorageTree`,
+  `StorageTreeRow`, and `EditStorageValueSheet` (no more edit
+  affordance; user deletes + re-adds to change a value).
+- `StoragesOutline` and `NamespaceRow` lose their `onEdit`
+  callback; only `onDelete`, `onAddInside`, and `onDeleteInside`
+  remain.
+- `EditTarget` renamed `DeleteTarget` (since edit is gone, the
+  struct only carries the row for delete confirmation).
+- The `HSplitView` is gone; the outline gets the full viewport.
+
+**Trade-offs.**
+- **No inline edit.** Changing a value now means delete + add (two
+  confirmations, two SDK calls). Acceptable because the common
+  case is "flip a feature flag" — a binary change where
+  delete+add is fine — and because keeping edit would re-introduce
+  a sheet for what the user wants to be a peek-and-poke flow.
+  If complaints come in, we can re-add edit on inner rows behind
+  a `pencil` icon without un-doing the rest of D31.
+- **No deep-tree browser.** Anything nested ≥2 levels deep (a
+  JSON object inside `applicaster.v2.someKey`) can only be
+  inspected via copy-as-JSON. Acceptable for the same reason as
+  above — the typical Logger workload is one level deep.

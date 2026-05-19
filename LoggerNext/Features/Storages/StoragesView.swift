@@ -5,11 +5,17 @@
 
 import SwiftUI
 
-/// Storages screen — three colored namespace chips (Session / Local /
-/// Keychain), a table of top-level keys, and a detail tree for the
-/// selected key. Matches the layout of the original Logger app's
-/// Storages screen, adapted to LoggerNext's session-aware data
-/// model.
+/// Storages screen — three colored layer chips (Session / Local /
+/// Keychain) at the top, then a flat list of the active layer's
+/// namespaces. Each namespace row is expandable: click the chevron
+/// (or anywhere on the row) to reveal its inner `key: value` pairs
+/// inline. No right-side detail pane — everything's visible inline,
+/// and deeper structures can be inspected via copy-as-JSON.
+///
+/// Per-row affordances (D31):
+///   • Namespace (container) row: [copy-as-JSON] [add-key-inside]
+///   • Top-level scalar row:      [copy-value]   [delete]
+///   • Inner `key: value` row:    [copy-value]   [delete]
 struct StoragesView: View {
     @Environment(AppEnvironment.self) private var env
     @State private var vm: StoragesViewModel?
@@ -65,10 +71,14 @@ private struct StoragesContent: View {
     @State private var showingExporter = false
     @State private var exportDocument: JSONExportDocument?
 
-    // Edit / add / delete sheet state. Each row in the outline owns
-    // its namespace, so we carry that along — the action sheet picks
-    // the right `storage.<ns>.set/delete` command.
-    struct EditTarget: Identifiable {
+    // Add / delete sheet state. Each row in the outline owns its
+    // namespace, so we carry that along — the action sheet picks the
+    // right `storage.<ns>.set/delete` command.
+
+    /// Top-level scalar delete — applies to a value sitting directly
+    /// in the layer (no parent subscope). SDK command:
+    /// `storage.<ns>.delete <key>`.
+    struct DeleteTarget: Identifiable {
         let record: StorageRecord
         let namespace: StorageSnapshot.Namespace
         var id: String { "\(namespace.rawValue):\(record.id)" }
@@ -77,7 +87,7 @@ private struct StoragesContent: View {
     /// Inner-row delete uses (namespace, parentKey, childKey) — we
     /// don't have a `StorageRecord` reference for these because they
     /// come straight from the row view; only the strings are needed
-    /// to build the `storage.<ns>.delete <key> <namespace>` command.
+    /// to build the `storage.<ns>.delete <key> <parentKey>` command.
     struct InnerDeleteTarget: Identifiable {
         let namespace: StorageSnapshot.Namespace
         let parentKey: String
@@ -95,8 +105,7 @@ private struct StoragesContent: View {
         var id: String { "\(namespace.rawValue):\(parentKey ?? "<root>")" }
     }
 
-    @State private var pendingEdit: EditTarget?
-    @State private var pendingDelete: EditTarget?
+    @State private var pendingDelete: DeleteTarget?
     @State private var pendingInnerDelete: InnerDeleteTarget?
     @State private var pendingAdd: AddKeyContext?
 
@@ -115,61 +124,39 @@ private struct StoragesContent: View {
             Divider()
             StoragesSearchBar(vm: vm)
             Divider()
-            HSplitView {
-                StoragesOutline(
-                    vm: vm,
-                    onEdit: { record, namespace in
-                        vm.selectedNamespace = namespace
-                        pendingEdit = EditTarget(record: record, namespace: namespace)
-                    },
-                    onDelete: { record, namespace in
-                        vm.selectedNamespace = namespace
-                        pendingDelete = EditTarget(record: record, namespace: namespace)
-                    },
-                    onAddInside: { record, namespace in
-                        vm.selectedNamespace = namespace
-                        pendingAdd = AddKeyContext(
-                            namespace: namespace,
-                            parentKey: record.key
-                        )
-                    },
-                    onDeleteInside: { namespace, parentKey, childKey in
-                        vm.selectedNamespace = namespace
-                        pendingInnerDelete = InnerDeleteTarget(
-                            namespace: namespace,
-                            parentKey: parentKey,
-                            childKey: childKey
-                        )
-                    }
-                )
-                .frame(minWidth: 400, maxWidth: .infinity, maxHeight: .infinity)
-                StoragesDetail(vm: vm)
-                    .frame(minWidth: 280, idealWidth: 360, maxHeight: .infinity)
-            }
+            // D31: no more right-side detail pane. Every value is
+            // visible by expanding the namespace row inline; deeper
+            // structures can be inspected by the row's copy-as-JSON
+            // button.
+            StoragesOutline(
+                vm: vm,
+                onDelete: { record, namespace in
+                    vm.selectedNamespace = namespace
+                    pendingDelete = DeleteTarget(record: record, namespace: namespace)
+                },
+                onAddInside: { record, namespace in
+                    vm.selectedNamespace = namespace
+                    pendingAdd = AddKeyContext(
+                        namespace: namespace,
+                        parentKey: record.key
+                    )
+                },
+                onDeleteInside: { namespace, parentKey, childKey in
+                    vm.selectedNamespace = namespace
+                    pendingInnerDelete = InnerDeleteTarget(
+                        namespace: namespace,
+                        parentKey: parentKey,
+                        childKey: childKey
+                    )
+                }
+            )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        // Edit sheet — uses the namespace from the row that triggered it.
-        .sheet(item: $pendingEdit) { target in
-            EditStorageValueSheet(
-                namespace: target.namespace,
-                key: target.record.key,
-                initialValue: target.record.valueText ?? "",
-                onSave: { newValue in
-                    vm.setValue(
-                        in: target.namespace,
-                        key: target.record.key,
-                        value: newValue,
-                        via: env.server
-                    )
-                    pendingEdit = nil
-                },
-                onCancel: { pendingEdit = nil }
-            )
-        }
-        // Top-level delete confirmation — wipes a whole namespace
-        // entry. The SDK leaves any nested subscope behind, but the
-        // outer key is gone immediately.
+        // Top-level scalar delete — removes a key sitting directly
+        // in the active layer (no subscope). Container namespace
+        // rows don't surface a delete at all (the SDK has no way to
+        // wipe a whole namespace in one call).
         .confirmationDialog(
             "Delete \"\(pendingDelete?.record.key ?? "")\" from \(pendingDelete?.namespace.displayName ?? "")?",
             isPresented: Binding(
@@ -289,7 +276,6 @@ private struct StoragesTopBar: View {
                         count: vm.recordCount(in: ns)
                     ) {
                         vm.selectedNamespace = ns
-                        vm.selection = nil
                     }
                 }
             }
@@ -391,26 +377,21 @@ private struct StoragesSearchBar: View {
     }
 }
 
-// NamespaceChip removed when the outline view (D29) replaced the
-// tab-style chip row in the top bar. Section headers in
-// `NamespaceSection` now carry the same color cue.
-
 // MARK: - Outline (single layer, expandable namespaces)
 
 /// Shows the top-level "namespace" rows for the currently-selected
 /// storage layer (Session / Local / Keychain). Each row is
 /// expandable: click the chevron to reveal the namespace's one-level
-/// children as inline `key: value` rows. The right-side detail pane
-/// still drives full-depth browsing for arbitrarily nested values.
+/// children as inline `key: value` rows.
 ///
-/// Per-row actions:
-///   • Namespace (container) row: copy-as-JSON + add-key-inside + delete
+/// Per-row actions (D31):
+///   • Namespace (container) row: copy-all-as-JSON + add-key-inside
+///     — no delete (SDK can't wipe an entire namespace in one call)
 ///   • Namespace (scalar)    row: copy-value + delete
 ///   • Inner key/value row:        copy-value + delete-inside-namespace
 private struct StoragesOutline: View {
     @Bindable var vm: StoragesViewModel
     @Environment(AppEnvironment.self) private var env
-    let onEdit: (StorageRecord, StorageSnapshot.Namespace) -> Void
     let onDelete: (StorageRecord, StorageSnapshot.Namespace) -> Void
     let onAddInside: (StorageRecord, StorageSnapshot.Namespace) -> Void
     let onDeleteInside: (
@@ -434,7 +415,6 @@ private struct StoragesOutline: View {
                             vm: vm,
                             namespace: vm.selectedNamespace,
                             record: record,
-                            onEdit: onEdit,
                             onDelete: onDelete,
                             onAddInside: onAddInside,
                             onDeleteInside: onDeleteInside
@@ -525,7 +505,6 @@ private struct NamespaceRow: View {
     @Bindable var vm: StoragesViewModel
     let namespace: StorageSnapshot.Namespace
     let record: StorageRecord
-    let onEdit: (StorageRecord, StorageSnapshot.Namespace) -> Void
     let onDelete: (StorageRecord, StorageSnapshot.Namespace) -> Void
     let onAddInside: (StorageRecord, StorageSnapshot.Namespace) -> Void
     let onDeleteInside: (
@@ -539,11 +518,6 @@ private struct NamespaceRow: View {
 
     private var isExpanded: Bool {
         vm.isExpanded(record: record, in: namespace)
-    }
-
-    private var isSelected: Bool {
-        vm.selection?.namespace == namespace &&
-        vm.selection?.recordId  == record.id
     }
 
     private var isClientConnected: Bool {
@@ -569,7 +543,6 @@ private struct NamespaceRow: View {
                 }
             }
         }
-        .background(isSelected ? Color.accentColor.opacity(0.10) : Color.clear)
     }
 
     @ViewBuilder
@@ -593,8 +566,12 @@ private struct NamespaceRow: View {
         .background(rowBackground)
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }
+        // Whole row toggles expansion on container rows; scalars
+        // can't expand, so the tap is a no-op there.
         .onTapGesture {
-            vm.selection = .init(namespace: namespace, recordId: record.id)
+            if record.isContainer {
+                vm.toggleExpansion(record: record, in: namespace)
+            }
         }
     }
 
@@ -631,6 +608,9 @@ private struct NamespaceRow: View {
     @ViewBuilder
     private var actions: some View {
         HStack(spacing: 4) {
+            // Copy is always available — works without a device.
+            // Container rows copy the full subtree as JSON; scalar
+            // rows copy the raw value.
             Button(action: { copyNamespaceContents() }) {
                 Image(systemName: "doc.on.doc")
                     .font(.system(size: 12))
@@ -643,6 +623,10 @@ private struct NamespaceRow: View {
                   : "Copy this value")
 
             if record.isContainer {
+                // Containers (namespaces) — only [add]. No delete
+                // because the SDK has no command to remove an
+                // entire namespace; the user has to delete its
+                // inner keys one by one via the InnerKeyRow trash.
                 Button {
                     onAddInside(record, namespace)
                 } label: {
@@ -657,43 +641,29 @@ private struct NamespaceRow: View {
                       ? "Add a key inside \(record.key)"
                       : "Connect a device to add a key")
             } else {
-                Button {
-                    onEdit(record, namespace)
+                // Scalar top-level key — straight delete, no
+                // subscope. SDK: `storage.<ns>.delete <key>`.
+                Button(role: .destructive) {
+                    onDelete(record, namespace)
                 } label: {
-                    Image(systemName: "pencil")
+                    Image(systemName: "trash")
                         .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.red)
                         .frame(width: 22, height: 22)
                 }
                 .buttonStyle(.plain)
                 .disabled(!isClientConnected)
                 .help(isClientConnected
-                      ? "Edit this value on the device"
-                      : "Connect a device to edit")
+                      ? "Delete this top-level key"
+                      : "Connect a device to delete")
             }
-
-            Button(role: .destructive) {
-                onDelete(record, namespace)
-            } label: {
-                Image(systemName: "trash")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.red)
-                    .frame(width: 22, height: 22)
-            }
-            .buttonStyle(.plain)
-            .disabled(!isClientConnected)
-            .help(isClientConnected
-                  ? "Delete this top-level key"
-                  : "Connect a device to delete")
         }
         .opacity(isHovered ? 1 : 0.55)
     }
 
     @ViewBuilder
     private var rowBackground: some View {
-        if isSelected {
-            Color.accentColor.opacity(0.18)
-        } else if isHovered {
+        if isHovered {
             Color.secondary.opacity(0.08)
         } else {
             Color.clear
@@ -783,240 +753,7 @@ private struct InnerKeyRow: View {
     }
 }
 
-// MARK: - Detail
-
-private struct StoragesDetail: View {
-    @Bindable var vm: StoragesViewModel
-
-    var body: some View {
-        if let record = vm.selectedRecord {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    header(record)
-                    Divider()
-                    if record.valueText != nil {
-                        StorageTreeRow(record: record)
-                    } else if let children = record.children, !children.isEmpty {
-                        tree(children: children)
-                    } else {
-                        Text("(empty)").foregroundStyle(.secondary)
-                    }
-                }
-                .padding(16)
-                .frame(maxWidth: .infinity, alignment: .topLeading)
-            }
-        } else {
-            ContentUnavailableView(
-                "No record selected",
-                systemImage: "rectangle.inset.filled",
-                description: Text("Pick a key from the outline to inspect its value.")
-            )
-        }
-    }
-
-    @ViewBuilder
-    private func header(_ record: StorageRecord) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(record.key)
-                .font(.title3)
-                .textSelection(.enabled)
-            HStack(spacing: 6) {
-                Text(vm.selectedRecordNamespace.displayName)
-                    .font(.caption.weight(.semibold))
-                if record.isContainer {
-                    Text("·")
-                        .foregroundStyle(.secondary)
-                    Text(record.itemCount == 1 ? "1 item" : "\(record.itemCount) items")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .foregroundStyle(.secondary)
-        }
-    }
-
-    @ViewBuilder
-    private func tree(children: [StorageRecord]) -> some View {
-        // Manual recursion — see DetailPaneView.JSONTree for the
-        // same pattern. OutlineGroup's automatic indentation isn't
-        // visible outside of a List, so we lay out depth padding +
-        // disclosure chevrons ourselves.
-        VStack(alignment: .leading, spacing: 2) {
-            ForEach(children) { child in
-                StorageTree(record: child, depth: 0)
-            }
-        }
-    }
-}
-
-// MARK: - Storage tree
-
-/// Recursive tree renderer for storage records. Indents children per
-/// nesting level so the structure reads as a tree, and renders its
-/// own disclosure chevron beside each container row.
-private struct StorageTree: View {
-    let record: StorageRecord
-    let depth: Int
-
-    @State private var isExpanded: Bool = true
-
-    private static let indentStep: CGFloat = 14
-
-    private var hasChildren: Bool {
-        !(record.children?.isEmpty ?? true)
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack(alignment: .firstTextBaseline, spacing: 4) {
-                disclosureChevron
-                StorageTreeRow(record: record)
-            }
-            .padding(.leading, CGFloat(depth) * Self.indentStep)
-
-            if isExpanded, let children = record.children, !children.isEmpty {
-                ForEach(children) { child in
-                    StorageTree(record: child, depth: depth + 1)
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var disclosureChevron: some View {
-        if hasChildren {
-            Button {
-                isExpanded.toggle()
-            } label: {
-                Image(systemName: "chevron.right")
-                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 10, height: 10)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help(isExpanded ? "Collapse" : "Expand")
-        } else {
-            Color.clear.frame(width: 10, height: 10)
-        }
-    }
-}
-
-// MARK: - Storage tree row
-
-/// One row in the storages OutlineGroup. Mirrors the
-/// `JSONTreeRow` from the log-feed DetailPaneView: hover reveals a
-/// copy button on the right. Leaf rows copy the raw value; container
-/// rows copy the subtree as pretty-printed JSON.
-///
-/// Renders `"key": value` (or `[N]: value` for array elements) using
-/// `JSONSyntax` so colours match the log-event detail pane.
-private struct StorageTreeRow: View {
-    let record: StorageRecord
-    @State private var isHovered = false
-
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            JSONSyntax.row(
-                key: record.key,
-                isArrayIndex: record.key.looksLikeJSONArrayIndex,
-                kind: record.kind
-            )
-            .textSelection(.enabled)
-            .help(record.key)
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            // Copy button: reserves space always so the row doesn't
-            // jiggle when the pointer enters; only visible + clickable
-            // while hovered.
-            Button {
-                copyToPasteboard()
-            } label: {
-                Image(systemName: "doc.on.doc")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-            .help(record.kind.isContainer ? "Copy as JSON" : "Copy value")
-            .opacity(isHovered ? 1 : 0)
-            .allowsHitTesting(isHovered)
-        }
-        .font(.system(.caption, design: .monospaced))
-        .contentShape(Rectangle())
-        .onHover { isHovered = $0 }
-    }
-
-    private func copyToPasteboard() {
-        let payload: String
-        switch record.kind {
-        case .string(let raw):  payload = raw
-        case .number(let n):    payload = n
-        case .bool(let b):      payload = b ? "true" : "false"
-        case .null:             payload = "null"
-        case .object, .array:   payload = StorageRecord.serializeJSON(record)
-        }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(payload, forType: .string)
-    }
-}
-
-// MARK: - Edit / Add value sheets
-
-/// Sheet for changing the value of an existing top-level storage key.
-/// The SDK's `storage.<ns>.set` command takes a space-separated
-/// `<key> <value>`, so values containing spaces will be truncated —
-/// surfaced as an inline warning when the user types one.
-private struct EditStorageValueSheet: View {
-    let namespace: StorageSnapshot.Namespace
-    let key: String
-    let initialValue: String
-    let onSave: (String) -> Void
-    let onCancel: () -> Void
-
-    @State private var value: String = ""
-
-    private var hasSpace: Bool { value.contains(" ") }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Edit value")
-                .font(.headline)
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(namespace.displayName + " · " + key)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Text("Sends: storage.\(namespace.wireKey).set \(key) <value>")
-                    .font(.system(.caption2, design: .monospaced))
-                    .foregroundStyle(.secondary)
-            }
-
-            VStack(alignment: .leading, spacing: 6) {
-                TextField("New value", text: $value)
-                    .textFieldStyle(.roundedBorder)
-                    .onSubmit { onSave(value) }
-                if hasSpace {
-                    Text("⚠️ Spaces in the value may be lost — the SDK splits arguments on whitespace.")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                }
-            }
-
-            HStack {
-                Spacer()
-                Button("Cancel", role: .cancel, action: onCancel)
-                    .keyboardShortcut(.cancelAction)
-                Button("Save") { onSave(value) }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(value.isEmpty)
-            }
-        }
-        .padding(20)
-        .frame(width: 420)
-        .onAppear { value = initialValue }
-    }
-}
+// MARK: - Add-key sheet
 
 /// Sheet for adding a new key. Operates in two modes:
 ///

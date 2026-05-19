@@ -21,28 +21,13 @@ import Foundation
 @MainActor
 final class StoragesViewModel {
 
-    /// A reference to one top-level key in a specific namespace.
-    /// Used as the selection identity across the outline view (all
-    /// three namespaces visible at once, so plain `recordId` alone
-    /// would be ambiguous if two namespaces have a key with the same
-    /// name).
-    public struct SelectionKey: Hashable, Sendable {
-        public let namespace: StorageSnapshot.Namespace
-        public let recordId: String
-    }
-
-    /// The namespace the user most recently interacted with — used
-    /// as the default for the "Add key" sheet and as a hint for the
-    /// detail-pane header. Set automatically when a row's selected.
+    /// The currently-active storage layer tab (Session / Local /
+    /// Keychain). Drives which set of records the outline displays.
     var selectedNamespace: StorageSnapshot.Namespace = .session
 
     /// Latest snapshot per namespace. Refreshed from the store after
     /// any `.storageUpdated` broadcast for this session.
     private(set) var snapshots: [StorageSnapshot.Namespace: StorageSnapshot] = [:]
-
-    /// Currently-focused (namespace, top-level key) pair. nil = nothing
-    /// selected.
-    var selection: SelectionKey?
 
     /// Per-record expansion state inside the current storage layer.
     /// Keyed by `"<wireKey>:<recordId>"` so the set survives tab
@@ -137,25 +122,6 @@ final class StoragesViewModel {
                 (node.valueText?.lowercased().contains(needle) ?? false)
             }
         }
-    }
-
-    /// Record currently focused in the detail pane. Resolves
-    /// `selection` against the records under its namespace.
-    var selectedRecord: StorageRecord? {
-        guard let selection else { return nil }
-        for top in records(in: selection.namespace) {
-            for record in top.allDescendants() where record.id == selection.recordId {
-                return record
-            }
-        }
-        return nil
-    }
-
-    /// The namespace currently focused (matches `selection`, falls
-    /// back to `selectedNamespace`). Used by the detail pane to
-    /// label which namespace the visible key belongs to.
-    var selectedRecordNamespace: StorageSnapshot.Namespace {
-        selection?.namespace ?? selectedNamespace
     }
 
     /// Total namespaces present in the latest snapshot set.
@@ -256,7 +222,7 @@ final class StoragesViewModel {
     /// storage; just clears what LoggerNext is displaying.
     func clearLocalCache() {
         snapshots.removeAll()
-        selection = nil
+        expandedRecordKeys.removeAll()
     }
 
     /// Produce the file payload for the Export button. Includes all

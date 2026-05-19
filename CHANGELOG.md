@@ -15,15 +15,23 @@ When releasing:
 ## [Unreleased]
 
 ### Changed
-- **Storages tab restructured (D30 — revises D29).** Session /
-  Local / Keychain are back as **tabs at the top** (one layer
-  visible at a time). Inside each tab, every **namespace**
-  (`applicaster.v2`, `continue-watching`, etc.) is now an
-  **expandable row**: click the chevron to see its inner
-  `key: value` pairs inline. Per-row icons follow the structure:
-  namespace rows have **copy-all-as-JSON / add-key-inside / trash**;
-  inner key rows have **copy-value / trash**. The right-side detail
-  pane still drives full recursive browsing for nested values.
+- **Storages tab restructured (D30 + D31).** Session / Local /
+  Keychain are back as **tabs at the top** (one layer visible at a
+  time). Inside each tab, every **namespace** (`applicaster.v2`,
+  `continue-watching`, etc.) is an **expandable row** — click the
+  chevron (or anywhere on the row) to reveal its inner
+  `key: value` pairs inline. Per-row icons:
+  namespace rows have **copy-all-as-JSON / add-key-inside**
+  (no delete — the SDK can't wipe a whole namespace in one call);
+  scalar top-level and inner key rows have **copy-value / trash**.
+  The right-side detail pane is gone — everything's visible inline,
+  and deeply nested values can be inspected via copy-as-JSON.
+
+### Removed
+- **Inline edit on storage values.** Changing a value now means
+  delete + add. The common case (flip a feature flag) is binary
+  anyway; keeping edit would re-introduce a sheet for a flow that
+  should be peek-and-poke.
 
 ### Added
 - **Add / delete keys inside a namespace.** The "+" button on a
