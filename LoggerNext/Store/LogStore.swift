@@ -503,48 +503,41 @@ public actor LogStore {
         }
     }
 
-    /// Earliest event timestamp in the session, regardless of filter.
-    /// Used by the Jump-to-Time UI to rebase a typed time-of-day onto
-    /// the session's calendar day (so an imported session from 2026-05-15
-    /// jumps correctly when the user types "12:13:42" even though
-    /// "today" is 2026-05-19). Returns nil if the session is empty.
-    public func sessionFirstEventTimestampMillis(
-        sessionId: Int64
-    ) async throws -> Int64? {
-        try await dbQueue.read { db in
-            try Int64.fetchOne(
-                db,
-                sql: """
-                    SELECT timestamp_ms FROM event
-                    WHERE session_id = ?
-                    ORDER BY timestamp_ms ASC
-                    LIMIT 1
-                """,
-                arguments: [sessionId]
-            )
-        }
-    }
-
-    /// Find the event in the session (respecting the current filter)
-    /// whose `timestamp_ms` is closest to `targetMillis`. Used by the
-    /// "Jump to Time" toolbar action — "the app crashed at 14:13:42" →
-    /// scroll to the nearest visible event. Returns nil if no events
-    /// match the filter.
+    /// Find the event (respecting the current filter) whose
+    /// **time-of-day** is closest to `targetMillisSinceMidnight`.
+    /// Ignores the calendar date entirely — typing `12:13:42` lands
+    /// on any event at ~12:13:42 regardless of which day it occurred
+    /// on. Wraps around midnight, so `23:55` correctly matches an
+    /// event at `00:05` (10 min away, not 23h50m).
+    ///
+    /// `targetMillisSinceMidnight` is UTC milliseconds since UTC
+    /// midnight (0…86_399_999). The caller computes this from the
+    /// user's typed Date as `timeIntervalSince1970 * 1000 % 86_400_000`.
+    /// Events' `timestamp_ms` are also UTC, so % 86_400_000 gives a
+    /// directly-comparable value.
     public func nearestEventId(
         sessionId: Int64,
-        targetMillis: Int64,
+        targetMillisSinceMidnight: Int64,
         filter: Filter
     ) async throws -> Int64? {
         try await dbQueue.read { db in
             let (whereClause, args) = Self.where(filter: filter, sessionId: sessionId)
+            // Circular distance on a 24h clock:
+            //   raw  = |(ts % 86400000) - target|
+            //   dist = MIN(raw, 86400000 - raw)
+            // SQLite's MIN(a, b) is scalar when given two arguments.
             let sql = """
                 SELECT id FROM event
                 \(whereClause)
-                ORDER BY ABS(timestamp_ms - ?) ASC, id ASC
+                ORDER BY MIN(
+                    ABS((timestamp_ms % 86400000) - ?),
+                    86400000 - ABS((timestamp_ms % 86400000) - ?)
+                ) ASC, id ASC
                 LIMIT 1
             """
             var fullArgs = args
-            fullArgs.append(targetMillis)
+            fullArgs.append(targetMillisSinceMidnight)
+            fullArgs.append(targetMillisSinceMidnight)
             return try Int64.fetchOne(db, sql: sql, arguments: StatementArguments(fullArgs))
         }
     }

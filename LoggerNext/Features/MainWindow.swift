@@ -516,7 +516,7 @@ private struct JumpToTimePopover: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Jump to time").font(.headline)
-            Text("Enter HH:MM:SS or HH:MM:SS.mmm. The date of the session is used automatically, so this works for imported sessions from any day. Respects the active filter.")
+            Text("Enter HH:MM:SS or HH:MM:SS.mmm. Matches by time-of-day only — date is ignored, so this works for sessions from any day. Respects the active filter.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

@@ -332,27 +332,33 @@ final class LogFeedViewModel {
         Task { await jumpTo(eventId: eventId) }
     }
 
-    /// Jump to the event whose timestamp is closest to `target`,
-    /// respecting the active filter. Pauses follow-tail so the
-    /// jump isn't immediately undone by tail-scroll.
+    /// Jump to the event whose **time-of-day** is closest to
+    /// `target`'s time-of-day, respecting the active filter. The
+    /// calendar date in `target` is ignored — the store query matches
+    /// on `timestamp_ms % 86_400_000` so a typed `12:13:42` lands on
+    /// any event near 12:13:42 regardless of which day it occurred
+    /// (live session today, imported session from last month — same
+    /// behavior). Wraps around midnight.
     ///
-    /// `target` carries a date (typically "today" from the popover)
-    /// AND a time-of-day. The date may be wrong — for an imported
-    /// session that ran days ago, "today + 12:13:42" lies far away
-    /// from every event in the session, and the nearest-event query
-    /// would always snap to the chronologically last event. So before
-    /// querying, we rebase the time-of-day onto the SESSION's day
-    /// (derived from its first event). If the session is empty, no-op.
-    /// See D27.
+    /// Pauses follow-tail so the jump isn't immediately undone by
+    /// tail-scroll. See D27.
     func jumpToTime(_ target: Date) {
-        Task { [weak self] in
+        // Compute UTC milliseconds since UTC midnight. The user typed
+        // a local time, the popover built a Date by combining that
+        // with today's date in the local calendar, so the resulting
+        // absolute UTC ms %% 86400000 = "what UTC time-of-day matches
+        // the local time-of-day the user meant".
+        let totalMs = Int64(target.timeIntervalSince1970 * 1000)
+        let dayMs: Int64 = 86_400_000
+        var targetMod = totalMs % dayMs
+        if targetMod < 0 { targetMod += dayMs }  // tolerate pre-1970 Dates
+
+        Task { [weak self, targetMod] in
             guard let self else { return }
             do {
-                let rebased = try await rebaseToSessionDay(target) ?? target
-                let millis = Int64(rebased.timeIntervalSince1970 * 1000)
                 guard let id = try await store.nearestEventId(
                     sessionId: sessionId,
-                    targetMillis: millis,
+                    targetMillisSinceMidnight: targetMod,
                     filter: filter
                 ) else { return }
                 isPaused = true
@@ -361,34 +367,6 @@ final class LogFeedViewModel {
                 print("jumpToTime: \(error)")
             }
         }
-    }
-
-    /// Take the time-of-day from `target` and the calendar day from
-    /// the session's first event. Returns nil if the session is empty
-    /// (in which case there's nothing to jump to anyway). Both inputs
-    /// and output are in the current calendar / local time zone.
-    private func rebaseToSessionDay(_ target: Date) async throws -> Date? {
-        guard let firstMillis = try await store.sessionFirstEventTimestampMillis(
-            sessionId: sessionId
-        ) else {
-            return nil
-        }
-        let sessionStart = Date(timeIntervalSince1970: TimeInterval(firstMillis) / 1000.0)
-        let calendar = Calendar.current
-        let dayParts  = calendar.dateComponents([.year, .month, .day], from: sessionStart)
-        let timeParts = calendar.dateComponents(
-            [.hour, .minute, .second, .nanosecond],
-            from: target
-        )
-        var combined = DateComponents()
-        combined.year       = dayParts.year
-        combined.month      = dayParts.month
-        combined.day        = dayParts.day
-        combined.hour       = timeParts.hour
-        combined.minute     = timeParts.minute
-        combined.second     = timeParts.second
-        combined.nanosecond = timeParts.nanosecond
-        return calendar.date(from: combined)
     }
 
     private func reloadBookmarks() async {
