@@ -184,6 +184,31 @@ jobs:
               --notes "${NOTES}" \
               --repo applicaster/Beaver
 
+      # ── Sparkle: update appcast.xml back on main with [skip ci] ────
+      #
+      # scripts/release.sh already produced the signed appcast entry
+      # if SPARKLE_PRIVATE_KEY_BASE64 was set on this run. We just
+      # need to commit + push the resulting docs/appcast.xml change.
+      # The "[skip ci]" suffix prevents this commit from re-triggering
+      # the workflow (which would otherwise hit the idempotency check
+      # and halt, but at the cost of a wasted runner minute).
+      - run:
+          name: Push updated appcast to main
+          command: |
+            set -euo pipefail
+            if git diff --quiet docs/appcast.xml; then
+              echo "ℹ️  appcast.xml unchanged — skipping push."
+              exit 0
+            fi
+            git config user.name  "CircleCI"
+            git config user.email "ci@applicaster.com"
+            git add docs/appcast.xml
+            git commit -m "appcast: Beaver ${BEAVER_VERSION} [skip ci]"
+            # Use the GITHUB_TOKEN to push back over HTTPS without
+            # needing an SSH key on the runner.
+            git push "https://x-access-token:${GITHUB_TOKEN}@github.com/applicaster/Beaver.git" \
+                HEAD:main
+
       - store_artifacts:
           path: build
           destination: build

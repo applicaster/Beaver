@@ -208,6 +208,31 @@ ditto -c -k --keepParent "$BRANDED_APP_PATH" "$OUTPUT_ZIP"
 
 rm -f "$NOTARIZE_ZIP" "$EXPORT_OPTIONS_PLIST"
 
+# ─── Step 9: Sparkle — sign + update appcast ─────────────────────────
+#
+# Best-effort: if sign-appcast.sh exists and the Sparkle private key
+# is reachable (env var or login keychain), append an <item> to
+# docs/appcast.xml. CI also calls this; running locally without a
+# key isn't an error, the release just doesn't ship through Sparkle.
+
+if [ -x "$REPO_ROOT/scripts/sign-appcast.sh" ]; then
+    if [ -n "${SPARKLE_PRIVATE_KEY_BASE64:-}" ] \
+       || security find-generic-password -s "https://sparkle-project.org" \
+              >/dev/null 2>&1; then
+        echo "▸ Updating Sparkle appcast…"
+        "$REPO_ROOT/scripts/sign-appcast.sh" "$VERSION" "$OUTPUT_ZIP" || {
+            echo "⚠️  Appcast update failed — the zip is still good, but" \
+                 "installed Beaver instances won't see this version" \
+                 "until someone fixes docs/appcast.xml." >&2
+        }
+    else
+        echo "ℹ️  Sparkle private key not found (no SPARKLE_PRIVATE_KEY_BASE64" \
+             "env var and no key in login keychain). Skipping appcast update." \
+             "Users who installed an earlier Sparkle-enabled build won't see" \
+             "this release in the auto-updater."
+    fi
+fi
+
 # ─── Done ─────────────────────────────────────────────────────────────
 
 SIZE="$(du -h "$OUTPUT_ZIP" | cut -f1)"
