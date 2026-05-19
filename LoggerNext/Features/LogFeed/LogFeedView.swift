@@ -173,7 +173,10 @@ private struct LogFeedFilterBar: View {
                 .help("Fold consecutive identical events into one row")
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        // Explicit 48pt so the bar matches StoragesTopBar's height
+        // regardless of which control inside is the tallest. Inner
+        // pills / chips sit centered in the 48pt frame.
+        .frame(height: 48)
     }
 }
 

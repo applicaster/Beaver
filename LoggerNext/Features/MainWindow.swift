@@ -415,9 +415,16 @@ private struct ToolbarButtonLabel: View {
                 .font(.system(size: 16, weight: .regular))
             Text(title)
                 .font(.system(size: 10))
+                .lineLimit(1)
         }
         .foregroundStyle(tint ?? .primary)
-        .frame(minWidth: 56)
+        // Fixed width (not `minWidth`) so every toolbar button is
+        // exactly the same horizontal extent. 76pt comfortably
+        // fits the longest current label ("Jump To Time") at 10pt
+        // and gives short labels a sensible amount of empty space
+        // on either side. If you add a label longer than ~12 chars,
+        // bump this.
+        .frame(width: 76)
         .contentShape(Rectangle())
     }
 }

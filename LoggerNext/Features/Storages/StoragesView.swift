@@ -314,7 +314,10 @@ private struct StoragesTopBar: View {
             .help("Clear the local snapshot cache (doesn't touch the device)")
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        // Explicit 48pt so this bar lines up with LogFeedFilterBar.
+        // The bigger namespace tabs (D32 polish) still fit
+        // comfortably; shorter controls sit centered in the frame.
+        .frame(height: 48)
     }
 
     private var isClientConnected: Bool {
