@@ -424,12 +424,11 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = LoggerNext/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Beaver;
 				INFOPLIST_KEY_CFBundleName = Beaver;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				INFOPLIST_KEY_SUFeedURL = "https://applicaster.github.io/Beaver/appcast.xml";
-				INFOPLIST_KEY_SUPublicEDKey = "ZYuSQ24/sz+w72KMK+mISy+FZvnv+QJGuiDs9DH4cs8=";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -458,12 +457,11 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = LoggerNext/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Beaver;
 				INFOPLIST_KEY_CFBundleName = Beaver;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				INFOPLIST_KEY_SUFeedURL = "https://applicaster.github.io/Beaver/appcast.xml";
-				INFOPLIST_KEY_SUPublicEDKey = "ZYuSQ24/sz+w72KMK+mISy+FZvnv+QJGuiDs9DH4cs8=";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
