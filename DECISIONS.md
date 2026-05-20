@@ -1275,3 +1275,328 @@ space for the actual content.
   JSON object inside `applicaster.v2.someKey`) can only be
   inspected via copy-as-JSON. Acceptable for the same reason as
   above — the typical Logger workload is one level deep.
+
+---
+
+## D32. Hoist per-session view models to `MainWindow`
+
+**Status:** Accepted (2026-05-19)
+
+**Decision.** `LogFeedViewModel` and `StoragesViewModel` now live as
+`@State` on `MainWindow`, keyed by `env.viewingSessionId`. The tab
+views (`LogFeedView`, `StoragesView`) become thin pass-throughs that
+receive their VM as a parameter rather than constructing it in their
+own `@State`.
+
+**Why.** With the previous layout — each tab view owned its VM as
+`@State` — switching tabs tore down the view subtree and destroyed
+the VM. Coming back to the Log feed wiped the user's filter, exclude,
+level, search, highlight, sort, and selection. Same story for Storages
+(selected layer, expanded namespaces, search term, auto-refresh
+toggle). Users hit this constantly because the natural debugging flow
+is "look at logs → check storage → back to logs."
+
+**Alternatives considered.**
+- *Keep all tab views alive with a ZStack and opacity*: works but
+  every tab pays render cost continuously.
+- *Cache VMs in `AppEnvironment`*: env is for services + global
+  state, not per-window UI state. Mixing concerns.
+- *Add a `@Environment` "store of view models"*: same problem as
+  above, plus invented infrastructure.
+
+Hoisting to `MainWindow` is just SwiftUI working as designed —
+parent owns the state, child renders it.
+
+**Implications.**
+- `MainWindow` has `@State var logFeedVM: LogFeedViewModel?` and
+  `@State var storagesVM: StoragesViewModel?`.
+- A single `.task(id: env.viewingSessionId)` block creates/destroys
+  both when the session changes. Tab switches don't invalidate
+  the task id, so the VMs survive.
+- `LogFeedViewModel.sessionId` had to flip from `private` to
+  internal so `MainWindow` can compare it against
+  `env.viewingSessionId` and decide whether to replace.
+- `StoragesView` no longer self-bootstraps; its `bootstrap()`
+  call moved up into the same `MainWindow` task and runs
+  *before* `storagesVM` is published — preserves the
+  subscribe-before-first-request ordering that D52 fixed.
+- Side benefit: the same `storagesVM` is what the toolbar's
+  device badge reads from, so `applicaster.v2` metadata is
+  visible across every tab not just Storages.
+
+**Trade-offs.**
+- Eager VM construction on session change, even if the user
+  never visits that tab. Cheap (a subscription + one query) so
+  not worth lazy-loading.
+
+---
+
+## D33. App-level `ToastCenter` for action feedback
+
+**Status:** Accepted (2026-05-19)
+
+**Decision.** Add `ToastCenter` — an `@Observable @MainActor`
+service injected via `.environment(_:)` from `LoggerNextApp` — and
+a `ToastPresenter` view that floats one toast at a time at the top
+of the window. Every primary user action (copy, delete, save,
+bookmark toggle, filter change, …) calls `toasts.success(…)`,
+`toasts.info(…)`, or `toasts.error(…)`.
+
+**Why.** Actions used to be silent. Right-click → "Copy Message"
+performed the copy but gave no feedback; users couldn't tell if it
+landed. Worse, the bookmark popover race (the "first bookmark not
+shown" bug) was effectively invisible without confirmation. A
+2-second floating chip is the macOS-native pattern (Notification
+Center–style) and costs nothing.
+
+**Alternatives considered.**
+- *NSAlert on each action*: modal, disruptive, wrong tool.
+- *Status-bar label that's always visible*: takes permanent
+  vertical space, ages out poorly.
+- *Pulse the changed UI element*: hard to do consistently across
+  the 20+ places we want feedback, and the eye misses pulses
+  outside the focal area.
+
+**Implications.**
+- `LoggerNext/Features/Shared/Toast.swift` is the new home:
+  `Toast` value type, `ToastCenter` controller, `ToastPresenter`
+  view.
+- `ToastPresenter` is `.overlay(alignment: .top)` on
+  `MainWindow.body`, with `.allowsHitTesting(false)` so the chip
+  never blocks underlying clicks.
+- `MainWindow`, `LogFeedView`, `StoragesView`, `SessionsView`,
+  and every helper that touches the clipboard reads
+  `@Environment(ToastCenter.self)` and calls into it.
+- Toast presets: green check for success, blue info-circle for
+  passive actions like filter changes, red triangle for errors
+  (longer dismiss — 3s). UUID-keyed auto-dismiss so back-to-back
+  toasts don't cut each other off.
+
+**Trade-offs.**
+- One toast at a time — back-to-back actions replace the
+  previous chip rather than queueing. Intentional: users want
+  feedback on the *latest* thing they did.
+- Toast lives at the window level; popovers and sheets render
+  over the toast (correct z-order). If we ever want a sheet to
+  itself fire toasts, the sheet would need its own
+  `ToastPresenter` overlay or to pass results back. Not a
+  current pain point.
+
+---
+
+## D34. Persist device fingerprint per session
+
+**Status:** Accepted (2026-05-19)
+
+**Decision.** Capture `app_name`, `app_version` (`version_name`),
+`device_model`, `platform`, and `os_version` from the SDK's
+well-known `applicaster.v2` session-storage namespace and write them
+onto the session row itself. Migration `v3_session_device_info` adds
+five nullable TEXT columns. `LogStore.recordStorageSnapshot` runs a
+small `harvestDeviceInfo` step whenever a session-namespace snapshot
+arrives, and `setSessionDeviceInfo` patches the row via `COALESCE`
+so later snapshots don't clobber earlier fields they don't carry.
+A new `Change.sessionUpdated(Session)` broadcast lets the Sessions
+list refresh its rows.
+
+**Why.** When a user opens a past session they need to know which
+build of which app they're looking at. Without persistent
+fingerprint data, the only context for a session was its start
+timestamp — useless for "which of these is the iPhone 15 Pro Max
+crash?" Surfacing the fingerprint on the Sessions list and in the
+toolbar makes session identification instant.
+
+**Alternatives considered.**
+- *Compute on-demand by reading the latest snapshot each session
+  needs to render*: N queries to paint the Sessions list. Bad
+  scaling, plus snapshots may not exist for older sessions.
+- *Single JSON blob column*: defeats the "group by device model"
+  queries we might want later (analytics, debugging cohorts).
+- *Capture from a synthetic SDK event*: would require an SDK
+  protocol change. `applicaster.v2` already contains this data.
+
+**Implications.**
+- Schema v3 adds: `app_name`, `app_version`, `device_model`,
+  `platform`, `os_version` (all nullable TEXT) on `session`.
+- `Session` domain struct grows matching optional properties.
+- `LogStore.setSessionDeviceInfo(id:…)` uses `COALESCE` so a
+  later partial snapshot doesn't blow away an earlier complete
+  one.
+- `Change.sessionUpdated(Session)` joins the existing change
+  cases. `SessionsViewModel` reloads on it.
+- `SessionListItem.appLabel` / `deviceLabel` derived properties
+  drive the new SessionRow subtitle line.
+- `StoragesViewModel.appContext` still computes from
+  `snapshots[.session]` for the toolbar badge — they were both
+  added in the same pass but they read from different sources:
+  the badge wants what's currently in memory (so it updates as
+  storage refreshes); the session list wants what was persisted
+  (so past sessions remember).
+
+**Trade-offs.**
+- Sessions recorded BEFORE this migration ran don't auto-backfill;
+  their device columns stay `NULL` and Session list rows fall
+  back to the timestamp-only layout. A one-shot backfill on app
+  launch (walk sessions, fetch latest `.session` snapshot, harvest
+  if non-empty) would close this gap; deferred until someone
+  complains.
+- Five columns is more than strictly necessary — `device_model`
+  alone covers most needs — but the others (platform, os_version,
+  app_version) are cheap to store and useful for future queries.
+
+---
+
+## D35. Hide device-write affordances when viewing a past session
+
+**Status:** Accepted (2026-05-19)
+
+**Decision.** When the session being viewed is not the live session
+(`env.currentSessionId != vm.sessionId`), the Storages tab hides
+its device-writing controls entirely:
+- Top bar: "Add key", "Auto-refresh", and "Reload" are not
+  rendered.
+- Namespace rows: "+ add-inside" and the scalar-row trash are not
+  rendered.
+- Inner key/value rows: trash is not rendered.
+
+Read-only affordances stay visible across both modes: copy
+buttons, expand-value popover, layer tabs, search, right-click
+copy menus, and Export/Clear (which act on local cache, not the
+device).
+
+**Why.** Those buttons would silently no-op on past sessions
+because the device that recorded the session is gone — any write
+would either go nowhere or land on a *different* device that
+happens to be connected now. The previous behavior was
+"disabled with tooltip", but disabled-tease is a worse UX than
+"not shown" when the action can never apply. The user shouldn't
+have to inspect tooltips to learn the action is meaningless.
+
+**Alternatives considered.**
+- *Disable with explanation tooltip*: previous behavior. Too
+  subtle — users see the buttons and don't read the tooltip.
+- *Hide everything including copy/export*: too aggressive;
+  copying past data is exactly what past sessions are useful
+  for.
+- *Cross-route writes to the currently-connected device*:
+  semantically wrong; the user thinks they're editing this
+  session's state.
+
+**Implications.**
+- `StoragesTopBar` and `NamespaceRow` gain a private
+  `isViewingLiveSession` check reading
+  `env.currentSessionId == vm.sessionId`.
+- `InnerKeyRow` takes an explicit `isLiveSession: Bool` param
+  threaded from its parent (doesn't have direct env access).
+- Empty-state message branches on the same flag:
+  - live, no snapshot → "Click Reload to fetch"
+  - past, no snapshot → "No data was captured during this session"
+- Same rule applies to disconnect mid-session: while connected
+  you can write, once disconnected the buttons hide until
+  reconnect.
+
+**Trade-offs.**
+- A live session that briefly disconnects (e.g., device sleeps)
+  loses its editing buttons until reconnect. Acceptable — they
+  wouldn't work anyway, and reappearing is automatic.
+
+---
+
+## D36. Distribution: GitHub Pages landing page + stable Beaver.zip
+
+**Status:** Accepted (2026-05-19)
+
+**Decision.** Add `docs/index.html` as a one-page install landing
+page at `https://applicaster.github.io/Beaver/` and have CI upload
+two artifacts per release: the existing versioned
+`Beaver-X.Y.Z.zip` AND a stable-named `Beaver.zip` (a copy of the
+same content). The stable name unlocks GitHub's
+`/releases/latest/download/Beaver.zip` redirect, which always
+points at the newest non-prerelease build. The landing page's
+Download button targets that redirect.
+
+**Why.** First-time installs needed a single URL to share — "go to
+the GitHub Releases page and pick the right asset" is too many
+steps for non-developer users. Sparkle handles updates after
+install; this fills the gap before install.
+
+**Alternatives considered.**
+- *DMG distribution*: prettier first-install UX (drag-to-Apps
+  background), but adds `create-dmg` + an additional notarize
+  step. Punted; the zip flow is fine for an internal tool.
+- *Direct-link to versioned zip on the landing page, update the
+  page on every release*: bad — the link rots between releases.
+- *Host the zip ourselves (S3, CDN)*: adds infrastructure we
+  don't need. GitHub Releases is already serving the data.
+
+**Implications.**
+- `docs/index.html` joins `docs/appcast.xml` in the
+  GitHub-Pages-served folder. Single-file HTML, dark-mode aware
+  via `prefers-color-scheme`, no JS.
+- CI's release job now copies `build/Beaver-${VERSION}.zip` to
+  `build/Beaver.zip` and uploads both via `gh release create`.
+- README's "Install (end users)" section points at the landing
+  page and the redirect URL instead of the per-release Assets
+  section.
+- One URL to share with the team:
+  `https://applicaster.github.io/Beaver/`.
+
+**Trade-offs.**
+- Two copies of the same bytes per release — ~30 MB each, so
+  60 MB. GitHub Releases storage is free for public repos at the
+  scale we care about.
+- The landing page version isn't auto-updated; it's a static
+  page. If we ever want to show the current version on the page,
+  that's a small JS fetch against the GitHub API. Skipped for
+  now.
+
+---
+
+## D37. Storages UI density polish + expand-value popover
+
+**Status:** Accepted (2026-05-19)
+
+**Decision.** Inner-row font goes from `.caption` monospaced (12pt
+/ 3pt vertical padding) to `.callout` monospaced (13pt / 6pt
+vertical padding). Add zebra striping (every other inner row gets
+`Color.secondary.opacity(0.04)`). Add a hover-revealed
+`rectangle.expand.vertical` button on long strings (>60 chars) and
+all containers; clicking opens a 540×380 popover with the full
+value monospaced + scrollable, header showing key name and a copy
+button. Namespace tab chips bump from `.caption.semibold` /
+padding 10/5 to `.subheadline.semibold` / padding 14/7.
+
+**Why.** D31 removed the right-side detail pane, so long values
+(base64 PNGs, JWT payloads) had no escape hatch from the truncated
+single-line view. And the dense inner-row list (100+ keys in a
+typical `applicaster.v2`) was a wall of text at the previous font
+size. Three small polish moves restored readability without
+re-introducing the detail pane.
+
+**Alternatives considered.**
+- *Bring the detail pane back*: regression on D31. Vertical real
+  estate matters more.
+- *Wrap long values inline*: row heights become unpredictable,
+  Tables panic on irregular heights in macOS Tahoe (see fixes
+  around D60).
+- *Auto-truncate at a smarter point (e.g., middle ellipsis)*:
+  helps marginally but doesn't help "I need to read the whole
+  base64 blob".
+
+**Implications.**
+- `InnerKeyRow` gains `canExpand` computed property + a new
+  `StorageValuePopover` view.
+- Zebra needs an index, so `ForEach(Array(children.enumerated()),
+  id: \.element.id)` threads `rowIndex` into each row.
+- `NamespaceTab` styling values changed; toolbar height in
+  `StoragesTopBar` later got an explicit `.frame(height: 48)` so
+  the row matches `LogFeedFilterBar`'s height regardless of
+  which inner control is tallest.
+
+**Trade-offs.**
+- "Long string" threshold (60 chars) is heuristic; some 50-char
+  values might benefit from expand too. Tunable later if the
+  cutoff bothers anyone.
+- Popover width is fixed at 540pt. A truly huge JWT or asset URL
+  could overflow horizontally; scrolling works but the user
+  might miss it. Acceptable for now.

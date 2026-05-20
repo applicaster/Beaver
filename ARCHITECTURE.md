@@ -98,10 +98,11 @@ this document gets updated.
 | `WSServer`            | `actor`                  | Owns `NWListener` + current `NWConnection`. Inbound frames published as `AsyncStream<Data>`. |
 | `ProtocolDecoder`     | Free function / struct   | Pure. Stateless. Called from WSServer's consumer task. |
 | `LogStore`            | `actor`                  | Owns a single GRDB `DatabaseQueue`. All reads and writes go through it. Publishes `AsyncStream<StoreChange>` notifications. |
-| `LogFeedViewModel`    | `@MainActor @Observable` | Subscribes to `LogStore` snapshots, owns visible-window state, manages follow-tail/auto-pause. |
-| `StoragesViewModel`   | `@MainActor @Observable` | Owns selected tab + current snapshot. Triggers `storage.list` on activation. |
+| `LogFeedViewModel`    | `@MainActor @Observable` | Subscribes to `LogStore` snapshots, owns visible-window state, manages follow-tail/auto-pause. Owned by `MainWindow` (see D32), keyed by `env.viewingSessionId`. |
+| `StoragesViewModel`   | `@MainActor @Observable` | Owns selected tab + current snapshot. Triggers `storage.list` on activation. Same ownership model as `LogFeedViewModel` — lives on `MainWindow`, not on `StoragesView`. |
 | `SessionsViewModel`   | `@MainActor @Observable` | Sidebar list of sessions. |
 | `CommandBarViewModel` | `@MainActor @Observable` | History + autocomplete; calls `WSServer.send`. |
+| `ToastCenter`         | `@MainActor @Observable` | Window-level confirmation surface (see D33). Injected via `.environment(_:)` from `LoggerNextApp`. |
 | SwiftUI views         | `@MainActor`             | Render only. No business logic, no async work. |
 
 **Rules.**
@@ -128,7 +129,17 @@ CREATE TABLE session (
   started_at   INTEGER NOT NULL,       -- ms since epoch
   ended_at     INTEGER,                -- nullable, set on disconnect
   source       TEXT NOT NULL,          -- 'live' | 'imported'
-  client_label TEXT                    -- optional identifier from handshake
+  client_label TEXT,                   -- optional identifier from handshake
+
+  -- Device fingerprint, added in migration v3 (see D34). Captured
+  -- from applicaster.v2 the first time it arrives for a session.
+  -- All nullable: older rows and SDKs that don't write
+  -- applicaster.v2 just leave them blank.
+  app_name     TEXT,
+  app_version  TEXT,
+  device_model TEXT,
+  platform     TEXT,
+  os_version   TEXT
 );
 
 CREATE TABLE event (
@@ -356,7 +367,8 @@ LoggerNext/
 │   │   ├── DetailPane/
 │   │   │   └── DetailPaneView.swift
 │   │   └── Shared/
-│   │       └── JSONSyntaxText.swift   (D18 colour palette + row builder)
+│   │       ├── JSONSyntaxText.swift   (D18 colour palette + row builder)
+│   │       └── Toast.swift            (D33 ToastCenter + ToastPresenter)
 │   └── Support/
 │       ├── Highlighting.swift
 │       └── NetworkInterface.swift
