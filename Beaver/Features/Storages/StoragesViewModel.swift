@@ -69,10 +69,11 @@ final class StoragesViewModel {
     let sessionId: Int64
     private let store: LogStore
 
-    /// `nonisolated(unsafe)` so the nonisolated `deinit` can cancel
-    /// it. Task<Void, Never> is Sendable; only written from the
-    /// `@MainActor` init.
-    private nonisolated(unsafe) var subscription: Task<Void, Never>?
+    /// `nonisolated` so the nonisolated `deinit` can cancel it.
+    /// `Task<Void, Never>` is Sendable, which is why plain
+    /// `nonisolated` works here (Swift 6 flagged the previous
+    /// `nonisolated(unsafe)` as redundant).
+    private nonisolated var subscription: Task<Void, Never>?
 
     init(store: LogStore, sessionId: Int64) {
         self.store = store

@@ -18,12 +18,13 @@ final class SessionsViewModel {
 
     private let store: LogStore
 
-    /// Marked `nonisolated(unsafe)` so the nonisolated `deinit` can
-    /// cancel it. Task<Void, Never> is Sendable; the property is only
-    /// written from `@MainActor` init/subscribe, and read once from
-    /// deinit after all other references are gone — no concurrent
-    /// access is possible.
-    private nonisolated(unsafe) var subscription: Task<Void, Never>?
+    /// `nonisolated` so the nonisolated `deinit` can cancel it.
+    /// `Task<Void, Never>` is Sendable; the property is only written
+    /// from `@MainActor` init/subscribe, and read once from deinit
+    /// after all other references are gone — no concurrent access is
+    /// possible. (Was `nonisolated(unsafe)`; Swift 6 flagged that as
+    /// redundant.)
+    private nonisolated var subscription: Task<Void, Never>?
 
     init(store: LogStore) {
         self.store = store

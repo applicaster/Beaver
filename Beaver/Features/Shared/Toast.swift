@@ -38,10 +38,12 @@ public struct Toast: Identifiable, Equatable, Sendable {
 public final class ToastCenter {
     public private(set) var current: Toast?
 
-    /// nonisolated(unsafe) so a brand-new `show` can cancel the
-    /// previous auto-dismiss task without bouncing through the
-    /// actor. Only mutated from `@MainActor` methods.
-    private nonisolated(unsafe) var dismissTask: Task<Void, Never>?
+    /// `nonisolated` so a brand-new `show` can cancel the previous
+    /// auto-dismiss task without bouncing through the actor.
+    /// `Task<Void, Never>` is Sendable, only mutated from
+    /// `@MainActor` methods. (Was `nonisolated(unsafe)`; Swift 6
+    /// flagged that as redundant.)
+    private nonisolated var dismissTask: Task<Void, Never>?
 
     public init() {}
 

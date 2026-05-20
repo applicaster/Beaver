@@ -62,14 +62,17 @@ public struct EventRecord: Identifiable, Hashable, Sendable {
         Self.fullFormatter.string(from: date)
     }
 
-    nonisolated(unsafe) private static let timeFormatter: DateFormatter = {
+    // DateFormatter is Sendable as of macOS 14 / iOS 17, so the
+    // previous `nonisolated(unsafe)` annotation is no longer needed
+    // — Swift 6 flags it as redundant.
+    private static let timeFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "HH:mm:ss.SSS"
         f.locale = .init(identifier: "en_US_POSIX")
         return f
     }()
 
-    nonisolated(unsafe) private static let fullFormatter: DateFormatter = {
+    private static let fullFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
         f.locale = .init(identifier: "en_US_POSIX")

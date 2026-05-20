@@ -131,15 +131,15 @@ final class LogFeedViewModel {
     private var visibleRange: Range<Int> = 0..<0
     private let pageOverscan: Int = 100
 
-    /// `nonisolated(unsafe)` so the nonisolated `deinit` can cancel
-    /// these. Task<Void, Never> is Sendable; properties are only
-    /// written from `@MainActor` methods and read once from deinit
-    /// after all references are gone — no concurrent access is
-    /// possible.
-    private nonisolated(unsafe) var loadTask: Task<Void, Never>?
-    private nonisolated(unsafe) var reloadDebounce: Task<Void, Never>?
-    private nonisolated(unsafe) var subscription: Task<Void, Never>?
-    private nonisolated(unsafe) var matchTask: Task<Void, Never>?
+    /// `nonisolated` so the nonisolated `deinit` can cancel these.
+    /// `Task<Void, Never>` is Sendable; properties are only written
+    /// from `@MainActor` methods and read once from deinit after all
+    /// references are gone — no concurrent access is possible.
+    /// (Was `nonisolated(unsafe)`; Swift 6 flagged that as redundant.)
+    private nonisolated var loadTask: Task<Void, Never>?
+    private nonisolated var reloadDebounce: Task<Void, Never>?
+    private nonisolated var subscription: Task<Void, Never>?
+    private nonisolated var matchTask: Task<Void, Never>?
 
     private let reloadDebounceInterval: Duration = .milliseconds(150)
 
