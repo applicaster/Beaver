@@ -4,19 +4,26 @@ Successor to the macOS `Logger` desktop app. Receives log events and
 storage snapshots from a mobile client SDK over WebSocket, persists them
 to SQLite, and renders a virtualized live feed plus a storages inspector.
 
-> **Internal name.** The Xcode target, bundle identifier
-> (`com.applicaster.LoggerNext`), entitlements file, and on-disk
-> Application Support directory still use the codename `LoggerNext`.
-> "Beaver" is the user-facing display name (CFBundleDisplayName,
-> window title). Renaming the internals would orphan existing users'
-> databases and force a new signing identity — not worth it for a
-> rebrand. See DECISIONS.md D21.
+> **Internal name.** The source tree, Xcode project, and target are
+> all named `Beaver` (renamed from the codename `LoggerNext` in D38).
+> Two things are intentionally kept as `LoggerNext` for backwards
+> compatibility:
+>
+> - The bundle identifier `com.applicaster.LoggerNext` — changing it
+>   would break Sparkle in-place updates for existing installs.
+> - The on-disk Application Support directory
+>   `~/Library/Application Support/LoggerNext/` — changing it would
+>   orphan existing users' sessions, bookmarks, and storage
+>   snapshots.
+>
+> See DECISIONS.md D21 (the original "don't rename" decision) and
+> D38 (the source-tree rename done while keeping the two stable
+> identifiers).
 
 ## Status
 
-Scaffolding in progress. The architecture and feature set are locked
-(see `DECISIONS.md`); the working source tree is being built up under
-`LoggerNext/`.
+Architecture and feature set are stable (see `DECISIONS.md`); the
+source tree lives under `Beaver/`.
 
 ## Documents
 
@@ -31,8 +38,7 @@ Scaffolding in progress. The architecture and feature set are locked
 ## Quick start
 
 ```bash
-# After SCAFFOLD.md is followed:
-open LoggerNext.xcodeproj
+open Beaver.xcodeproj
 # ⌘R to build and run.
 ```
 

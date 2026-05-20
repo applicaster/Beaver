@@ -31,7 +31,7 @@
 #
 set -euo pipefail
 
-PBXPROJ="LoggerNext.xcodeproj/project.pbxproj"
+PBXPROJ="Beaver.xcodeproj/project.pbxproj"
 VERBOSE=0
 [ "${1:-}" = "--verbose" ] && VERBOSE=1
 

@@ -47,16 +47,16 @@ jobs:
       - restore_cache:
           name: Restore SPM cache
           keys:
-            - v1-spm-{{ checksum "LoggerNext.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved" }}
+            - v1-spm-{{ checksum "Beaver.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved" }}
             - v1-spm-
       - run:
           name: Resolve Swift packages
-          command: xcodebuild -resolvePackageDependencies -project LoggerNext.xcodeproj
+          command: xcodebuild -resolvePackageDependencies -project Beaver.xcodeproj
       - save_cache:
           name: Save SPM cache
           paths:
-            - ~/Library/Developer/Xcode/DerivedData/LoggerNext-*/SourcePackages
-          key: v1-spm-{{ checksum "LoggerNext.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved" }}
+            - ~/Library/Developer/Xcode/DerivedData/Beaver-*/SourcePackages
+          key: v1-spm-{{ checksum "Beaver.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved" }}
       - run:
           name: Build (Debug)
           command: make build
@@ -157,7 +157,7 @@ jobs:
           name: Apply version bump to pbxproj
           command: |
             set -euo pipefail
-            PBXPROJ="LoggerNext.xcodeproj/project.pbxproj"
+            PBXPROJ="Beaver.xcodeproj/project.pbxproj"
 
             # Skip if pbxproj already at the target version (manual
             # bump path — compute-next-version.sh detected it).
@@ -197,7 +197,7 @@ jobs:
             git config user.email "ci@applicaster.com"
 
             REMOTE="https://x-access-token:${GITHUB_TOKEN}@github.com/applicaster/Beaver.git"
-            PBXPROJ="LoggerNext.xcodeproj/project.pbxproj"
+            PBXPROJ="Beaver.xcodeproj/project.pbxproj"
 
             # 1. Commit the pbxproj bump if the file is dirty.
             if ! git diff --quiet "$PBXPROJ"; then

@@ -115,7 +115,7 @@ echo "   signature: $SIG_LINE"
 # ─── Gather metadata for the <item> block ─────────────────────────────
 
 PUBDATE="$(LC_TIME=C date -u "+%a, %d %b %Y %H:%M:%S +0000")"
-PBXPROJ="LoggerNext.xcodeproj/project.pbxproj"
+PBXPROJ="Beaver.xcodeproj/project.pbxproj"
 
 BUILD="$(grep -m1 'CURRENT_PROJECT_VERSION = ' "$PBXPROJ" \
     | sed 's/.*= //; s/;//' | tr -d '[:space:]')"

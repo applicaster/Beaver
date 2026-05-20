@@ -102,7 +102,7 @@ this document gets updated.
 | `StoragesViewModel`   | `@MainActor @Observable` | Owns selected tab + current snapshot. Triggers `storage.list` on activation. Same ownership model as `LogFeedViewModel` — lives on `MainWindow`, not on `StoragesView`. |
 | `SessionsViewModel`   | `@MainActor @Observable` | Sidebar list of sessions. |
 | `CommandBarViewModel` | `@MainActor @Observable` | History + autocomplete; calls `WSServer.send`. |
-| `ToastCenter`         | `@MainActor @Observable` | Window-level confirmation surface (see D33). Injected via `.environment(_:)` from `LoggerNextApp`. |
+| `ToastCenter`         | `@MainActor @Observable` | Window-level confirmation surface (see D33). Injected via `.environment(_:)` from `BeaverApp`. |
 | SwiftUI views         | `@MainActor`             | Render only. No business logic, no async work. |
 
 **Rules.**
@@ -319,7 +319,7 @@ is:
 Single-target Xcode project, single SPM package.
 
 ```
-LoggerNext/
+Beaver/
 ├── Package.swift
 ├── README.md
 ├── ARCHITECTURE.md              (this file)
@@ -327,8 +327,8 @@ LoggerNext/
 ├── PROTOCOL.md                  (wire-protocol contract, to be written)
 ├── scripts/
 │   └── release.sh               (D13: scripted .pkg pipeline)
-├── LoggerNext.xcodeproj/
-├── LoggerNext/
+├── Beaver.xcodeproj/
+├── Beaver/
 │   ├── BeaverApp.swift      (App + scene)
 │   ├── AppEnvironment.swift     (DI container)
 │   ├── Domain/
@@ -372,11 +372,11 @@ LoggerNext/
 │   └── Support/
 │       ├── Highlighting.swift
 │       └── NetworkInterface.swift
-├── LoggerNextTests/             (Swift Testing)
+├── BeaverTests/             (Swift Testing)
 │   ├── ProtocolDecoderTests.swift
 │   ├── LogStoreTests.swift
 │   └── FilterTests.swift
-└── LoggerNextUITests/           (XCTest)
+└── BeaverUITests/           (XCTest)
     └── LogFeedUITests.swift
 ```
 
@@ -455,7 +455,7 @@ and to write tests against.
 | Main-actor blocked time during 1000-event burst | < 50 ms total   |
 
 The decision review (D1, D5, D8) gives us the design margin to hit these.
-Performance regression tests live under `LoggerNextTests/` and run in CI.
+Performance regression tests live under `BeaverTests/` and run in CI.
 
 ---
 

@@ -1,0 +1,615 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		402C77552FB7A97700767E7C /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = 402C77542FB7A97700767E7C /* GRDB */; };
+		402C799A2FBCC12600767E7C /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 402C79992FBCC12600767E7C /* Sparkle */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		4036D8172FB7A18600A60095 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 4036D8002FB7A18400A60095 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 4036D8072FB7A18400A60095;
+			remoteInfo = Beaver;
+		};
+		4036D8212FB7A18600A60095 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 4036D8002FB7A18400A60095 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 4036D8072FB7A18400A60095;
+			remoteInfo = Beaver;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		4036D8082FB7A18400A60095 /* Beaver.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Beaver.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		4036D8162FB7A18600A60095 /* BeaverTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = BeaverTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		4036D8202FB7A18600A60095 /* BeaverUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = BeaverUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		4036D80A2FB7A18400A60095 /* Beaver */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Beaver;
+			sourceTree = "<group>";
+		};
+		4036D8192FB7A18600A60095 /* BeaverTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = BeaverTests;
+			sourceTree = "<group>";
+		};
+		4036D8232FB7A18600A60095 /* BeaverUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = BeaverUITests;
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		4036D8052FB7A18400A60095 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				402C77552FB7A97700767E7C /* GRDB in Frameworks */,
+				402C799A2FBCC12600767E7C /* Sparkle in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		4036D8132FB7A18600A60095 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		4036D81D2FB7A18600A60095 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		402C77532FB7A97200767E7C /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		4036D7FF2FB7A18400A60095 = {
+			isa = PBXGroup;
+			children = (
+				4036D80A2FB7A18400A60095 /* Beaver */,
+				4036D8192FB7A18600A60095 /* BeaverTests */,
+				4036D8232FB7A18600A60095 /* BeaverUITests */,
+				402C77532FB7A97200767E7C /* Frameworks */,
+				4036D8092FB7A18400A60095 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		4036D8092FB7A18400A60095 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				4036D8082FB7A18400A60095 /* Beaver.app */,
+				4036D8162FB7A18600A60095 /* BeaverTests.xctest */,
+				4036D8202FB7A18600A60095 /* BeaverUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		4036D8072FB7A18400A60095 /* Beaver */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 4036D82A2FB7A18600A60095 /* Build configuration list for PBXNativeTarget "Beaver" */;
+			buildPhases = (
+				4036D8042FB7A18400A60095 /* Sources */,
+				4036D8052FB7A18400A60095 /* Frameworks */,
+				4036D8062FB7A18400A60095 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				4036D80A2FB7A18400A60095 /* Beaver */,
+			);
+			name = Beaver;
+			packageProductDependencies = (
+				402C77542FB7A97700767E7C /* GRDB */,
+				402C79992FBCC12600767E7C /* Sparkle */,
+			);
+			productName = Beaver;
+			productReference = 4036D8082FB7A18400A60095 /* Beaver.app */;
+			productType = "com.apple.product-type.application";
+		};
+		4036D8152FB7A18600A60095 /* BeaverTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 4036D82D2FB7A18600A60095 /* Build configuration list for PBXNativeTarget "BeaverTests" */;
+			buildPhases = (
+				4036D8122FB7A18600A60095 /* Sources */,
+				4036D8132FB7A18600A60095 /* Frameworks */,
+				4036D8142FB7A18600A60095 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				4036D8182FB7A18600A60095 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				4036D8192FB7A18600A60095 /* BeaverTests */,
+			);
+			name = BeaverTests;
+			packageProductDependencies = (
+			);
+			productName = BeaverTests;
+			productReference = 4036D8162FB7A18600A60095 /* BeaverTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		4036D81F2FB7A18600A60095 /* BeaverUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 4036D8302FB7A18600A60095 /* Build configuration list for PBXNativeTarget "BeaverUITests" */;
+			buildPhases = (
+				4036D81C2FB7A18600A60095 /* Sources */,
+				4036D81D2FB7A18600A60095 /* Frameworks */,
+				4036D81E2FB7A18600A60095 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				4036D8222FB7A18600A60095 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				4036D8232FB7A18600A60095 /* BeaverUITests */,
+			);
+			name = BeaverUITests;
+			packageProductDependencies = (
+			);
+			productName = BeaverUITests;
+			productReference = 4036D8202FB7A18600A60095 /* BeaverUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		4036D8002FB7A18400A60095 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1640;
+				LastUpgradeCheck = 1640;
+				TargetAttributes = {
+					4036D8072FB7A18400A60095 = {
+						CreatedOnToolsVersion = 16.4;
+					};
+					4036D8152FB7A18600A60095 = {
+						CreatedOnToolsVersion = 16.4;
+						TestTargetID = 4036D8072FB7A18400A60095;
+					};
+					4036D81F2FB7A18600A60095 = {
+						CreatedOnToolsVersion = 16.4;
+						TestTargetID = 4036D8072FB7A18400A60095;
+					};
+				};
+			};
+			buildConfigurationList = 4036D8032FB7A18400A60095 /* Build configuration list for PBXProject "Beaver" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 4036D7FF2FB7A18400A60095;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				402C77522FB7A8A400767E7C /* XCRemoteSwiftPackageReference "GRDB" */,
+				402C79982FBCC12600767E7C /* XCRemoteSwiftPackageReference "Sparkle" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 4036D8092FB7A18400A60095 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				4036D8072FB7A18400A60095 /* Beaver */,
+				4036D8152FB7A18600A60095 /* BeaverTests */,
+				4036D81F2FB7A18600A60095 /* BeaverUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		4036D8062FB7A18400A60095 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		4036D8142FB7A18600A60095 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		4036D81E2FB7A18600A60095 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		4036D8042FB7A18400A60095 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		4036D8122FB7A18600A60095 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		4036D81C2FB7A18600A60095 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		4036D8182FB7A18600A60095 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 4036D8072FB7A18400A60095 /* Beaver */;
+			targetProxy = 4036D8172FB7A18600A60095 /* PBXContainerItemProxy */;
+		};
+		4036D8222FB7A18600A60095 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 4036D8072FB7A18400A60095 /* Beaver */;
+			targetProxy = 4036D8212FB7A18600A60095 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		4036D8282FB7A18600A60095 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = 49M4HHM3X6;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.5;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		4036D8292FB7A18600A60095 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = 49M4HHM3X6;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.5;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+			};
+			name = Release;
+		};
+		4036D82B2FB7A18600A60095 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Beaver/Beaver.entitlements;
+				CODE_SIGN_STYLE = Manual;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 17;
+				DEVELOPMENT_TEAM = "";
+				"DEVELOPMENT_TEAM[sdk=macosx*]" = WZZ4E5L8EL;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Beaver/Info.plist;
+				INFOPLIST_KEY_CFBundleName = Beaver;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.7.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.applicaster.LoggerNext;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				REGISTER_APP_GROUPS = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		4036D82C2FB7A18600A60095 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Beaver/Beaver.entitlements;
+				CODE_SIGN_STYLE = Manual;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 17;
+				DEVELOPMENT_TEAM = "";
+				"DEVELOPMENT_TEAM[sdk=macosx*]" = WZZ4E5L8EL;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Beaver/Info.plist;
+				INFOPLIST_KEY_CFBundleName = Beaver;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.7.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.applicaster.LoggerNext;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				REGISTER_APP_GROUPS = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		4036D82E2FB7A18600A60095 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 17;
+				DEVELOPMENT_TEAM = 49M4HHM3X6;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.5;
+				MARKETING_VERSION = 1.7.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.applicaster.LoggerNextTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Beaver.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Beaver";
+			};
+			name = Debug;
+		};
+		4036D82F2FB7A18600A60095 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 17;
+				DEVELOPMENT_TEAM = 49M4HHM3X6;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.5;
+				MARKETING_VERSION = 1.7.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.applicaster.LoggerNextTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Beaver.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Beaver";
+			};
+			name = Release;
+		};
+		4036D8312FB7A18600A60095 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 17;
+				DEVELOPMENT_TEAM = 49M4HHM3X6;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.7.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.applicaster.LoggerNextUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_TARGET_NAME = Beaver;
+			};
+			name = Debug;
+		};
+		4036D8322FB7A18600A60095 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 17;
+				DEVELOPMENT_TEAM = 49M4HHM3X6;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.7.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.applicaster.LoggerNextUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_TARGET_NAME = Beaver;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		4036D8032FB7A18400A60095 /* Build configuration list for PBXProject "Beaver" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				4036D8282FB7A18600A60095 /* Debug */,
+				4036D8292FB7A18600A60095 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		4036D82A2FB7A18600A60095 /* Build configuration list for PBXNativeTarget "Beaver" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				4036D82B2FB7A18600A60095 /* Debug */,
+				4036D82C2FB7A18600A60095 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		4036D82D2FB7A18600A60095 /* Build configuration list for PBXNativeTarget "BeaverTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				4036D82E2FB7A18600A60095 /* Debug */,
+				4036D82F2FB7A18600A60095 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		4036D8302FB7A18600A60095 /* Build configuration list for PBXNativeTarget "BeaverUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				4036D8312FB7A18600A60095 /* Debug */,
+				4036D8322FB7A18600A60095 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		402C77522FB7A8A400767E7C /* XCRemoteSwiftPackageReference "GRDB" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/groue/GRDB.swift";
+			requirement = {
+				branch = master;
+				kind = branch;
+			};
+		};
+		402C79982FBCC12600767E7C /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.9.2;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		402C77542FB7A97700767E7C /* GRDB */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 402C77522FB7A8A400767E7C /* XCRemoteSwiftPackageReference "GRDB" */;
+			productName = GRDB;
+		};
+		402C79992FBCC12600767E7C /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 402C79982FBCC12600767E7C /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 4036D8002FB7A18400A60095 /* Project object */;
+}

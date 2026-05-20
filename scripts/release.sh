@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# release.sh — build, codesign, notarize, and staple a LoggerNext.app
-# package as a distributable .zip.
+# release.sh — build, codesign, notarize, and staple Beaver.app as a
+# distributable .zip.
 #
 # Per DECISIONS.md D13 (revised): we ship a signed + notarized
 # .app.zip rather than a .pkg installer. Trade-off explained in the
@@ -27,19 +27,19 @@
 #   ./scripts/release.sh
 #
 # Output:
-#   build/LoggerNext-<version>.zip   (notarized, stapled, ready to share)
+#   build/Beaver-<version>.zip   (notarized, stapled, ready to share)
 #
+# Naming note: target / scheme / PRODUCT_NAME are all "Beaver" since
+# D38 (source-tree rename). The bundle ID is intentionally still
+# `com.applicaster.LoggerNext` so existing installs keep their data
+# and Sparkle in-place upgrades stay valid.
 set -euo pipefail
 
 # ─── Config ───────────────────────────────────────────────────────────
 
-PROJECT="LoggerNext.xcodeproj"
-SCHEME="LoggerNext"
-# Internal name = LoggerNext (target, bundle id, exec); user-facing
-# brand = Beaver (CFBundleDisplayName + final .app rename). See
-# DECISIONS.md D21.
-APP_NAME="LoggerNext"
-BRAND_NAME="Beaver"
+PROJECT="Beaver.xcodeproj"
+SCHEME="Beaver"
+APP_NAME="Beaver"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
@@ -83,18 +83,14 @@ if ! command -v ditto >/dev/null;       then echo "❌ ditto not found";      ex
 # trick here.)
 if [ -z "${VERSION:-}" ]; then
     VERSION="$(grep -m1 'MARKETING_VERSION = ' \
-        "$REPO_ROOT/LoggerNext.xcodeproj/project.pbxproj" \
+        "$REPO_ROOT/Beaver.xcodeproj/project.pbxproj" \
         | sed 's/.*= //; s/;//' | tr -d '[:space:]')"
 fi
 if [ -z "$VERSION" ]; then
     VERSION="dev-$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 fi
 
-OUTPUT_ZIP="$BUILD_DIR/$BRAND_NAME-$VERSION.zip"
-# Friendly name shown when the user unzips. Renaming the .app file
-# is safe (codesigning is bundle-id based, not filename based), and
-# Finder already shows CFBundleDisplayName regardless.
-BRANDED_APP_PATH="$EXPORT_DIR/$BRAND_NAME.app"
+OUTPUT_ZIP="$BUILD_DIR/$APP_NAME-$VERSION.zip"
 
 # ─── Step 1: Clean ────────────────────────────────────────────────────
 
@@ -192,17 +188,13 @@ spctl --assess --type execute --verbose=2 "$APP_PATH" || {
 
 # ─── Step 7: Package final zip ────────────────────────────────────────
 
-# Rename to the brand name so the user sees "Beaver.app" in the zip
-# and in /Applications. Rename happens AFTER notarize + staple so
-# Apple's tools never see the renamed bundle (they identify by
-# bundle id, but keeping the path stable through notarization is the
-# defensively-simple choice).
-echo "▸ Renaming bundle to $BRAND_NAME.app for distribution…"
-mv "$APP_PATH" "$BRANDED_APP_PATH"
-
+# Bundle is already named Beaver.app at this point (PRODUCT_NAME).
+# Previously this step renamed LoggerNext.app → Beaver.app; that's
+# unnecessary since D38 unified the internal target name with the
+# user-facing brand.
 echo "▸ Packaging final ${OUTPUT_ZIP}…"
 rm -f "$OUTPUT_ZIP"
-ditto -c -k --keepParent "$BRANDED_APP_PATH" "$OUTPUT_ZIP"
+ditto -c -k --keepParent "$APP_PATH" "$OUTPUT_ZIP"
 
 # ─── Step 8: Cleanup intermediates ────────────────────────────────────
 

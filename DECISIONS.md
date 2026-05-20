@@ -1,7 +1,17 @@
-# LoggerNext — Design Decisions
+# Beaver — Design Decisions
 
-Running log of architecture and feature decisions made during planning.
-Each entry: decision, reasoning, alternatives considered, status.
+Running log of architecture and feature decisions made during the
+project's lifetime. Each entry: decision, reasoning, alternatives
+considered, status.
+
+> **Note on names.** Decisions D1–D37 were written when the
+> codebase was still under the codename `LoggerNext`; references
+> to it inside those historical entries are preserved as the
+> record-of-the-time. From D38 onward, the source tree is named
+> `Beaver` while the bundle ID + on-disk path stay
+> `com.applicaster.LoggerNext` / `~/Library/Application Support/LoggerNext/`
+> for backwards compatibility — see D38 itself for the full
+> rationale.
 
 ---
 
@@ -1600,3 +1610,105 @@ re-introducing the detail pane.
 - Popover width is fixed at 540pt. A truly huge JWT or asset URL
   could overflow horizontally; scrolling works but the user
   might miss it. Acceptable for now.
+
+---
+
+## D38. Source-tree rename `LoggerNext` → `Beaver` (revises D21)
+
+**Status:** Accepted (2026-05-20), revises D21
+
+**Decision.** Rename the visible parts of the codebase from the
+codename `LoggerNext` to the user-facing brand `Beaver`:
+
+- `LoggerNext.xcodeproj` → `Beaver.xcodeproj`
+- `LoggerNext/` → `Beaver/`
+- `LoggerNextTests/` → `BeaverTests/`
+- `LoggerNextUITests/` → `BeaverUITests/`
+- `LoggerNextApp.swift` → `BeaverApp.swift`, `struct LoggerNextApp`
+  → `struct BeaverApp`
+- `LoggerNext.entitlements` → `Beaver.entitlements`
+- Xcode target / scheme name `LoggerNext` → `Beaver`
+- `PRODUCT_NAME = LoggerNext` → `PRODUCT_NAME = Beaver` (build
+  output is now `Beaver.app` directly, no post-build rename
+  needed in `release.sh`)
+- SPM library/target name `LoggerNextCore` → `BeaverCore`
+- Notification.Name strings `LoggerNextJumpToBookmark` /
+  `LoggerNextJumpToTime` → `BeaverJumpToBookmark` /
+  `BeaverJumpToTime` (and their static accessors)
+- User-facing UI strings (e.g., "Unknown to LoggerNext" in the
+  command-help popover) → "Unknown to Beaver"
+
+**Kept stable, intentionally:**
+
+- `PRODUCT_BUNDLE_IDENTIFIER = com.applicaster.LoggerNext` (and
+  the test bundle IDs). Changing it would break Sparkle in-place
+  upgrades for every existing install — Sparkle uses bundle ID
+  + version to decide whether a download is an upgrade.
+- `~/Library/Application Support/LoggerNext/store.sqlite` — the
+  on-disk persistence anchor. Changing it would orphan every
+  existing user's sessions, bookmarks, storage snapshots, and
+  saved filters. A migration could move the data, but the cost /
+  risk ratio is wrong for an internal tool.
+- `DispatchQueue` label `com.applicaster.LoggerNext.WSServer` —
+  mirrors the bundle ID for consistency in Console.app and
+  Activity Monitor.
+
+Each of these has an in-code comment explaining the
+"intentionally LoggerNext, see D38" reasoning so future
+maintainers don't reflexively rename them.
+
+**Why now (revising D21).**
+
+D21's original "don't rename" was correct at the time — early
+in development, the bundle ID and on-disk path concerns
+dominated, and the codebase didn't have enough surface area
+yet to make the codename leakage really painful. Six months
+later, the codebase is many tens of files. Every new
+contributor / future-me reading the source has to mentally
+substitute "this thing called LoggerNext is the same product as
+Beaver". The cost of that ongoing cognitive overhead exceeds
+the one-time cost of the rename.
+
+D21's actual blockers (bundle ID + on-disk path) are still
+respected — they stay as `LoggerNext`. Only the visible source
+tree is rebranded. So D38 doesn't contradict D21; it scopes
+D21 down to the two identifiers that really must not change.
+
+**Alternatives considered.**
+
+- *Full rename including bundle ID + Application Support path*:
+  requires a one-shot data migration on first launch of the
+  renamed app + new Developer ID provisioning + verification
+  that Sparkle in-place updates work when the upgrading bundle
+  has a different ID than the installed one. Doable, ~1–2 days
+  of work plus careful testing, but adds risk that an existing
+  user might lose their session history if migration has a bug.
+  Punted unless there's a concrete reason (App Store submission,
+  team transfer, …).
+- *Do nothing*: keeps the cost-of-confusion that drove this
+  decision.
+
+**Implications.**
+
+- Anyone with a local checkout needs to close Xcode, pull, and
+  reopen `Beaver.xcodeproj`. Xcode's user-state files
+  (`xcuserdata`) under the old `.xcodeproj` are abandoned, which
+  loses breakpoint and bookmark positions — acceptable.
+- CI's `Beaver.xcodeproj` reference is already updated; first
+  CI run after the rename rebuilds the SPM cache once.
+- `release.sh`'s post-build `LoggerNext.app` → `Beaver.app`
+  rename step is gone — the build directly produces
+  `Beaver.app` now.
+- README's "internal name" disclaimer was updated to point at
+  D21 + D38 together and to clarify which identifiers are
+  intentionally still `LoggerNext`.
+
+**Trade-offs.**
+
+- Discoverable inconsistency: a new contributor opens the app's
+  Application Support folder and finds `LoggerNext/`, not
+  `Beaver/`. The in-code comment + this DECISIONS entry are
+  the doc trail; nothing prevents momentary confusion.
+- Bundle ID looks like a brand name in `defaults`, Keychain,
+  and `codesign -d`. Invisible to end users; only matters to
+  devs who actively look.

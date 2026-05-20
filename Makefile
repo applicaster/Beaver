@@ -1,7 +1,8 @@
-# Common Beaver tasks (internal codename: LoggerNext — see D21).
+# Common Beaver tasks. The bundle ID is still
+# `com.applicaster.LoggerNext` for user-data continuity — see D38.
 # Run `make` (or `make help`) for the list.
 
-PBXPROJ := LoggerNext.xcodeproj/project.pbxproj
+PBXPROJ := Beaver.xcodeproj/project.pbxproj
 
 .PHONY: help build test release clean version bump ship tag
 
@@ -28,16 +29,16 @@ help:
 
 build:
 	xcodebuild \
-	    -project LoggerNext.xcodeproj \
-	    -scheme LoggerNext \
+	    -project Beaver.xcodeproj \
+	    -scheme Beaver \
 	    -configuration Debug \
 	    -destination 'platform=macOS' \
 	    build
 
 test:
 	xcodebuild test \
-	    -project LoggerNext.xcodeproj \
-	    -scheme LoggerNext \
+	    -project Beaver.xcodeproj \
+	    -scheme Beaver \
 	    -destination 'platform=macOS'
 
 release:
@@ -45,7 +46,7 @@ release:
 
 clean:
 	rm -rf build
-	rm -rf ~/Library/Developer/Xcode/DerivedData/LoggerNext-*
+	rm -rf ~/Library/Developer/Xcode/DerivedData/Beaver-*
 
 # ── Versioning ───────────────────────────────────────────────────────
 #

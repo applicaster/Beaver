@@ -284,7 +284,7 @@ A snapshot of the client's storage namespaces, sent in response to
 
 **Backwards.** Beaver must decode every event the current Logger
 desktop can decode. Test fixtures captured from real client sessions are
-checked into `LoggerNextTests/Fixtures/`.
+checked into `BeaverTests/Fixtures/`.
 
 **Forwards.** Unknown top-level `type` values are rejected with a logged
 synthetic event but do not break the connection. Unknown fields inside
@@ -323,7 +323,7 @@ To validate the decoder against reality, capture and check in:
   of the outbound path).
 
 These should live as raw JSON files under
-`LoggerNextTests/Fixtures/wire/` and be replayed by parameterized
+`BeaverTests/Fixtures/wire/` and be replayed by parameterized
 `ProtocolDecoderTests`.
 
 ---

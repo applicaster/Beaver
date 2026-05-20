@@ -6,7 +6,7 @@ import PackageDescription
 // decoder logic headlessly in CI without booting an Xcode build.
 
 let package = Package(
-    name: "LoggerNext",
+    name: "Beaver",
     platforms: [
         // macOS app deployment is 26 (set in the Xcode target). SPM
         // doesn't yet have a `.v26` enum value, so we use the highest
@@ -15,8 +15,8 @@ let package = Package(
     ],
     products: [
         .library(
-            name: "LoggerNextCore",
-            targets: ["LoggerNextCore"]
+            name: "BeaverCore",
+            targets: ["BeaverCore"]
         ),
     ],
     dependencies: [
@@ -24,23 +24,23 @@ let package = Package(
     ],
     targets: [
         .target(
-            name: "LoggerNextCore",
+            name: "BeaverCore",
             dependencies: [
                 .product(name: "GRDB", package: "GRDB.swift"),
             ],
-            path: "LoggerNext",
+            path: "Beaver",
             exclude: [
-                "LoggerNextApp.swift",       // SwiftUI App entry, app-target only
+                "BeaverApp.swift",           // SwiftUI App entry, app-target only
                 "AppEnvironment.swift",      // depends on app-target lifecycle
                 "Features",                  // SwiftUI views, app-target only
                 "Assets.xcassets",           // Xcode resource bundle
-                "LoggerNext.entitlements",   // app entitlements
+                "Beaver.entitlements",       // app entitlements
             ]
         ),
         .testTarget(
-            name: "LoggerNextCoreTests",
-            dependencies: ["LoggerNextCore"],
-            path: "LoggerNextTests"
+            name: "BeaverCoreTests",
+            dependencies: ["BeaverCore"],
+            path: "BeaverTests"
         ),
     ],
     swiftLanguageModes: [.v6]

@@ -92,6 +92,16 @@ When releasing:
   the user is on the Storages tab, the first `storage.list` now
   fires automatically — no need to click Reload to see anything.
 
+### Internal
+- **Source tree renamed `LoggerNext` → `Beaver` (D38).** Xcode
+  project, source folder, app entry struct, entitlements, target,
+  scheme, SPM library, and the `release.sh` build output all
+  switch to `Beaver`. The bundle identifier
+  (`com.applicaster.LoggerNext`) and the on-disk Application
+  Support path (`~/Library/Application Support/LoggerNext/`) stay
+  put so existing installs keep their data and Sparkle in-place
+  upgrades remain valid. Pure refactor — no user-visible change.
+
 ### Fixed
 - **Bookmark popover showed empty after the first bookmark.**
   Race between the fire-and-forget write Task and the popover's

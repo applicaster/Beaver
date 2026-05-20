@@ -10,7 +10,7 @@ the project navigator and get a green build.
 ## Final layout
 
 ```
-LoggerNext/                                  ← repo root
+Beaver/                                     ← repo root
 ├── .git/
 ├── .gitignore
 ├── ARCHITECTURE.md
@@ -21,23 +21,23 @@ LoggerNext/                                  ← repo root
 ├── Package.swift                            (SPM, for headless CI / `swift test`)
 ├── scripts/
 │   └── release.sh
-├── LoggerNext.xcodeproj/                    ← double-click to open
-├── LoggerNext/                              ← target: LoggerNext
+├── Beaver.xcodeproj/                    ← double-click to open
+├── Beaver/                              ← target: Beaver
 │   ├── BeaverApp.swift                  (the real app entry)
 │   ├── AppEnvironment.swift
 │   ├── Assets.xcassets/                     (Xcode resource bundle)
-│   ├── LoggerNext.entitlements              (App Sandbox entitlements)
+│   ├── Beaver.entitlements              (App Sandbox entitlements)
 │   ├── Domain/                              EventRecord, Filter, LogLevel, Session, StorageSnapshot
 │   ├── Features/                            MainWindow + LogFeed / Storages / Sessions / DetailPane / CommandBar
 │   ├── Store/                               LogStore (GRDB actor), Schema (migrations)
 │   ├── Support/                             Highlighting, NetworkInterface
 │   └── Transport/                           WSServer, ProtocolDecoder
-├── LoggerNextTests/                         ← target: LoggerNextTests (Swift Testing)
+├── BeaverTests/                         ← target: BeaverTests (Swift Testing)
 │   ├── LogStoreTests.swift
 │   └── ProtocolDecoderTests.swift
-└── LoggerNextUITests/                       ← target: LoggerNextUITests (XCTest)
-    ├── LoggerNextUITests.swift
-    └── LoggerNextUITestsLaunchTests.swift
+└── BeaverUITests/                       ← target: BeaverUITests (XCTest)
+    ├── BeaverUITests.swift
+    └── BeaverUITestsLaunchTests.swift
 ```
 
 ---
@@ -46,7 +46,7 @@ LoggerNext/                                  ← repo root
 
 ```bash
 cd /Users/antonkononenko/Work/Applicaster/Beaver
-open LoggerNext.xcodeproj
+open Beaver.xcodeproj
 ```
 
 ---
@@ -54,13 +54,13 @@ open LoggerNext.xcodeproj
 ## Steps remaining in Xcode
 
 1. **Add the new source folders to the project navigator.**
-   In Xcode the project navigator will show `LoggerNext` as a group
+   In Xcode the project navigator will show `Beaver` as a group
    containing `BeaverApp.swift` and `ContentView.swift` (which is
    now red — see step 2). The new folders on disk (`Domain`,
    `Features`, `Store`, `Support`, `Transport`) aren't referenced yet.
-   - In Finder, navigate to `LoggerNext/LoggerNext/`.
+   - In Finder, navigate to `Beaver/`.
    - Drag **Domain**, **Features**, **Store**, **Support**, **Transport**,
-     and the loose **AppEnvironment.swift** into the `LoggerNext` group
+     and the loose **AppEnvironment.swift** into the `Beaver` group
      in Xcode's navigator.
    - Dialog: select **Create groups** (not "Create folder references"),
      and **Add to target: Beaver**.
@@ -78,9 +78,9 @@ open LoggerNext.xcodeproj
    - Add to target **Beaver** (not the test targets).
 5. **Add the test files to the test target.**
    - Drag `LogStoreTests.swift` and `ProtocolDecoderTests.swift` from
-     Finder into the `LoggerNextTests` group in Xcode.
-   - Add to target **LoggerNextTests** only.
-   - Remove the boilerplate `LoggerNextTests.swift` reference (file is
+     Finder into the `BeaverTests` group in Xcode.
+   - Add to target **BeaverTests** only.
+   - Remove the boilerplate `BeaverTests.swift` reference (file is
      already deleted from disk).
 6. **Project settings.**
    - Select the **Beaver** project, then the **Beaver** target.
