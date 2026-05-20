@@ -69,11 +69,17 @@ final class StoragesViewModel {
     let sessionId: Int64
     private let store: LogStore
 
-    /// `nonisolated` so the nonisolated `deinit` can cancel it.
-    /// `Task<Void, Never>` is Sendable, which is why plain
-    /// `nonisolated` works here (Swift 6 flagged the previous
-    /// `nonisolated(unsafe)` as redundant).
-    private var subscription: Task<Void, Never>?
+    /// Marked `nonisolated(unsafe)` so the nonisolated `deinit` can
+    /// cancel it. `Task<Void, Never>` is Sendable; written only
+    /// from `@MainActor` init/subscribe and read once from deinit
+    /// after all other references are gone — the "unsafe" is
+    /// notational.
+    ///
+    /// Xcode 26 emits a "'nonisolated(unsafe)' has no effect,
+    /// consider using 'nonisolated'" warning here. Suggestion is
+    /// wrong: plain `nonisolated` is rejected on mutable stored
+    /// properties. Known compiler false positive; ignore it.
+    private nonisolated(unsafe) var subscription: Task<Void, Never>?
 
     init(store: LogStore, sessionId: Int64) {
         self.store = store

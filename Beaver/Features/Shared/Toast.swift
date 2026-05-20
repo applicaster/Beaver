@@ -38,12 +38,18 @@ public struct Toast: Identifiable, Equatable, Sendable {
 public final class ToastCenter {
     public private(set) var current: Toast?
 
-    /// `nonisolated` so a brand-new `show` can cancel the previous
-    /// auto-dismiss task without bouncing through the actor.
-    /// `Task<Void, Never>` is Sendable, only mutated from
-    /// `@MainActor` methods. (Was `nonisolated(unsafe)`; Swift 6
-    /// flagged that as redundant.)
-    private var dismissTask: Task<Void, Never>?
+    /// `nonisolated(unsafe)` so the nonisolated `deinit` (and a
+    /// fresh `show` call that needs to cancel the previous timer
+    /// without bouncing through the actor) can mutate this without
+    /// the compiler treating each touch as cross-actor.
+    /// `Task<Void, Never>` is Sendable and only mutated from
+    /// `@MainActor` methods, so the "unsafe" is just notational.
+    ///
+    /// Xcode 26 emits a "'nonisolated(unsafe)' has no effect,
+    /// consider using 'nonisolated'" warning here. The suggestion
+    /// is wrong: plain `nonisolated` is rejected on mutable stored
+    /// properties. Known compiler false positive; ignore it.
+    private nonisolated(unsafe) var dismissTask: Task<Void, Never>?
 
     public init() {}
 

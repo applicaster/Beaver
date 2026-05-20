@@ -147,15 +147,21 @@ final class LogFeedViewModel {
     private var visibleRange: Range<Int> = 0..<0
     private let pageOverscan: Int = 100
 
-    /// `nonisolated` so the nonisolated `deinit` can cancel these.
-    /// `Task<Void, Never>` is Sendable; properties are only written
-    /// from `@MainActor` methods and read once from deinit after all
-    /// references are gone — no concurrent access is possible.
-    /// (Was `nonisolated(unsafe)`; Swift 6 flagged that as redundant.)
-    private var loadTask: Task<Void, Never>?
-    private var reloadDebounce: Task<Void, Never>?
-    private var subscription: Task<Void, Never>?
-    private var matchTask: Task<Void, Never>?
+    /// Marked `nonisolated(unsafe)` so the nonisolated `deinit` can
+    /// cancel them. `Task<Void, Never>` is Sendable and the
+    /// properties are written only from `@MainActor` methods + read
+    /// once from deinit after all other references are gone, so
+    /// the "unsafe" is notational, not an actual data race.
+    ///
+    /// Xcode 26 emits a "'nonisolated(unsafe)' has no effect,
+    /// consider using 'nonisolated'" warning on these four. The
+    /// suggestion is wrong: plain `nonisolated` is rejected on
+    /// mutable stored properties. Known compiler false positive;
+    /// ignore it.
+    private nonisolated(unsafe) var loadTask: Task<Void, Never>?
+    private nonisolated(unsafe) var reloadDebounce: Task<Void, Never>?
+    private nonisolated(unsafe) var subscription: Task<Void, Never>?
+    private nonisolated(unsafe) var matchTask: Task<Void, Never>?
 
     private let reloadDebounceInterval: Duration = .milliseconds(150)
 

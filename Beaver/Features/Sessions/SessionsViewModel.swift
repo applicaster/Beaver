@@ -18,13 +18,19 @@ final class SessionsViewModel {
 
     private let store: LogStore
 
-    /// `nonisolated` so the nonisolated `deinit` can cancel it.
-    /// `Task<Void, Never>` is Sendable; the property is only written
-    /// from `@MainActor` init/subscribe, and read once from deinit
-    /// after all other references are gone — no concurrent access is
-    /// possible. (Was `nonisolated(unsafe)`; Swift 6 flagged that as
-    /// redundant.)
-    private var subscription: Task<Void, Never>?
+    /// Marked `nonisolated(unsafe)` so the nonisolated `deinit` can
+    /// cancel it — `@MainActor` stored properties are unreachable
+    /// from deinit's nonisolated context without an escape hatch.
+    /// `Task<Void, Never>` is Sendable and the property is only
+    /// written from `@MainActor` init/subscribe + read once from
+    /// deinit after all other references are gone, so the "unsafe"
+    /// is a notational concession, not an actual data race.
+    ///
+    /// Xcode 26 emits a "'nonisolated(unsafe)' has no effect, consider
+    /// using 'nonisolated'" warning here — that suggestion is wrong:
+    /// plain `nonisolated` is rejected on mutable stored properties.
+    /// The warning is a known compiler false positive; ignore it.
+    private nonisolated(unsafe) var subscription: Task<Void, Never>?
 
     init(store: LogStore) {
         self.store = store
