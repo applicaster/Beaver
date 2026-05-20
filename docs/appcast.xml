@@ -28,6 +28,18 @@
     <language>en</language>
 
     <item>
+      <title>Version 1.7.2</title>
+      <pubDate>Wed, 20 May 2026 11:13:28 +0000</pubDate>
+      <sparkle:version>18</sparkle:version>
+      <sparkle:shortVersionString>1.7.2</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>15.5</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/applicaster/Beaver/releases/download/1.7.2/Beaver-1.7.2.zip"
+        sparkle:edSignature="AomAMCTIlxku/WDhNmQicTrUBndWTgdbAzUaegkktrmNG0PMVBNmJveARhR7qYjoaf2xgkD85o6LbaPrQD+xCA==" length="7631004"
+        type="application/octet-stream" />
+    </item>
+
+    <item>
       <title>Version 1.7.1</title>
       <pubDate>Tue, 19 May 2026 22:22:41 +0000</pubDate>
       <sparkle:version>17</sparkle:version>
