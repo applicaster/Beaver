@@ -3,6 +3,7 @@
 //  Beaver
 //
 
+import AppKit
 import SwiftUI
 
 /// Renders the table + filter bar + detail split for a session.
@@ -166,6 +167,19 @@ private struct LogFeedFilterBar: View {
             .help(vm.isPaused
                   ? "Resume the live feed (catch up on new events)"
                   : "Freeze the table so you can read without new events shifting it")
+
+            // Tail-following toggle. Off by default so high-volume
+            // streaming doesn't yank the user's scroll position
+            // to the bottom every time an event arrives. Flipping
+            // ON snaps to the latest event; the moment the user
+            // scrolls manually, ScrollWatcher flips it back OFF
+            // so they're never trapped.
+            Toggle("Auto-scroll", isOn: $vm.autoScrollEnabled)
+                .toggleStyle(.switch)
+                .fixedSize()
+                .help(vm.autoScrollEnabled
+                      ? "Following the tail. Scrolling manually turns this off."
+                      : "Click to start following new events. Off by default — turn on while you want live tailing.")
 
             Toggle("Collapse", isOn: $vm.collapseRepeats)
                 .toggleStyle(.switch)
@@ -692,18 +706,32 @@ private struct LogFeedTable: View {
             .contextMenu(forSelectionType: EventRecord.ID.self) { ids in
                 rowContextMenu(for: events(forSelection: ids))
             }
+            // Detect user-initiated scrolls on the table's underlying
+            // NSScrollView. When the user manually moves the scroll
+            // position, we flip `autoScrollEnabled` off so the next
+            // new event doesn't yank them back to the bottom.
+            .background {
+                ScrollWatcher {
+                    if vm.autoScrollEnabled { vm.autoScrollEnabled = false }
+                }
+            }
             // Auto-scroll to the newest row whenever a new event
-            // lands in the page. NOT animated — under fast streaming
-            // the animation would move row positions while the user
-            // tries to click, causing hit-tests to resolve to the
-            // wrong row. Instant scroll keeps clicks reliable.
+            // lands in the page — but only when the user has
+            // explicitly opted into tail-following via the
+            // "Auto-scroll" toggle. Default is OFF, so this is a
+            // no-op until the user asks for it.
+            //
+            // NOT animated — under fast streaming the animation
+            // would move row positions while the user tries to
+            // click, causing hit-tests to resolve to the wrong row.
+            // Instant scroll keeps clicks reliable.
             //
             // Paused state means `page` doesn't grow, so no scroll
             // fires. Match-jump scrolls to its own target separately
             // via scrollTarget below (which IS animated, because
             // that's a one-shot user action).
             .onChange(of: vm.page.last?.id) { _, newLastId in
-                guard let newLastId else { return }
+                guard let newLastId, vm.autoScrollEnabled else { return }
                 // Defer one runloop so SwiftUI Table finishes
                 // committing the new `page` before we ask its
                 // internal NSTableView to scroll. Without this defer,
@@ -712,6 +740,15 @@ private struct LogFeedTable: View {
                 // the data update.
                 DispatchQueue.main.async {
                     proxy.scrollTo(newLastId, anchor: .bottom)
+                }
+            }
+            // Toggling Auto-scroll ON snaps the table to the latest
+            // row immediately — otherwise the user would have to
+            // wait for the next event to see anything happen.
+            .onChange(of: vm.autoScrollEnabled) { _, enabled in
+                guard enabled, let lastId = vm.page.last?.id else { return }
+                DispatchQueue.main.async {
+                    proxy.scrollTo(lastId, anchor: .bottom)
                 }
             }
             // Resuming from paused should snap to the latest row.
@@ -848,5 +885,126 @@ private struct LogFeedTable: View {
             return ""
         }
         return string
+    }
+}
+
+// MARK: - Scroll watcher
+
+/// Invisible bridge that finds the enclosing `NSScrollView` (the
+/// one SwiftUI's `Table` builds on top of) and reports
+/// user-initiated scroll events back via the `onUserScroll`
+/// closure.
+///
+/// Used by `LogFeedTable` to flip the Auto-scroll toggle off when
+/// the user manually scrolls — programmatic scrolls
+/// (`proxy.scrollTo`) don't fire `didLiveScrollNotification`, so
+/// there's no feedback loop.
+///
+/// Placed as a `.background` of the Table; the empty NSView walks
+/// up its superview chain to find the table's scroll view.
+private struct ScrollWatcher: NSViewRepresentable {
+    let onUserScroll: () -> Void
+
+    func makeNSView(context: Context) -> NSView {
+        let view = ScrollWatcherView()
+        view.onUserScroll = onUserScroll
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        if let view = nsView as? ScrollWatcherView {
+            view.onUserScroll = onUserScroll
+        }
+    }
+}
+
+private final class ScrollWatcherView: NSView {
+    var onUserScroll: (() -> Void)?
+    private weak var observed: NSScrollView?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard window != nil else {
+            // Removed from hierarchy — tear down the observation.
+            unsubscribe()
+            return
+        }
+        // Defer one runloop so the Table has time to install its
+        // internal NSTableView + NSScrollView. Without this delay
+        // findScrollView() walks an incomplete view tree.
+        DispatchQueue.main.async { [weak self] in
+            self?.subscribe()
+        }
+    }
+
+    deinit {
+        unsubscribe()
+    }
+
+    private func subscribe() {
+        guard let scrollView = findScrollView() else { return }
+        if observed === scrollView { return }
+        unsubscribe()
+        observed = scrollView
+        // `didLiveScrollNotification` fires for user-initiated
+        // scrolls (trackpad, scroll wheel, scrollbar drag).
+        // Programmatic scrollers like `NSTableView.scrollRowToVisible`
+        // don't fire it — exactly what we want.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleScroll),
+            name: NSScrollView.didLiveScrollNotification,
+            object: scrollView
+        )
+    }
+
+    private func unsubscribe() {
+        if let observed {
+            NotificationCenter.default.removeObserver(
+                self,
+                name: NSScrollView.didLiveScrollNotification,
+                object: observed
+            )
+        }
+        observed = nil
+    }
+
+    @objc private func handleScroll() {
+        onUserScroll?()
+    }
+
+    /// Walk the parent chain to find the scroll view SwiftUI's
+    /// Table sits inside. Tables on macOS use NSTableView wrapped
+    /// in NSScrollView, so the scroll view is an ancestor of any
+    /// `.background` view attached to the Table.
+    private func findScrollView() -> NSScrollView? {
+        var current: NSView? = superview
+        while let view = current {
+            if let scroll = view as? NSScrollView { return scroll }
+            // Walk siblings too — Table's NSScrollView is sometimes
+            // a sibling of the .background overlay rather than a
+            // strict ancestor.
+            if let siblings = view.superview?.subviews {
+                for sibling in siblings where sibling !== view {
+                    if let scroll = sibling as? NSScrollView { return scroll }
+                    if let nested = sibling.descendantScrollView() {
+                        return nested
+                    }
+                }
+            }
+            current = view.superview
+        }
+        return nil
+    }
+}
+
+private extension NSView {
+    /// Depth-first search for an NSScrollView in the subtree.
+    func descendantScrollView() -> NSScrollView? {
+        for child in subviews {
+            if let scroll = child as? NSScrollView { return scroll }
+            if let nested = child.descendantScrollView() { return nested }
+        }
+        return nil
     }
 }

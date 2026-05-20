@@ -68,6 +68,22 @@ final class LogFeedViewModel {
     /// chronology can toggle off.
     var collapseRepeats: Bool = true
 
+    /// Tail-following toggle. When ON, every new event scrolls the
+    /// table to the bottom; when OFF, new events still appear in
+    /// the page but the user's current scroll position is left
+    /// alone.
+    ///
+    /// Defaults to OFF: during high-volume streaming (e.g., video
+    /// playback that fires ~4 events/sec) the constant pull-to-bottom
+    /// prevents the user from reading older events. Opt-in is the
+    /// right default for a debugger.
+    ///
+    /// Auto-disabled by `ScrollWatcher` when the user manually
+    /// scrolls — so flipping it ON for live-tailing doesn't trap
+    /// them; the moment they scroll away, the toggle turns itself
+    /// off and the table stops chasing the tail.
+    var autoScrollEnabled: Bool = false
+
     /// Cached set of bookmarked event IDs in this session; refreshed
     /// via the store's `.bookmarksChanged` change stream.
     private(set) var bookmarkedIds: Set<Int64> = []
