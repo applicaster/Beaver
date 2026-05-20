@@ -152,10 +152,10 @@ final class LogFeedViewModel {
     /// from `@MainActor` methods and read once from deinit after all
     /// references are gone — no concurrent access is possible.
     /// (Was `nonisolated(unsafe)`; Swift 6 flagged that as redundant.)
-    private nonisolated var loadTask: Task<Void, Never>?
-    private nonisolated var reloadDebounce: Task<Void, Never>?
-    private nonisolated var subscription: Task<Void, Never>?
-    private nonisolated var matchTask: Task<Void, Never>?
+    private var loadTask: Task<Void, Never>?
+    private var reloadDebounce: Task<Void, Never>?
+    private var subscription: Task<Void, Never>?
+    private var matchTask: Task<Void, Never>?
 
     private let reloadDebounceInterval: Duration = .milliseconds(150)
 

@@ -43,7 +43,7 @@ public final class ToastCenter {
     /// `Task<Void, Never>` is Sendable, only mutated from
     /// `@MainActor` methods. (Was `nonisolated(unsafe)`; Swift 6
     /// flagged that as redundant.)
-    private nonisolated var dismissTask: Task<Void, Never>?
+    private var dismissTask: Task<Void, Never>?
 
     public init() {}
 

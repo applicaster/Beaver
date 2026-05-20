@@ -73,7 +73,7 @@ final class StoragesViewModel {
     /// `Task<Void, Never>` is Sendable, which is why plain
     /// `nonisolated` works here (Swift 6 flagged the previous
     /// `nonisolated(unsafe)` as redundant).
-    private nonisolated var subscription: Task<Void, Never>?
+    private var subscription: Task<Void, Never>?
 
     init(store: LogStore, sessionId: Int64) {
         self.store = store

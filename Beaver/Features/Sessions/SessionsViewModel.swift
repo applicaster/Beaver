@@ -24,7 +24,7 @@ final class SessionsViewModel {
     /// after all other references are gone — no concurrent access is
     /// possible. (Was `nonisolated(unsafe)`; Swift 6 flagged that as
     /// redundant.)
-    private nonisolated var subscription: Task<Void, Never>?
+    private var subscription: Task<Void, Never>?
 
     init(store: LogStore) {
         self.store = store
