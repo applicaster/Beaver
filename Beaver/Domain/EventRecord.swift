@@ -45,6 +45,50 @@ public struct EventRecord: Identifiable, Hashable, Sendable {
         self.contextJSON = contextJSON
     }
 
+    /// UTF-8 byte cost of the whole entry — the honest wire/storage
+    /// price of one log line. Mirrors the web viewer's Size column, so
+    /// "which log is expensive?" gets the same answer in both apps.
+    public var sizeBytes: Int {
+        var total = message.utf8.count
+            + subsystem.utf8.count
+            + category.utf8.count
+        total += dataJSON?.utf8.count ?? 0
+        total += contextJSON?.utf8.count ?? 0
+        return total
+    }
+
+    public enum SizeClass: Sendable {
+        case normal
+        case average
+        case oversized
+    }
+
+    /// Same thresholds as the web viewer: under 1 KB is unremarkable,
+    /// 8 KB and up is worth asking about.
+    public var sizeClass: SizeClass {
+        switch sizeBytes {
+        case ..<1024:      .normal
+        case ..<(8 * 1024): .average
+        default:            .oversized
+        }
+    }
+
+    /// Compact and human-readable: "512 B", "3.2 KB", "1.4 MB".
+    public var sizeText: String {
+        let bytes = sizeBytes
+        if bytes < 1024 { return "\(bytes) B" }
+        let kb = Double(bytes) / 1024
+        if kb < 1024 {
+            return kb < 10
+                ? String(format: "%.1f KB", kb)
+                : "\(Int(kb.rounded())) KB"
+        }
+        let mb = kb / 1024
+        return mb < 10
+            ? String(format: "%.1f MB", mb)
+            : "\(Int(mb.rounded())) MB"
+    }
+
     public var date: Date {
         Date(timeIntervalSince1970: TimeInterval(timestampMillis) / 1000.0)
     }

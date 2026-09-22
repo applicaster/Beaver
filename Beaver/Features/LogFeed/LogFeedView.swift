@@ -138,12 +138,22 @@ private struct LogFeedFilterBar: View {
                 MatchNavigator(vm: vm)
             }
 
+            // "42 / 150 events" while filtering, plain count otherwise —
+            // so the filter's effect is visible without doing the maths.
             HStack(spacing: 4) {
                 Text("\(vm.totalCount)").bold().monospacedDigit()
+                if vm.totalCount != vm.unfilteredCount {
+                    Text("/ \(vm.unfilteredCount)")
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
                 Text("events").foregroundStyle(.secondary)
             }
             .font(.caption)
             .fixedSize()
+            .help(vm.totalCount == vm.unfilteredCount
+                  ? "Events in this session"
+                  : "Matching the current filter, out of every event in the session")
 
             // "↓ N new events" pill — shown only when paused with
             // unseen events queued up. Click resumes the live feed.
@@ -792,9 +802,19 @@ private struct LogFeedTable: View {
     @Bindable var vm: LogFeedViewModel
     @Environment(ToastCenter.self) private var toasts
 
+    /// Column widths / order / visibility, remembered between launches.
+    /// `TableColumnCustomization` is Codable, so it round-trips through
+    /// a single defaults string.
+    @AppStorage("logFeed.columnLayout") private var storedColumnLayout = ""
+    @State private var columnLayout = TableColumnCustomization<LogFeedViewModel.CollapsedRow>()
+
     var body: some View {
         ScrollViewReader { proxy in
-            Table(vm.collapsedRows, selection: $vm.selectedEventId) {
+            Table(
+                vm.collapsedRows,
+                selection: $vm.selectedEventId,
+                columnCustomization: $columnLayout
+            ) {
                 TableColumn("Level") { (row: LogFeedViewModel.CollapsedRow) in
                     HStack(spacing: 4) {
                         if vm.isBookmarked(row.event.id) {
@@ -811,6 +831,7 @@ private struct LogFeedTable: View {
                     }
                 }
                 .width(95)
+                .customizationID("level")
 
                 TableColumn("Message") { (row: LogFeedViewModel.CollapsedRow) in
                     HStack(spacing: 6) {
@@ -831,16 +852,30 @@ private struct LogFeedTable: View {
                     }
                 }
                 .width(min: 400, ideal: 600)
+                .customizationID("message")
 
                 TableColumn("Subsystem") { (row: LogFeedViewModel.CollapsedRow) in
                     Text(highlighted(row.event.subsystem))
                 }
                 .width(min: 150, ideal: 200)
+                .customizationID("subsystem")
 
                 TableColumn("Category") { (row: LogFeedViewModel.CollapsedRow) in
                     Text(highlighted(row.event.category))
                 }
                 .width(min: 120, ideal: 150)
+                .customizationID("category")
+
+                // What this entry costs on the wire. Colour-coded so an
+                // expensive log stands out while scrolling.
+                TableColumn("Size") { (row: LogFeedViewModel.CollapsedRow) in
+                    Text(row.event.sizeText)
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(sizeTint(row.event.sizeClass))
+                        .help(sizeHelp(row.event.sizeClass))
+                }
+                .width(70)
+                .customizationID("size")
 
                 TableColumn("Time") { (row: LogFeedViewModel.CollapsedRow) in
                     Text(row.event.timeOfDayWithMillis)
@@ -848,6 +883,36 @@ private struct LogFeedTable: View {
                         .foregroundStyle(.secondary)
                 }
                 .width(120)
+                .customizationID("time")
+            }
+            // j / k mirror the arrow keys, and Esc closes the detail
+            // pane — the shortcuts the web viewer documents.
+            .onKeyPress { press in
+                switch press.key {
+                case "j": vm.selectNextRow();     return .handled
+                case "k": vm.selectPreviousRow(); return .handled
+                default:  return .ignored
+                }
+            }
+            .onKeyPress(.escape) {
+                guard vm.selectedEventId != nil else { return .ignored }
+                vm.selectedEventId = nil
+                return .handled
+            }
+            .onAppear {
+                guard let data = storedColumnLayout.data(using: .utf8),
+                      let saved = try? JSONDecoder().decode(
+                          TableColumnCustomization<LogFeedViewModel.CollapsedRow>.self,
+                          from: data
+                      )
+                else { return }
+                columnLayout = saved
+            }
+            .onChange(of: columnLayout) { _, layout in
+                guard let data = try? JSONEncoder().encode(layout),
+                      let text = String(data: data, encoding: .utf8)
+                else { return }
+                storedColumnLayout = text
             }
             .contextMenu(forSelectionType: EventRecord.ID.self) { ids in
                 rowContextMenu(for: events(forSelection: ids))
@@ -914,6 +979,22 @@ private struct LogFeedTable: View {
                     proxy.scrollTo(target, anchor: .center)
                 }
             }
+        }
+    }
+
+    private func sizeTint(_ sizeClass: EventRecord.SizeClass) -> Color {
+        switch sizeClass {
+        case .normal:    .secondary
+        case .average:   .yellow
+        case .oversized: .red
+        }
+    }
+
+    private func sizeHelp(_ sizeClass: EventRecord.SizeClass) -> String {
+        switch sizeClass {
+        case .normal:    "Ordinary size"
+        case .average:   "Over 1 KB — on the heavy side"
+        case .oversized: "Over 8 KB — worth asking why"
         }
     }
 

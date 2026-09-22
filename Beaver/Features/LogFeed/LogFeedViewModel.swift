@@ -39,6 +39,10 @@ final class LogFeedViewModel {
     /// Total events that match the current filter, for table sizing.
     private(set) var totalCount: Int = 0
 
+    /// Events in the session before any filtering, so the bar can say
+    /// "shown / total" and make the filter's effect visible.
+    private(set) var unfilteredCount: Int = 0
+
     /// In-memory window of events for the visible range.
     private(set) var page: [EventRecord] = []
 
@@ -272,9 +276,15 @@ final class LogFeedViewModel {
                         sessionId: sessionId,
                         filter: snapshotFilter
                     )
+                    // Only worth a second COUNT when a filter is
+                    // actually hiding something.
+                    let unfiltered = snapshotFilter.isEmpty
+                        ? count
+                        : try await store.eventCount(sessionId: sessionId, filter: .none)
                     if Task.isCancelled { return }
                     await MainActor.run {
                         self.totalCount = count
+                        self.unfilteredCount = unfiltered
                         // Keep visibleRange in sync for downstream
                         // code (jumpTo, didReachEnd). Now always
                         // covers the full filtered result set.
@@ -337,6 +347,31 @@ final class LogFeedViewModel {
     func resume() {
         isPaused = false
         // didSet on isPaused handles unseenCount reset + reload.
+    }
+
+    // MARK: - Keyboard row navigation
+
+    /// `j` / `k` walk the rows as displayed, so a collapsed group counts
+    /// once — the same unit the user is looking at.
+    func selectNextRow() { moveSelection(by: 1) }
+    func selectPreviousRow() { moveSelection(by: -1) }
+
+    private func moveSelection(by delta: Int) {
+        let rows = collapsedRows
+        guard !rows.isEmpty else { return }
+        guard let current = selectedEventId,
+              let index = rows.firstIndex(where: { $0.id == current })
+        else {
+            // Nothing selected yet: enter from the end you came from.
+            let entry = delta > 0 ? rows.first : rows.last
+            selectedEventId = entry?.id
+            if let entry { scrollTarget = (entry.id, UUID()) }
+            return
+        }
+        let next = index + delta
+        guard rows.indices.contains(next) else { return }
+        selectedEventId = rows[next].id
+        scrollTarget = (rows[next].id, UUID())
     }
 
     // MARK: - Bookmarks
