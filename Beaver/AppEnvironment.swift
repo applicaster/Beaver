@@ -63,17 +63,14 @@ public final class AppEnvironment {
     /// case `viewingSessionId` points at something other than the
     /// just-ended live session, and we preserve that choice).
     public func didConnectSession(_ id: Int64) {
-        print("[Beaver/env] didConnectSession(\(id)) — was currentSessionId=\(String(describing: currentSessionId)) viewingSessionId=\(String(describing: viewingSessionId)) lastEndedSessionId=\(String(describing: lastEndedSessionId))")
         currentSessionId = id
         if viewingSessionId == nil || viewingSessionId == lastEndedSessionId {
             viewingSessionId = id
         }
         lastEndedSessionId = nil
-        print("[Beaver/env] didConnectSession DONE — currentSessionId=\(id) viewingSessionId=\(String(describing: viewingSessionId))")
     }
 
     public func didDisconnectSession() {
-        print("[Beaver/env] didDisconnectSession — was currentSessionId=\(String(describing: currentSessionId)) viewingSessionId=\(String(describing: viewingSessionId))")
         // Remember which session was live so the next connect knows
         // whether the user was "following live".
         lastEndedSessionId = currentSessionId
@@ -81,7 +78,6 @@ public final class AppEnvironment {
         // viewingSessionId stays — the user can keep reading the now-ended
         // session.
         availableCommands = []
-        print("[Beaver/env] didDisconnectSession DONE — currentSessionId=nil lastEndedSessionId=\(String(describing: lastEndedSessionId))")
     }
 
     /// Re-query the event count for the viewing session. Called on

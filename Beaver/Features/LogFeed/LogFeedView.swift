@@ -72,9 +72,11 @@ private struct LogFeedContent: View {
         }
     }
 
+    /// Rows in `vm.page` carry no JSON payloads (they'd be gigabytes for a
+    /// whole session), so the detail pane reads the separately-fetched
+    /// full row instead of looking the selection up in the page.
     private var selectedEvent: EventRecord? {
-        guard let id = vm.selectedEventId else { return nil }
-        return vm.page.first { $0.id == id }
+        vm.selectedEvent
     }
 }
 
@@ -1040,7 +1042,7 @@ private struct LogFeedTable: View {
             if !event.category.isEmpty {
                 Button("Copy Category") { copyToPasteboard(event.category, label: "Category") }
             }
-            Button("Copy as JSON")   { copyToPasteboard(formatAsJSON([event]), label: "Event JSON") }
+            Button("Copy as JSON")   { copyAsJSON(ids: [event.id], label: "Event JSON") }
         }
         // These set a chip rather than overwriting the free-text
         // fields, so "filter to this subsystem" no longer wipes
@@ -1093,7 +1095,10 @@ private struct LogFeedTable: View {
             copyToPasteboard(messages, label: "\(events.count) messages")
         }
         Button("Copy \(events.count) Events as JSON") {
-            copyToPasteboard(formatAsJSON(events), label: "\(events.count) events as JSON")
+            copyAsJSON(
+                ids: Set(events.map(\.id)),
+                label: "\(events.count) events as JSON"
+            )
         }
     }
 
@@ -1111,6 +1116,15 @@ private struct LogFeedTable: View {
             return ""
         }
         return string
+    }
+
+    /// Rows in `vm.page` are payload-free, so refetch the selected ids
+    /// with their JSON before encoding.
+    private func copyAsJSON(ids: Set<EventRecord.ID>, label: String) {
+        Task {
+            let full = await vm.fullEvents(ids: ids)
+            copyToPasteboard(formatAsJSON(full), label: label)
+        }
     }
 }
 

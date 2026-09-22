@@ -47,7 +47,7 @@ jobs:
       - restore_cache:
           name: Restore SPM cache
           keys:
-            - v1-spm-{{ checksum "Beaver.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved" }}
+            - v1-spm-{{ checksum "Beaver.xcodeproj/project.pbxproj" }}
             - v1-spm-
       - run:
           name: Resolve Swift packages
@@ -56,10 +56,14 @@ jobs:
           name: Save SPM cache
           paths:
             - ~/Library/Developer/Xcode/DerivedData/Beaver-*/SourcePackages
-          key: v1-spm-{{ checksum "Beaver.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved" }}
+          key: v1-spm-{{ checksum "Beaver.xcodeproj/project.pbxproj" }}
       - run:
           name: Build (Debug)
-          command: make build
+          # No Developer ID keychain on this runner — only the `release`
+          # job imports one. An unsigned Debug build is all we need to
+          # know the code compiles.
+          command: |
+            make build XCB_FLAGS='CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY= CODE_SIGNING_REQUIRED=NO'
       - run:
           name: Unit tests
           command: make test

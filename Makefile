@@ -27,19 +27,27 @@ help:
 	@echo "                          See scripts/.envrc.example for required env vars"
 	@echo "  make ship VERSION=X.Y.Z bump + release in one step (push with git push --tags)"
 
+# Extra flags passed through to xcodebuild. CI sets this to disable
+# code signing: the build-and-test runner has no Developer ID keychain
+# (only the `release` job imports one), and an unsigned Debug build is
+# all that job needs.
+XCB_FLAGS ?=
+
 build:
 	xcodebuild \
 	    -project Beaver.xcodeproj \
 	    -scheme Beaver \
 	    -configuration Debug \
 	    -destination 'platform=macOS' \
+	    $(XCB_FLAGS) \
 	    build
 
+# The tests live in the SwiftPM package (they `@testable import
+# BeaverCore`, a product the Xcode project doesn't build), so they run
+# through swift test. `xcodebuild test -scheme Beaver` cannot resolve
+# that module and fails before running anything.
 test:
-	xcodebuild test \
-	    -project Beaver.xcodeproj \
-	    -scheme Beaver \
-	    -destination 'platform=macOS'
+	swift test
 
 release:
 	@./scripts/release.sh

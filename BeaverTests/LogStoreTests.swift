@@ -41,8 +41,7 @@ struct LogStoreTests {
         }
         for e in events { await store.append(e, to: session.id) }
 
-        // Force the batch flush.
-        try await Task.sleep(for: .milliseconds(120))
+        try await waitForEvents(100, session: session.id, in: store)
 
         let total = try await store.eventCount(sessionId: session.id, filter: .none)
         #expect(total == 100)
@@ -56,6 +55,60 @@ struct LogStoreTests {
         #expect(page.count == 10)
         // Ordered by timestamp ASC, so first row is the oldest.
         #expect(page.first?.timestampMillis == 1_000_000)
+    }
+
+    // MARK: - Payload-free feed query
+
+    /// The log feed renders level / message / subsystem / category / time
+    /// only, but `data_json` is ~97% of a row's bytes (10 KB average,
+    /// 25 MB peak in the wild). Fetching a whole session *with* payloads
+    /// is what let the app reach 56 GB, so the feed must ask for them to
+    /// be dropped — and the detail pane must still be able to get them
+    /// back by id.
+    @Test
+    func feedQuerySkipsPayloadsButIdLookupKeepsThem() async throws {
+        let store = try LogStore(source: .inMemory)
+        let session = try await store.createSession(source: .live)
+
+        await store.append(
+            DecodedEvent(
+                timestampMillis: 1_000_000,
+                level: .info,
+                subsystem: "com.example",
+                category: "cat",
+                message: "with payload",
+                dataJSON: #"{"big":"blob"}"#,
+                contextJSON: #"{"ctx":1}"#
+            ),
+            to: session.id
+        )
+        try await waitForEvents(1, session: session.id, in: store)
+
+        let lean = try await store.events(
+            sessionId: session.id,
+            filter: .none,
+            offset: 0,
+            limit: 10,
+            includePayloads: false
+        )
+        #expect(lean.count == 1)
+        #expect(lean.first?.message == "with payload")
+        #expect(lean.first?.dataJSON == nil)
+        #expect(lean.first?.contextJSON == nil)
+
+        let id = try #require(lean.first?.id)
+        let full = try await store.events(ids: [id])
+        #expect(full.first?.dataJSON == #"{"big":"blob"}"#)
+        #expect(full.first?.contextJSON == #"{"ctx":1}"#)
+
+        // Default stays payload-bearing so Export keeps working.
+        let exported = try await store.events(
+            sessionId: session.id,
+            filter: .none,
+            offset: 0,
+            limit: 10
+        )
+        #expect(exported.first?.dataJSON == #"{"big":"blob"}"#)
     }
 
     // MARK: - Level filter
@@ -79,7 +132,7 @@ struct LogStoreTests {
                 to: session.id
             )
         }
-        try await Task.sleep(for: .milliseconds(120))
+        try await waitForEvents(LogLevel.allCases.count, session: session.id, in: store)
 
         // minLevel = .warning should yield only warning + error.
         let filter = Filter(minLevel: .warning)
@@ -114,7 +167,7 @@ struct LogStoreTests {
                 to: session.id
             )
         }
-        try await Task.sleep(for: .milliseconds(120))
+        try await waitForEvents(phrases.count, session: session.id, in: store)
 
         let filter = Filter(search: "user")
         let count = try await store.eventCount(sessionId: session.id, filter: filter)
@@ -153,7 +206,7 @@ struct LogStoreTests {
                 to: session.id
             )
         }
-        try await Task.sleep(for: .milliseconds(120))
+        try await waitForEvents(phrases.count, session: session.id, in: store)
 
         let filter = Filter(exclude: "beta")
         let count = try await store.eventCount(sessionId: session.id, filter: filter)
@@ -255,7 +308,7 @@ extension LogStoreTests {
                 )
             }
         }
-        try await Task.sleep(for: .milliseconds(120))
+        try await waitForEvents(6, session: session.id, in: store)
         return (store, session.id)
     }
 
@@ -315,6 +368,48 @@ extension LogStoreTests {
         #expect(categories == ["net", "ui"])
     }
 
+    @Test("Size is right even when payloads aren't loaded")
+    func sizeSurvivesPayloadFreeFetch() async throws {
+        // The feed fetches rows without payloads — they are ~97% of the
+        // bytes — so the Size column has to get the payload cost from
+        // SQL rather than from a blob it never received.
+        let store = try LogStore(source: .inMemory)
+        let session = try await store.createSession(source: .live)
+        let payload = #"{"blob":"\#(String(repeating: "x", count: 4096))"}"#
+
+        await store.append(
+            DecodedEvent(
+                timestampMillis: 1_000_000,
+                level: .info,
+                subsystem: "player",
+                category: "net",
+                message: "heavy",
+                dataJSON: payload,
+                contextJSON: nil
+            ),
+            to: session.id
+        )
+        try await waitForEvents(1, session: session.id, in: store)
+
+        let lean = try await store.events(
+            sessionId: session.id, filter: .none, offset: 0, limit: 10,
+            includePayloads: false
+        ).first
+        let full = try await store.events(
+            sessionId: session.id, filter: .none, offset: 0, limit: 10
+        ).first
+
+        // The lean row genuinely has no payload in hand...
+        #expect(lean?.dataJSON == nil)
+        // ...yet reports the same cost as the full one.
+        #expect(lean?.sizeBytes == full?.sizeBytes)
+        #expect(lean?.sizeBytes == "heavy".utf8.count
+                + "player".utf8.count
+                + "net".utf8.count
+                + payload.utf8.count)
+        #expect(lean?.sizeClass == .average)
+    }
+
     @Test("A saved filter keeps its chips")
     func savedFilterRoundTripsChips() async throws {
         let store = try LogStore(source: .inMemory)
@@ -350,13 +445,44 @@ extension LogStoreTests {
 
 // MARK: - Test helpers
 
-/// Runs `work` with a timeout. Returns `nil` on timeout, otherwise the
-/// result of `work`.
+struct WaitTimedOut: Error, CustomStringConvertible {
+    let expected: Int
+    let actual: Int
+    var description: String {
+        "timed out waiting for \(expected) events to flush — store had \(actual)"
+    }
+}
+
+/// Block until `expected` events have actually landed in the store.
 ///
-/// Deliberately a free function rather than an extension on `Task`: an
-/// `extension Task where Failure == Never` leaves `Success` unbound, so
-/// the call site can't infer it and `Task.sleep` (which needs
-/// `Success == Never`) doesn't resolve either.
+/// `LogStore.append` batches writes behind a 50 ms timer, so asserting
+/// after a fixed sleep is a race: swift-testing runs these suites in
+/// parallel, and on a loaded CI runner the flush lands after the
+/// assertion has already read an empty table. Poll for the condition
+/// instead of guessing a duration.
+func waitForEvents(
+    _ expected: Int,
+    session: Int64,
+    in store: LogStore,
+    timeout: Duration = .seconds(10)
+) async throws {
+    let deadline = ContinuousClock.now.advanced(by: timeout)
+    var seen = 0
+    while ContinuousClock.now < deadline {
+        seen = try await store.eventCount(sessionId: session, filter: .none)
+        if seen >= expected { return }
+        try await Task.sleep(for: .milliseconds(5))
+    }
+    throw WaitTimedOut(expected: expected, actual: seen)
+}
+
+/// Runs `work` with a timeout. Returns `nil` on timeout, otherwise
+/// the result of `work`.
+///
+/// A free function rather than a `Task` extension: inside
+/// `extension Task where Failure == Never`, `Task.sleep` resolves to
+/// `Task<Success, Never>.sleep` and fails to compile (it needs
+/// `Success == Never`), and the call site can't infer `Success` either.
 func race<T: Sendable>(
     timeout: Duration,
     _ work: @Sendable @escaping () async -> T

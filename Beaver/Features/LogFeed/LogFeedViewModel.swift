@@ -130,7 +130,17 @@ final class LogFeedViewModel {
     var matchCount: Int { matchIds.count }
 
     /// Selected row id (for the detail pane).
-    var selectedEventId: EventRecord.ID?
+    var selectedEventId: EventRecord.ID? {
+        didSet {
+            guard oldValue != selectedEventId else { return }
+            loadSelectedEvent()
+        }
+    }
+
+    /// The selected row *with* its JSON payloads. Rows in `page` are
+    /// fetched without payloads (see `reload`), so the detail pane reads
+    /// this instead of looking the selection up in `page`.
+    private(set) var selectedEvent: EventRecord?
 
     // MARK: - Dependencies
 
@@ -173,6 +183,14 @@ final class LogFeedViewModel {
     private nonisolated(unsafe) var subscription: Task<Void, Never>?
     private nonisolated(unsafe) var matchTask: Task<Void, Never>?
     private nonisolated(unsafe) var facetTask: Task<Void, Never>?
+    private nonisolated(unsafe) var selectionTask: Task<Void, Never>?
+
+    /// Bumped by every `reload`. A queued reload compares it before
+    /// issuing SQL and skips the query outright if a newer one has
+    /// been requested since — `Task.cancel()` alone can't do that,
+    /// because a cancelled task still runs its `store.events(...)`
+    /// call to completion once the actor gets to it (D16).
+    private var reloadGeneration: UInt64 = 0
 
     private let reloadDebounceInterval: Duration = .milliseconds(150)
 
@@ -194,6 +212,7 @@ final class LogFeedViewModel {
         subscription?.cancel()
         matchTask?.cancel()
         facetTask?.cancel()
+        selectionTask?.cancel()
     }
 
     // MARK: - Debounced reload
@@ -265,11 +284,27 @@ final class LogFeedViewModel {
         await reload(rangeOnly: false)
     }
 
+    /// A reload materialises the whole filtered result set in one array,
+    /// so two things have to hold or memory explodes:
+    ///
+    /// 1. **One query at a time.** Reloads are requested far faster than a
+    ///    large session can be fetched, and a cancelled task's SQL still
+    ///    runs and still builds its array. Left unserialised, a burst of
+    ///    appends puts ~20 full-session arrays in flight at once — the
+    ///    multiplier behind the 56 GB freeze.
+    /// 2. **No JSON payloads.** The table renders level / message /
+    ///    subsystem / category / time only; payloads are ~97% of the bytes.
+    ///    The detail pane refetches the selected row's payloads by id.
     private func reload(rangeOnly: Bool) async {
         loadTask?.cancel()
+        let previous = loadTask
+        reloadGeneration &+= 1
+        let generation = reloadGeneration
         let snapshotFilter = filter
         let limit = maxEventsPerFetch
-        loadTask = Task { [store, sessionId] in
+        loadTask = Task { [weak self, store, sessionId] in
+            _ = await previous?.value
+            guard let self, await self.isCurrentReload(generation) else { return }
             do {
                 if !rangeOnly {
                     let count = try await store.eventCount(
@@ -281,7 +316,7 @@ final class LogFeedViewModel {
                     let unfiltered = snapshotFilter.isEmpty
                         ? count
                         : try await store.eventCount(sessionId: sessionId, filter: .none)
-                    if Task.isCancelled { return }
+                    guard await self.isCurrentReload(generation) else { return }
                     await MainActor.run {
                         self.totalCount = count
                         self.unfilteredCount = unfiltered
@@ -295,15 +330,43 @@ final class LogFeedViewModel {
                     sessionId: sessionId,
                     filter: snapshotFilter,
                     offset: 0,
-                    limit: limit
+                    limit: limit,
+                    includePayloads: false
                 )
-                if Task.isCancelled { return }
+                guard await self.isCurrentReload(generation) else { return }
                 await MainActor.run { self.page = events }
             } catch {
                 // TODO: surface to UI as a banner.
                 print("LogFeedViewModel.reload: \(error)")
             }
         }
+    }
+
+    private func isCurrentReload(_ generation: UInt64) -> Bool {
+        generation == reloadGeneration
+    }
+
+    /// Fetch the selected row again, this time with its JSON payloads.
+    private func loadSelectedEvent() {
+        selectionTask?.cancel()
+        guard let id = selectedEventId else {
+            selectedEvent = nil
+            return
+        }
+        selectionTask = Task { [weak self, store] in
+            let full = try? await store.events(ids: [id]).first
+            guard let self, !Task.isCancelled else { return }
+            await MainActor.run {
+                guard self.selectedEventId == id else { return }
+                self.selectedEvent = full
+            }
+        }
+    }
+
+    /// Full rows (payloads included) for the given ids — used by the
+    /// clipboard actions, which need the JSON the feed query skips.
+    func fullEvents(ids: Set<EventRecord.ID>) async -> [EventRecord] {
+        (try? await store.events(ids: ids)) ?? []
     }
 
     private func subscribeToChanges() async {
