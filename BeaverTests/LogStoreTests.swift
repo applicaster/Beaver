@@ -58,6 +58,60 @@ struct LogStoreTests {
         #expect(page.first?.timestampMillis == 1_000_000)
     }
 
+    // MARK: - Payload-free feed query
+
+    /// The log feed renders level / message / subsystem / category / time
+    /// only, but `data_json` is ~97% of a row's bytes (10 KB average,
+    /// 25 MB peak in the wild). Fetching a whole session *with* payloads
+    /// is what let the app reach 56 GB, so the feed must ask for them to
+    /// be dropped — and the detail pane must still be able to get them
+    /// back by id.
+    @Test
+    func feedQuerySkipsPayloadsButIdLookupKeepsThem() async throws {
+        let store = try LogStore(source: .inMemory)
+        let session = try await store.createSession(source: .live)
+
+        await store.append(
+            DecodedEvent(
+                timestampMillis: 1_000_000,
+                level: .info,
+                subsystem: "com.example",
+                category: "cat",
+                message: "with payload",
+                dataJSON: #"{"big":"blob"}"#,
+                contextJSON: #"{"ctx":1}"#
+            ),
+            to: session.id
+        )
+        try await Task.sleep(for: .milliseconds(120))
+
+        let lean = try await store.events(
+            sessionId: session.id,
+            filter: .none,
+            offset: 0,
+            limit: 10,
+            includePayloads: false
+        )
+        #expect(lean.count == 1)
+        #expect(lean.first?.message == "with payload")
+        #expect(lean.first?.dataJSON == nil)
+        #expect(lean.first?.contextJSON == nil)
+
+        let id = try #require(lean.first?.id)
+        let full = try await store.events(ids: [id])
+        #expect(full.first?.dataJSON == #"{"big":"blob"}"#)
+        #expect(full.first?.contextJSON == #"{"ctx":1}"#)
+
+        // Default stays payload-bearing so Export keeps working.
+        let exported = try await store.events(
+            sessionId: session.id,
+            filter: .none,
+            offset: 0,
+            limit: 10
+        )
+        #expect(exported.first?.dataJSON == #"{"big":"blob"}"#)
+    }
+
     // MARK: - Level filter
 
     @Test
@@ -216,7 +270,7 @@ struct LogStoreTests {
         )
 
         // Pull one change off the stream with a timeout.
-        let received = await Task.race(timeout: .seconds(1)) {
+        let received = await race(timeout: .seconds(1)) {
             for await change in stream {
                 if case .appended(let sid, let count) = change,
                    sid == session.id, count > 0 {
@@ -231,22 +285,25 @@ struct LogStoreTests {
 
 // MARK: - Test helpers
 
-extension Task where Failure == Never {
-    /// Runs `work` with a timeout. Returns `nil` on timeout, otherwise
-    /// the result of `work`.
-    static func race<T: Sendable>(
-        timeout: Duration,
-        _ work: @Sendable @escaping () async -> T
-    ) async -> T? {
-        await withTaskGroup(of: T?.self) { group in
-            group.addTask { await work() }
-            group.addTask {
-                try? await Task.sleep(for: timeout)
-                return nil
-            }
-            let first = await group.next() ?? nil
-            group.cancelAll()
-            return first
+/// Runs `work` with a timeout. Returns `nil` on timeout, otherwise
+/// the result of `work`.
+///
+/// A free function rather than a `Task` extension: inside
+/// `extension Task where Failure == Never`, `Task.sleep` resolves to
+/// `Task<Success, Never>.sleep` and fails to compile (it needs
+/// `Success == Never`), and the call site can't infer `Success` either.
+func race<T: Sendable>(
+    timeout: Duration,
+    _ work: @Sendable @escaping () async -> T
+) async -> T? {
+    await withTaskGroup(of: T?.self) { group in
+        group.addTask { await work() }
+        group.addTask {
+            try? await Task.sleep(for: timeout)
+            return nil
         }
+        let first = await group.next() ?? nil
+        group.cancelAll()
+        return first
     }
 }
