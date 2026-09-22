@@ -101,22 +101,14 @@ struct BeaverApp: App {
         // Track server state on the main actor.
         Task { @MainActor in
             for await state in env.server.state {
-                let beforeCurrent = env.currentSessionId
-                let beforeViewing = env.viewingSessionId
-                print("[Beaver/state] received=\(state) currentSessionId(before)=\(String(describing: beforeCurrent)) viewingSessionId(before)=\(String(describing: beforeViewing))")
                 env.serverState = state
 
                 switch state {
                 case .clientConnected:
                     if env.currentSessionId == nil {
                         if let session = try? await env.store.createSession(source: .live) {
-                            print("[Beaver/state] .clientConnected → created NEW session id=\(session.id)")
                             env.didConnectSession(session.id)
-                        } else {
-                            print("[Beaver/state] .clientConnected → createSession FAILED — no session active")
                         }
-                    } else {
-                        print("[Beaver/state] .clientConnected → currentSessionId already set (\(env.currentSessionId!)), no new session created — frames will append to it")
                     }
                     // Ask the SDK for its command list so the command-bar
                     // help popover has something to show. Brief delay so
@@ -127,35 +119,20 @@ struct BeaverApp: App {
                     }
                 case .clientDisconnected:
                     if let sid = env.currentSessionId {
-                        print("[Beaver/state] .clientDisconnected → ending session \(sid) + clearing currentSessionId")
                         try? await env.store.endSession(sid)
                         env.didDisconnectSession()
-                    } else {
-                        print("[Beaver/state] .clientDisconnected → currentSessionId already nil, nothing to do")
                     }
                 default:
                     break
                 }
-                print("[Beaver/state] post-switch currentSessionId(after)=\(String(describing: env.currentSessionId))")
             }
-            print("[Beaver/state] STATE STREAM ENDED — observer Task exiting")
         }
 
         // Forward inbound frames into the decoder + store.
         Task {
-            var inboundCount = 0
             for await frame in env.server.inbound {
-                inboundCount += 1
-                // Sample to avoid spamming under normal load. Log every
-                // 100th frame plus the first 5 to confirm the pipeline
-                // is hot at session start.
-                if inboundCount <= 5 || inboundCount.isMultiple(of: 100) {
-                    let sid = await MainActor.run { env.currentSessionId }
-                    print("[Beaver/inbound] frame #\(inboundCount) (size=\(frame.count)) routing → sessionId=\(String(describing: sid))")
-                }
                 await Self.handleInbound(frame: frame, env: env)
             }
-            print("[Beaver/inbound] INBOUND STREAM ENDED — consumer Task exiting after \(inboundCount) frames")
         }
 
         // Keep the toolbar's "are there events to act on?" count fresh,
@@ -189,14 +166,7 @@ struct BeaverApp: App {
 
     private static func handleInbound(frame: Data, env: AppEnvironment) async {
         let sessionId = await MainActor.run { env.currentSessionId }
-        guard let sessionId else {
-            // This print fires when a frame arrives but no session
-            // is active — usually a benign race during connect /
-            // disconnect, but if it floods after a clean state
-            // transition something's stuck.
-            print("[Beaver/handleInbound] DROPPING frame (size=\(frame.count)) — currentSessionId is nil")
-            return
-        }
+        guard let sessionId else { return }
 
         switch ProtocolDecoder.decode(frame) {
         case .success(.event(let event)):
