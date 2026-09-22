@@ -40,6 +40,26 @@ public enum Highlighting {
 
     // MARK: - Private
 
+    /// Paint match backgrounds onto an already-styled string, leaving
+    /// its existing colours alone. Lets a syntax-coloured JSON row carry
+    /// search highlights without giving up either.
+    public static func markMatches(
+        in attributed: inout AttributedString,
+        term: String?,
+        isRegex: Bool = false
+    ) {
+        guard let term, !term.isEmpty else { return }
+        let plain = String(attributed.characters)
+        let ranges: [Range<String.Index>] = isRegex
+            ? regexRanges(in: plain, pattern: term)
+            : substringRanges(in: plain, term: term)
+
+        for range in ranges {
+            guard let attrRange = attributed.range(from: range, in: plain) else { continue }
+            attributed[attrRange].backgroundColor = Color.yellow.opacity(0.3)
+        }
+    }
+
     private static func substringRanges(
         in text: String,
         term: String

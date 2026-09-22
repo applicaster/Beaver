@@ -352,12 +352,42 @@ private struct StoragesTopBar: View {
 private struct StoragesSearchBar: View {
     @Bindable var vm: StoragesViewModel
 
+    @FocusState private var isFocused: Bool
+
     var body: some View {
+        HStack(spacing: 8) {
+            searchField
+            if !vm.groupNames.isEmpty {
+                groupPicker
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+    }
+
+    private var searchField: some View {
         HStack(spacing: 6) {
             Image(systemName: "magnifyingglass")
                 .foregroundStyle(.secondary)
-            TextField("Search keys and values…", text: $vm.searchTerm)
+
+            TextField("Discover keys and values…", text: $vm.searchTerm)
                 .textFieldStyle(.plain)
+                .focused($isFocused)
+                // Enter walks matches without leaving the box, so a
+                // search and a jump are one gesture.
+                .onSubmit { vm.nextMatch() }
+                .onKeyPress(.return, phases: .down) { press in
+                    guard press.modifiers.contains(.shift) else { return .ignored }
+                    vm.previousMatch()
+                    return .handled
+                }
+
+            if !vm.searchTerm.isEmpty {
+                MatchNavigatorCompact(vm: vm)
+            }
+
+            RegexToggle(isOn: $vm.searchIsRegex, isInvalid: vm.patternIsInvalid)
+
             if !vm.searchTerm.isEmpty {
                 Button {
                     vm.searchTerm = ""
@@ -377,12 +407,94 @@ private struct StoragesSearchBar: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .strokeBorder(Color(.separatorColor), lineWidth: 1)
+                .strokeBorder(
+                    vm.patternIsInvalid ? Color.red : Color(.separatorColor),
+                    lineWidth: 1
+                )
         )
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .help(vm.patternIsInvalid
+              ? "That regular expression doesn't compile"
+              : "Matches groups, keys and values")
+    }
+
+    private var groupPicker: some View {
+        Picker("", selection: $vm.groupFilter) {
+            Text("All groups").tag(String?.none)
+            Divider()
+            ForEach(vm.groupNames, id: \.self) { name in
+                Text(name).tag(String?.some(name))
+            }
+        }
+        .labelsHidden()
+        .frame(maxWidth: 220)
+        .help("Show only one group")
     }
 }
+
+/// `.*` switch. Turns red rather than empty when the pattern is broken,
+/// so a half-typed expression reads as "not finished" and not "no hits".
+private struct RegexToggle: View {
+    @Binding var isOn: Bool
+    let isInvalid: Bool
+
+    var body: some View {
+        Button {
+            isOn.toggle()
+        } label: {
+            Text(".*")
+                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                .padding(.horizontal, 5)
+                .padding(.vertical, 1)
+                .background(
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(tint.opacity(isOn ? 0.20 : 0))
+                )
+                .foregroundStyle(isOn ? tint : Color.secondary)
+        }
+        .buttonStyle(.plain)
+        .help(isOn ? "Regex: ON" : "Match with a regular expression")
+    }
+
+    private var tint: Color { isInvalid ? .red : .accentColor }
+}
+
+/// `current/total` with ▲ ▼, sized to sit inside the search field.
+private struct MatchNavigatorCompact: View {
+    @Bindable var vm: StoragesViewModel
+
+    var body: some View {
+        HStack(spacing: 2) {
+            Text(counterText)
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(vm.matchCount > 0 ? .primary : .secondary)
+
+            Button { vm.previousMatch() } label: {
+                Image(systemName: "chevron.up")
+                    .font(.caption2.weight(.semibold))
+                    .frame(width: 18, height: 18)
+            }
+            .buttonStyle(.plain)
+            .disabled(vm.matchCount == 0)
+            .help("Previous match (⇧↩)")
+
+            Button { vm.nextMatch() } label: {
+                Image(systemName: "chevron.down")
+                    .font(.caption2.weight(.semibold))
+                    .frame(width: 18, height: 18)
+            }
+            .buttonStyle(.plain)
+            .disabled(vm.matchCount == 0)
+            .help("Next match (↩)")
+        }
+        .fixedSize()
+    }
+
+    private var counterText: String {
+        guard vm.matchCount > 0 else { return "0/0" }
+        return "\((vm.currentMatchIndex ?? 0) + 1)/\(vm.matchCount)"
+    }
+}
+
 
 // MARK: - Outline (single layer, expandable namespaces)
 
@@ -412,24 +524,36 @@ private struct StoragesOutline: View {
     }
 
     var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                if records.isEmpty {
-                    emptyState
-                } else {
-                    ForEach(records) { record in
-                        NamespaceRow(
-                            vm: vm,
-                            namespace: vm.selectedNamespace,
-                            record: record,
-                            onDelete: onDelete,
-                            onAddInside: onAddInside,
-                            onDeleteInside: onDeleteInside
-                        )
-                        Divider().opacity(0.3)
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    if records.isEmpty {
+                        emptyState
+                    } else {
+                        ForEach(records) { record in
+                            NamespaceRow(
+                                vm: vm,
+                                namespace: vm.selectedNamespace,
+                                record: record,
+                                onDelete: onDelete,
+                                onAddInside: onAddInside,
+                                onDeleteInside: onDeleteInside
+                            )
+                            .id(record.id)
+                            Divider().opacity(0.3)
+                        }
                     }
+                    Spacer(minLength: 0)
                 }
-                Spacer(minLength: 0)
+            }
+            // Jumping between Discover matches scrolls the group holding
+            // the match into view. The token changes on every jump, so
+            // landing on the same group twice still scrolls.
+            .onChange(of: vm.scrollTarget?.token) { _, _ in
+                guard let target = vm.scrollTarget?.id else { return }
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    proxy.scrollTo(target, anchor: .top)
+                }
             }
         }
     }
@@ -650,11 +774,11 @@ private struct NamespaceRow: View {
             chevron
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 5) {
-                    Text(record.key)
+                    Text(highlighted(record.key))
                         .font(.body.weight(.medium))
                     valueTags
                 }
-                Text(summaryLine)
+                Text(highlighted(summaryLine))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -666,6 +790,7 @@ private struct NamespaceRow: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
         .background(rowBackground)
+        .overlay(currentMatchOutline)
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }
         // Whole row toggles expansion on container rows; scalars
@@ -697,6 +822,23 @@ private struct NamespaceRow: View {
                     Label("Copy value", systemImage: "doc.on.doc")
                 }
             }
+        }
+    }
+
+    private func highlighted(_ text: String) -> AttributedString {
+        Highlighting.highlight(
+            text,
+            term: vm.searchTerm.isEmpty ? nil : vm.searchTerm,
+            isRegex: vm.searchIsRegex
+        )
+    }
+
+    /// Marks the match the user jumped to, so ▲ ▼ has somewhere to land.
+    @ViewBuilder
+    private var currentMatchOutline: some View {
+        if vm.currentMatchId == record.id {
+            RoundedRectangle(cornerRadius: 4)
+                .strokeBorder(Color.accentColor, lineWidth: 2)
         }
     }
 
@@ -991,7 +1133,9 @@ private struct InnerKeyRow: View {
             JSONSyntax.row(
                 key: child.key,
                 isArrayIndex: child.key.looksLikeJSONArrayIndex,
-                kind: child.kind
+                kind: child.kind,
+                highlight: vm.searchTerm.isEmpty ? nil : vm.searchTerm,
+                isRegex: vm.searchIsRegex
             )
             // .callout monospaced (13pt) — readable at standard
             // zoom without dominating the layout. Was .caption
@@ -1058,6 +1202,12 @@ private struct InnerKeyRow: View {
         // (50+ keys) read as a comfortable list instead of a wall.
         .padding(.vertical, 6)
         .background(rowBackground)
+        .overlay {
+            if vm.currentMatchId == child.id {
+                RoundedRectangle(cornerRadius: 4)
+                    .strokeBorder(Color.accentColor, lineWidth: 2)
+            }
+        }
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }
         .onTapGesture {
