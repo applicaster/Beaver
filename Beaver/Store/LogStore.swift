@@ -393,17 +393,28 @@ public actor LogStore {
         }
     }
 
+    /// - Parameter includePayloads: when `false`, `data_json` / `context_json`
+    ///   come back `nil`. The log-feed table never renders them, and they are
+    ///   the bulk of a row: measured on a real store, `data_json` averages
+    ///   ~10 KB and peaks at 25 MB, so a session's worth of rows is ~2.6 GB
+    ///   with payloads versus ~85 MB without. The detail pane and "Copy as
+    ///   JSON" refetch the handful of rows they actually need via
+    ///   `events(ids:)`. Export keeps the default and takes the full rows.
     public func events(
         sessionId: Int64,
         filter: Filter,
         offset: Int,
-        limit: Int
+        limit: Int,
+        includePayloads: Bool = true
     ) async throws -> [EventRecord] {
         try await dbQueue.read { db in
             let (whereClause, args) = Self.where(filter: filter, sessionId: sessionId)
+            let payloadColumns = includePayloads
+                ? "data_json, context_json"
+                : "NULL AS data_json, NULL AS context_json"
             let sql = """
                 SELECT id, session_id, timestamp_ms, level, subsystem,
-                       category, message, data_json, context_json
+                       category, message, \(payloadColumns)
                 FROM event
                 \(whereClause)
                 ORDER BY timestamp_ms ASC, id ASC
@@ -412,6 +423,29 @@ public actor LogStore {
             var fullArgs = args
             fullArgs.append(contentsOf: [limit, offset])
             let rows = try Row.fetchAll(db, sql: sql, arguments: StatementArguments(fullArgs))
+            return rows.map(Self.makeEventRecord)
+        }
+    }
+
+    /// Full rows — payloads included — for a specific set of ids. The feed
+    /// loads rows without payloads; this is how the detail pane and the
+    /// clipboard actions get the JSON back for the rows in hand.
+    public func events(ids: Set<Int64>) async throws -> [EventRecord] {
+        guard !ids.isEmpty else { return [] }
+        let idList = Array(ids)
+        return try await dbQueue.read { db in
+            let placeholders = idList.map { _ in "?" }.joined(separator: ", ")
+            let rows = try Row.fetchAll(
+                db,
+                sql: """
+                    SELECT id, session_id, timestamp_ms, level, subsystem,
+                           category, message, data_json, context_json
+                    FROM event
+                    WHERE id IN (\(placeholders))
+                    ORDER BY timestamp_ms ASC, id ASC
+                """,
+                arguments: StatementArguments(idList)
+            )
             return rows.map(Self.makeEventRecord)
         }
     }
