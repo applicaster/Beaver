@@ -570,6 +570,7 @@ private struct NamespaceRow: View {
                 // eye can lock onto key:value pairs in long lists.
                 ForEach(Array(children.enumerated()), id: \.element.id) { idx, child in
                     InnerKeyRow(
+                        vm: vm,
                         namespace: namespace,
                         parent: record,
                         child: child,
@@ -794,6 +795,7 @@ private struct NamespaceRow: View {
 // MARK: - Inner key/value row (one level inside a namespace)
 
 private struct InnerKeyRow: View {
+    @Bindable var vm: StoragesViewModel
     let namespace: StorageSnapshot.Namespace
     let parent: StorageRecord
     let child: StorageRecord
@@ -824,12 +826,39 @@ private struct InnerKeyRow: View {
         }
     }
 
+    /// Containers open in place rather than only in the popover, so a
+    /// nested object reads as a tree on the screen — matching the web
+    /// viewer, where expanding a key renders the shared JSON tree inline.
+    private var isExpanded: Bool {
+        vm.isExpanded(record: child, in: namespace)
+    }
+
+    private var canExpandInline: Bool {
+        child.isContainer && !(child.children?.isEmpty ?? true)
+    }
+
     var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            row
+            if isExpanded, let grandchildren = child.children, !grandchildren.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(grandchildren) { JSONTreeView(record: $0) }
+                }
+                // Line the subtree up under this row's value column.
+                .padding(.leading, 44)
+                .padding(.trailing, 12)
+                .padding(.bottom, 6)
+            }
+        }
+    }
+
+    private var row: some View {
         HStack(spacing: 6) {
             // Indent past the parent's chevron gutter so the inner
             // key:value column aligns visually under the namespace
             // row's key label.
-            Color.clear.frame(width: 30)
+            Color.clear.frame(width: 16)
+            inlineChevron
 
             JSONSyntax.row(
                 key: child.key,
@@ -901,6 +930,10 @@ private struct InnerKeyRow: View {
         .background(rowBackground)
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }
+        .onTapGesture {
+            guard canExpandInline else { return }
+            vm.toggleExpansion(record: child, in: namespace)
+        }
         // Right-click → copy options. Mirrors NamespaceRow's
         // pattern so the muscle memory is the same on both levels.
         .contextMenu {
@@ -943,6 +976,27 @@ private struct InnerKeyRow: View {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(line, forType: .string)
         toasts.success("Copied as JSON line")
+    }
+
+    @ViewBuilder
+    private var inlineChevron: some View {
+        if canExpandInline {
+            Button {
+                vm.toggleExpansion(record: child, in: namespace)
+            } label: {
+                Image(systemName: "chevron.right")
+                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 10, height: 10)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(isExpanded ? "Collapse" : "Expand")
+        } else {
+            // Reserve the gutter so scalar and container rows align.
+            Color.clear.frame(width: 10, height: 10)
+        }
     }
 
     /// Hover wins over zebra (hover band needs to be visible);
