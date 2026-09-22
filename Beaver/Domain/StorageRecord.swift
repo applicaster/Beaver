@@ -54,6 +54,15 @@ public struct StorageRecord: Identifiable, Hashable, Sendable {
         }
     }
 
+    /// Build a record from an already-parsed `JSONSerialization` value.
+    ///
+    /// Exposed for `LeafDecoder`, which decodes a wrapped value (Base64 /
+    /// JWT / JSON text) into a plain object graph and needs it rendered
+    /// with the same tree the rest of the storage screen uses.
+    public static func make(key: String, value: Any, path: String) -> StorageRecord {
+        build(key: key, value: value, path: path)
+    }
+
     private static func build(key: String, value: Any, path: String) -> StorageRecord {
         switch value {
         case let dict as [String: Any]:

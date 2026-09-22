@@ -216,7 +216,7 @@ struct LogStoreTests {
         )
 
         // Pull one change off the stream with a timeout.
-        let received = await Task.race(timeout: .seconds(1)) {
+        let received = await race(timeout: .seconds(1)) {
             for await change in stream {
                 if case .appended(let sid, let count) = change,
                    sid == session.id, count > 0 {
@@ -231,22 +231,25 @@ struct LogStoreTests {
 
 // MARK: - Test helpers
 
-extension Task where Failure == Never {
-    /// Runs `work` with a timeout. Returns `nil` on timeout, otherwise
-    /// the result of `work`.
-    static func race<T: Sendable>(
-        timeout: Duration,
-        _ work: @Sendable @escaping () async -> T
-    ) async -> T? {
-        await withTaskGroup(of: T?.self) { group in
-            group.addTask { await work() }
-            group.addTask {
-                try? await Task.sleep(for: timeout)
-                return nil
-            }
-            let first = await group.next() ?? nil
-            group.cancelAll()
-            return first
+/// Runs `work` with a timeout. Returns `nil` on timeout, otherwise the
+/// result of `work`.
+///
+/// Deliberately a free function rather than an extension on `Task`: an
+/// `extension Task where Failure == Never` leaves `Success` unbound, so
+/// the call site can't infer it and `Task.sleep` (which needs
+/// `Success == Never`) doesn't resolve either.
+func race<T: Sendable>(
+    timeout: Duration,
+    _ work: @Sendable @escaping () async -> T
+) async -> T? {
+    await withTaskGroup(of: T?.self) { group in
+        group.addTask { await work() }
+        group.addTask {
+            try? await Task.sleep(for: timeout)
+            return nil
         }
+        let first = await group.next() ?? nil
+        group.cancelAll()
+        return first
     }
 }
