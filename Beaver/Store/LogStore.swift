@@ -378,6 +378,27 @@ public actor LogStore {
 
     // MARK: - Events: query
 
+    /// Every distinct subsystem (or category) seen in a session, for the
+    /// chip menus. Empty strings are dropped — an event without a
+    /// category isn't a value worth offering.
+    public func distinctValues(
+        sessionId: Int64,
+        facet: Filter.Facet
+    ) async throws -> [String] {
+        let column = facet == .subsystem ? "subsystem" : "category"
+        return try await dbQueue.read { db in
+            try String.fetchAll(
+                db,
+                sql: """
+                    SELECT DISTINCT \(column) FROM event
+                    WHERE session_id = ? AND \(column) <> ''
+                    ORDER BY \(column) COLLATE NOCASE
+                """,
+                arguments: [sessionId]
+            )
+        }
+    }
+
     public func eventCount(sessionId: Int64, filter: Filter) async throws -> Int {
         try await dbQueue.read { db in
             let (whereClause, args) = Self.where(filter: filter, sessionId: sessionId)
@@ -636,7 +657,8 @@ public actor LogStore {
             try Row.fetchAll(
                 db,
                 sql: """
-                    SELECT id, name, min_level, search, search_rx, exclude, exclude_rx
+                    SELECT id, name, min_level, search, search_rx, exclude, exclude_rx,
+                           subsystems, excluded_subsystems, categories, excluded_categories
                     FROM saved_filter
                     ORDER BY name COLLATE NOCASE
                 """
@@ -666,14 +688,19 @@ public actor LogStore {
             try db.execute(
                 sql: """
                     INSERT INTO saved_filter
-                      (name, min_level, search, search_rx, exclude, exclude_rx)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                      (name, min_level, search, search_rx, exclude, exclude_rx,
+                       subsystems, excluded_subsystems, categories, excluded_categories)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(name) DO UPDATE SET
-                      min_level  = excluded.min_level,
-                      search     = excluded.search,
-                      search_rx  = excluded.search_rx,
-                      exclude    = excluded.exclude,
-                      exclude_rx = excluded.exclude_rx
+                      min_level           = excluded.min_level,
+                      search              = excluded.search,
+                      search_rx           = excluded.search_rx,
+                      exclude             = excluded.exclude,
+                      exclude_rx          = excluded.exclude_rx,
+                      subsystems          = excluded.subsystems,
+                      excluded_subsystems = excluded.excluded_subsystems,
+                      categories          = excluded.categories,
+                      excluded_categories = excluded.excluded_categories
                 """,
                 arguments: [
                     trimmed,
@@ -682,6 +709,10 @@ public actor LogStore {
                     filter.searchIsRegex ? 1 : 0,
                     filter.exclude,
                     filter.excludeIsRegex ? 1 : 0,
+                    Self.encodeChips(filter.subsystems),
+                    Self.encodeChips(filter.excludedSubsystems),
+                    Self.encodeChips(filter.categories),
+                    Self.encodeChips(filter.excludedCategories),
                 ]
             )
             // Need the id after upsert — fetch it back by name.
@@ -712,9 +743,32 @@ public actor LogStore {
             search: row["search"] as String?,
             searchIsRegex: ((row["search_rx"] as Int?) ?? 0) != 0,
             exclude: row["exclude"] as String?,
-            excludeIsRegex: ((row["exclude_rx"] as Int?) ?? 0) != 0
+            excludeIsRegex: ((row["exclude_rx"] as Int?) ?? 0) != 0,
+            subsystems: decodeChips(row["subsystems"]),
+            excludedSubsystems: decodeChips(row["excluded_subsystems"]),
+            categories: decodeChips(row["categories"]),
+            excludedCategories: decodeChips(row["excluded_categories"])
         )
         return SavedFilter(id: row["id"], name: row["name"], filter: filter)
+    }
+
+    /// Chip sets ride in a JSON array: a subsystem or category can hold
+    /// any character, so there is no delimiter safe enough to split on.
+    /// An empty set stores NULL so pre-v4 rows and empty ones read back
+    /// the same.
+    private static func encodeChips(_ values: Set<String>) -> String? {
+        guard !values.isEmpty,
+              let data = try? JSONSerialization.data(withJSONObject: values.sorted())
+        else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    private static func decodeChips(_ raw: String?) -> Set<String> {
+        guard let raw,
+              let data = raw.data(using: .utf8),
+              let values = try? JSONSerialization.jsonObject(with: data) as? [String]
+        else { return [] }
+        return Set(values)
     }
 
     // MARK: - Storage snapshots
@@ -933,6 +987,44 @@ public actor LogStore {
             }
         }
 
+        // Subsystem / category chips. Sorted so the SQL text is stable
+        // for a given filter and SQLite can reuse its prepared plan.
+        appendChip(
+            column: "subsystem",
+            included: filter.subsystems,
+            excluded: filter.excludedSubsystems,
+            clauses: &clauses,
+            args: &args
+        )
+        appendChip(
+            column: "category",
+            included: filter.categories,
+            excluded: filter.excludedCategories,
+            clauses: &clauses,
+            args: &args
+        )
+
         return ("WHERE " + clauses.joined(separator: " AND "), args)
+    }
+
+    private static func appendChip(
+        column: String,
+        included: Set<String>,
+        excluded: Set<String>,
+        clauses: inout [String],
+        args: inout [any DatabaseValueConvertible]
+    ) {
+        if !included.isEmpty {
+            let values = included.sorted()
+            let placeholders = values.map { _ in "?" }.joined(separator: ", ")
+            clauses.append("\(column) IN (\(placeholders))")
+            args.append(contentsOf: values)
+        }
+        if !excluded.isEmpty {
+            let values = excluded.sorted()
+            let placeholders = values.map { _ in "?" }.joined(separator: ", ")
+            clauses.append("\(column) NOT IN (\(placeholders))")
+            args.append(contentsOf: values)
+        }
     }
 }

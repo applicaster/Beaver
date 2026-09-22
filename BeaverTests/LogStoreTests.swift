@@ -229,6 +229,125 @@ struct LogStoreTests {
     }
 }
 
+// MARK: - Chip filters
+
+extension LogStoreTests {
+
+    /// Three subsystems × two categories, so include and exclude can be
+    /// told apart from "matched everything".
+    private func seededStore() async throws -> (LogStore, Int64) {
+        let store = try LogStore(source: .inMemory)
+        let session = try await store.createSession(source: .live)
+
+        for (index, subsystem) in ["player", "auth", "network"].enumerated() {
+            for category in ["ui", "net"] {
+                await store.append(
+                    DecodedEvent(
+                        timestampMillis: UInt64(1_000_000 + index * 10),
+                        level: .info,
+                        subsystem: subsystem,
+                        category: category,
+                        message: "\(subsystem)/\(category)",
+                        dataJSON: nil,
+                        contextJSON: nil
+                    ),
+                    to: session.id
+                )
+            }
+        }
+        try await Task.sleep(for: .milliseconds(120))
+        return (store, session.id)
+    }
+
+    @Test("Including subsystems keeps only those")
+    func includedSubsystemsNarrowTheQuery() async throws {
+        let (store, sessionId) = try await seededStore()
+
+        let filter = Filter(subsystems: ["player", "auth"])
+        let rows = try await store.events(
+            sessionId: sessionId, filter: filter, offset: 0, limit: 100
+        )
+
+        #expect(rows.count == 4)
+        #expect(Set(rows.map(\.subsystem)) == ["player", "auth"])
+    }
+
+    @Test("Excluding a subsystem drops only it")
+    func excludedSubsystemsAreDropped() async throws {
+        let (store, sessionId) = try await seededStore()
+
+        let filter = Filter(excludedSubsystems: ["network"])
+        let rows = try await store.events(
+            sessionId: sessionId, filter: filter, offset: 0, limit: 100
+        )
+
+        #expect(rows.count == 4)
+        #expect(rows.allSatisfy { $0.subsystem != "network" })
+    }
+
+    @Test("Subsystem and category chips compose")
+    func chipsAcrossFacetsCombine() async throws {
+        let (store, sessionId) = try await seededStore()
+
+        // "show only player, and hide the ui category"
+        let filter = Filter(subsystems: ["player"], excludedCategories: ["ui"])
+        let rows = try await store.events(
+            sessionId: sessionId, filter: filter, offset: 0, limit: 100
+        )
+
+        #expect(rows.count == 1)
+        #expect(rows.first?.subsystem == "player")
+        #expect(rows.first?.category == "net")
+
+        // eventCount has to agree with the page it describes.
+        let count = try await store.eventCount(sessionId: sessionId, filter: filter)
+        #expect(count == rows.count)
+    }
+
+    @Test("Distinct values feed the chip menus")
+    func distinctValuesListsEachOnce() async throws {
+        let (store, sessionId) = try await seededStore()
+
+        let subsystems = try await store.distinctValues(sessionId: sessionId, facet: .subsystem)
+        let categories = try await store.distinctValues(sessionId: sessionId, facet: .category)
+
+        #expect(subsystems == ["auth", "network", "player"])
+        #expect(categories == ["net", "ui"])
+    }
+
+    @Test("A saved filter keeps its chips")
+    func savedFilterRoundTripsChips() async throws {
+        let store = try LogStore(source: .inMemory)
+        let filter = Filter(
+            minLevel: .warning,
+            search: "login",
+            subsystems: ["player"],
+            excludedSubsystems: ["network"],
+            categories: ["ui"],
+            excludedCategories: ["net"]
+        )
+
+        try await store.upsertSavedFilter(name: "Player errors", filter: filter)
+        let loaded = try await store.savedFilters()
+
+        #expect(loaded.count == 1)
+        #expect(loaded.first?.filter == filter)
+    }
+
+    @Test("An empty chip set round-trips as empty, not as a stray value")
+    func savedFilterWithoutChipsStaysEmpty() async throws {
+        let store = try LogStore(source: .inMemory)
+        let filter = Filter(minLevel: .error)
+
+        try await store.upsertSavedFilter(name: "Errors only", filter: filter)
+        let loaded = try await store.savedFilters().first
+
+        #expect(loaded?.filter.subsystems.isEmpty == true)
+        #expect(loaded?.filter.excludedCategories.isEmpty == true)
+        #expect(loaded?.filter == filter)
+    }
+}
+
 // MARK: - Test helpers
 
 /// Runs `work` with a timeout. Returns `nil` on timeout, otherwise the

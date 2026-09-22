@@ -93,6 +93,12 @@ final class LogFeedViewModel {
     /// surfaced in the ★ menu next to the filter bar.
     private(set) var savedFilters: [SavedFilter] = []
 
+    /// Values offered by the Subsystem / Category chip menus. Refreshed
+    /// as events arrive, since a session's vocabulary grows over time.
+    private(set) var availableSubsystems: [String] = []
+
+    private(set) var availableCategories: [String] = []
+
     /// Visual-only highlight term. Doesn't filter rows — just paints
     /// matches in the visible page. Matches the old Logger's "Search &
     /// highlight" field, separate from the include/exclude filters.
@@ -162,6 +168,7 @@ final class LogFeedViewModel {
     private nonisolated(unsafe) var reloadDebounce: Task<Void, Never>?
     private nonisolated(unsafe) var subscription: Task<Void, Never>?
     private nonisolated(unsafe) var matchTask: Task<Void, Never>?
+    private nonisolated(unsafe) var facetTask: Task<Void, Never>?
 
     private let reloadDebounceInterval: Duration = .milliseconds(150)
 
@@ -174,6 +181,7 @@ final class LogFeedViewModel {
         Task { await self.subscribeToChanges() }
         Task { await self.reloadBookmarks() }
         Task { await self.reloadSavedFilters() }
+        Task { await self.reloadFacetValues() }
     }
 
     deinit {
@@ -181,6 +189,7 @@ final class LogFeedViewModel {
         reloadDebounce?.cancel()
         subscription?.cancel()
         matchTask?.cancel()
+        facetTask?.cancel()
     }
 
     // MARK: - Debounced reload
@@ -298,6 +307,7 @@ final class LogFeedViewModel {
                 case .cleared(let sid) where sid == self.sessionId:
                     self.unseenCount = 0
                     self.requestReload()
+                    await self.reloadFacetValues()
                 case .bookmarksChanged(let sid) where sid == self.sessionId:
                     await self.reloadBookmarks()
                 case .savedFiltersChanged:
@@ -310,6 +320,7 @@ final class LogFeedViewModel {
     }
 
     private func handleAppended(count: Int) async {
+        scheduleFacetRefresh()
         if isPaused {
             // Frozen view — don't pull the new events into `page`.
             // Just track the gap so the UI shows the user how much
@@ -408,6 +419,49 @@ final class LogFeedViewModel {
     /// Apply a preset wholesale. Overwrites `filter`; leaves the
     /// separate `highlight` field alone since highlight is a
     /// session-local visual aid, not part of the persisted preset.
+    // MARK: - Subsystem / category chips
+
+    func values(for facet: Filter.Facet) -> [String] {
+        switch facet {
+        case .subsystem: availableSubsystems
+        case .category:  availableCategories
+        }
+    }
+
+    /// One click advances include → exclude → off; the `filter` didSet
+    /// reloads the page.
+    func cycleChip(_ value: String, in facet: Filter.Facet) {
+        guard !value.isEmpty else { return }
+        filter.cycle(value, in: facet)
+    }
+
+    func setChip(_ state: Filter.ChipState, for value: String, in facet: Filter.Facet) {
+        guard !value.isEmpty else { return }
+        filter.set(state, for: value, in: facet)
+    }
+
+    /// Debounced: under a fast stream the vocabulary barely changes, and
+    /// a DISTINCT scan per event would be wasteful.
+    private func scheduleFacetRefresh() {
+        facetTask?.cancel()
+        facetTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled else { return }
+            await self?.reloadFacetValues()
+        }
+    }
+
+    private func reloadFacetValues() async {
+        do {
+            async let subsystems = store.distinctValues(sessionId: sessionId, facet: .subsystem)
+            async let categories = store.distinctValues(sessionId: sessionId, facet: .category)
+            availableSubsystems = try await subsystems
+            availableCategories = try await categories
+        } catch {
+            print("reloadFacetValues: \(error)")
+        }
+    }
+
     func applySavedFilter(_ saved: SavedFilter) {
         filter = saved.filter
     }

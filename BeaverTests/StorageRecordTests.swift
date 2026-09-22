@@ -69,3 +69,61 @@ struct StorageRecordTests {
         #expect(weird["[0]"] as? String == "x")
     }
 }
+
+/// The include → exclude → off cycle behind the Subsystem / Category
+/// chips. A value must never sit in both sets at once, which is the
+/// invariant the SQL relies on.
+@Suite("Filter chips")
+struct FilterChipTests {
+
+    @Test("A click advances include → exclude → off")
+    func clickCyclesThroughThreeStates() {
+        var filter = Filter.none
+        #expect(filter.state(of: "Player", in: .subsystem) == .off)
+
+        filter.cycle("Player", in: .subsystem)
+        #expect(filter.state(of: "Player", in: .subsystem) == .include)
+
+        filter.cycle("Player", in: .subsystem)
+        #expect(filter.state(of: "Player", in: .subsystem) == .exclude)
+
+        filter.cycle("Player", in: .subsystem)
+        #expect(filter.state(of: "Player", in: .subsystem) == .off)
+        #expect(filter.isEmpty)
+    }
+
+    @Test("A value is never included and excluded at once")
+    func statesAreMutuallyExclusive() {
+        var filter = Filter.none
+        filter.set(.include, for: "Player", in: .subsystem)
+        filter.set(.exclude, for: "Player", in: .subsystem)
+
+        #expect(filter.subsystems.isEmpty)
+        #expect(filter.excludedSubsystems == ["Player"])
+    }
+
+    @Test("The two facets don't interfere")
+    func facetsAreIndependent() {
+        var filter = Filter.none
+        filter.set(.include, for: "Player", in: .subsystem)
+        filter.set(.exclude, for: "Player", in: .category)
+
+        #expect(filter.state(of: "Player", in: .subsystem) == .include)
+        #expect(filter.state(of: "Player", in: .category) == .exclude)
+        #expect(filter.chipCount(for: .subsystem) == 1)
+        #expect(filter.chipCount(for: .category) == 1)
+    }
+
+    @Test("Clearing one facet leaves the other alone")
+    func clearingIsScopedToOneFacet() {
+        var filter = Filter.none
+        filter.set(.include, for: "Player", in: .subsystem)
+        filter.set(.include, for: "Heartbeat", in: .category)
+
+        filter.clearChips(in: .subsystem)
+
+        #expect(filter.chipCount(for: .subsystem) == 0)
+        #expect(filter.chipCount(for: .category) == 1)
+        #expect(filter.isEmpty == false)
+    }
+}

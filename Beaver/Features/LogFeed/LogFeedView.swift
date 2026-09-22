@@ -29,6 +29,11 @@ private struct LogFeedContent: View {
     var body: some View {
         VStack(spacing: 0) {
             LogFeedFilterBar(vm: vm)
+            if vm.filter.chipCount(for: .subsystem) > 0
+                || vm.filter.chipCount(for: .category) > 0 {
+                Divider()
+                ActiveChipsBar(vm: vm)
+            }
             Divider()
             HSplitView {
                 LogFeedTable(vm: vm)
@@ -87,6 +92,11 @@ private struct LogFeedFilterBar: View {
             // Level popup — single button showing the current level;
             // click opens a menu of all five.
             LevelMenuButton(vm: vm)
+
+            // Click-to-filter values. Each click cycles
+            // include → exclude → off, same as the web viewer.
+            FacetMenuButton(vm: vm, facet: .subsystem, title: "Subsystem")
+            FacetMenuButton(vm: vm, facet: .category,  title: "Category")
 
             FilterPillField(
                 systemImage: "line.3.horizontal.decrease.circle",
@@ -457,6 +467,12 @@ private struct SavedFiltersMenu: View {
 
     private func filterSummary(_ f: Filter) -> String {
         var parts: [String] = ["≥ \(f.minLevel.displayName)"]
+        for facet in [Filter.Facet.subsystem, .category] where f.chipCount(for: facet) > 0 {
+            let included = f.included(facet).sorted()
+            let excluded = f.excluded(facet).sorted()
+            if !included.isEmpty { parts.append("only \(included.joined(separator: ", "))") }
+            if !excluded.isEmpty { parts.append("not \(excluded.joined(separator: ", "))") }
+        }
         if let s = f.search {
             parts.append(f.searchIsRegex ? "match /\(s)/" : "match \"\(s)\"")
         }
@@ -516,6 +532,8 @@ private struct SavedFilterRow: View {
         var parts: [String] = ["≥\(f.minLevel.displayName)"]
         if let s = f.search { parts.append("+\"\(s)\"") }
         if let s = f.exclude { parts.append("−\"\(s)\"") }
+        let chips = f.chipCount(for: .subsystem) + f.chipCount(for: .category)
+        if chips > 0 { parts.append("\(chips) chip\(chips == 1 ? "" : "s")") }
         return parts.joined(separator: " ")
     }
 }
@@ -637,6 +655,134 @@ private struct LevelChip: View {
                 )
         }
         .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Subsystem / category chips
+
+/// Browse every value a session has produced and set its state. The
+/// badge counts how many constraints this facet currently carries.
+private struct FacetMenuButton: View {
+    @Bindable var vm: LogFeedViewModel
+    let facet: Filter.Facet
+    let title: String
+
+    private var values: [String] { vm.values(for: facet) }
+    private var activeCount: Int { vm.filter.chipCount(for: facet) }
+
+    var body: some View {
+        Menu {
+            if values.isEmpty {
+                Text("No values yet")
+            } else {
+                ForEach(values, id: \.self) { value in
+                    Button {
+                        vm.cycleChip(value, in: facet)
+                    } label: {
+                        Label(value, systemImage: icon(for: vm.filter.state(of: value, in: facet)))
+                    }
+                }
+            }
+            if activeCount > 0 {
+                Divider()
+                Button("Clear \(title) filters") {
+                    vm.filter.clearChips(in: facet)
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(title)
+                if activeCount > 0 {
+                    Text("\(activeCount)")
+                        .font(.caption2.weight(.bold).monospacedDigit())
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Capsule().fill(Color.accentColor))
+                        .foregroundStyle(.white)
+                }
+            }
+        }
+        .menuStyle(.button)
+        .fixedSize()
+        .help("Show only, or hide, events by \(title.lowercased())")
+    }
+
+    /// Mirrors the web's ✅ / ⛔ / nothing.
+    private func icon(for state: Filter.ChipState) -> String {
+        switch state {
+        case .off:     "circle"
+        case .include: "checkmark.circle.fill"
+        case .exclude: "minus.circle.fill"
+        }
+    }
+}
+
+/// The active chips, on their own row so the filter bar keeps its
+/// height. Clicking one advances it, which is also how it is removed.
+private struct ActiveChipsBar: View {
+    @Bindable var vm: LogFeedViewModel
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                chips(for: .subsystem)
+                chips(for: .category)
+
+                Button {
+                    vm.filter.clearChips(in: .subsystem)
+                    vm.filter.clearChips(in: .category)
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Clear every chip")
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+        }
+    }
+
+    @ViewBuilder
+    private func chips(for facet: Filter.Facet) -> some View {
+        ForEach(vm.filter.included(facet).sorted(), id: \.self) { value in
+            FilterChip(value: value, state: .include) {
+                vm.cycleChip(value, in: facet)
+            }
+        }
+        ForEach(vm.filter.excluded(facet).sorted(), id: \.self) { value in
+            FilterChip(value: value, state: .exclude) {
+                vm.cycleChip(value, in: facet)
+            }
+        }
+    }
+}
+
+private struct FilterChip: View {
+    let value: String
+    let state: Filter.ChipState
+    let onTap: () -> Void
+
+    private var tint: Color { state == .include ? .green : .red }
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: 4) {
+                Image(systemName: state == .include ? "checkmark" : "minus")
+                    .font(.caption2.weight(.bold))
+                Text(value)
+                    .lineLimit(1)
+            }
+            .font(.caption)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(Capsule().fill(tint.opacity(0.18)))
+            .foregroundStyle(tint)
+        }
+        .buttonStyle(.plain)
+        .help(state == .include
+              ? "Showing only \"\(value)\" — click to hide it instead"
+              : "Hiding \"\(value)\" — click to clear")
     }
 }
 
@@ -815,29 +961,28 @@ private struct LogFeedTable: View {
             }
             Button("Copy as JSON")   { copyToPasteboard(formatAsJSON([event]), label: "Event JSON") }
         }
+        // These set a chip rather than overwriting the free-text
+        // fields, so "filter to this subsystem" no longer wipes
+        // whatever the user had typed there.
         Section {
             Button("Filter to this Subsystem") {
-                vm.filter.search = event.subsystem
-                vm.filter.searchIsRegex = false
-                toasts.info("Filtered to subsystem")
+                vm.setChip(.include, for: event.subsystem, in: .subsystem)
+                toasts.info("Showing only \(event.subsystem)")
             }
             Button("Exclude this Subsystem") {
-                vm.filter.exclude = event.subsystem
-                vm.filter.excludeIsRegex = false
-                toasts.info("Excluding subsystem")
+                vm.setChip(.exclude, for: event.subsystem, in: .subsystem)
+                toasts.info("Hiding \(event.subsystem)")
             }
         }
         if !event.category.isEmpty {
             Section {
                 Button("Filter to this Category") {
-                    vm.filter.search = event.category
-                    vm.filter.searchIsRegex = false
-                    toasts.info("Filtered to category")
+                    vm.setChip(.include, for: event.category, in: .category)
+                    toasts.info("Showing only \(event.category)")
                 }
                 Button("Exclude this Category") {
-                    vm.filter.exclude = event.category
-                    vm.filter.excludeIsRegex = false
-                    toasts.info("Excluding category")
+                    vm.setChip(.exclude, for: event.category, in: .category)
+                    toasts.info("Hiding \(event.category)")
                 }
             }
         }

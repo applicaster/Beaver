@@ -168,6 +168,28 @@ enum Schema {
             """)
         }
 
+        migrator.registerMigration("v4_filter_facets") { db in
+            // Saved filters gain the chip sets. Stored as JSON arrays
+            // because a subsystem or category may contain any character,
+            // so no delimiter is safe.
+            for column in [
+                "subsystems",
+                "excluded_subsystems",
+                "categories",
+                "excluded_categories",
+            ] {
+                try db.execute(sql: """
+                    ALTER TABLE saved_filter ADD COLUMN \(column) TEXT;
+                """)
+            }
+
+            // Subsystem already had one; category chips need the same.
+            try db.execute(sql: """
+                CREATE INDEX IF NOT EXISTS idx_event_category
+                    ON event(session_id, category);
+            """)
+        }
+
         return migrator
     }
 }
