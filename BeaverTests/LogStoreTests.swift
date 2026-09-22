@@ -41,8 +41,7 @@ struct LogStoreTests {
         }
         for e in events { await store.append(e, to: session.id) }
 
-        // Force the batch flush.
-        try await Task.sleep(for: .milliseconds(120))
+        try await waitForEvents(100, session: session.id, in: store)
 
         let total = try await store.eventCount(sessionId: session.id, filter: .none)
         #expect(total == 100)
@@ -83,7 +82,7 @@ struct LogStoreTests {
             ),
             to: session.id
         )
-        try await Task.sleep(for: .milliseconds(120))
+        try await waitForEvents(1, session: session.id, in: store)
 
         let lean = try await store.events(
             sessionId: session.id,
@@ -133,7 +132,7 @@ struct LogStoreTests {
                 to: session.id
             )
         }
-        try await Task.sleep(for: .milliseconds(120))
+        try await waitForEvents(LogLevel.allCases.count, session: session.id, in: store)
 
         // minLevel = .warning should yield only warning + error.
         let filter = Filter(minLevel: .warning)
@@ -168,7 +167,7 @@ struct LogStoreTests {
                 to: session.id
             )
         }
-        try await Task.sleep(for: .milliseconds(120))
+        try await waitForEvents(phrases.count, session: session.id, in: store)
 
         let filter = Filter(search: "user")
         let count = try await store.eventCount(sessionId: session.id, filter: filter)
@@ -207,7 +206,7 @@ struct LogStoreTests {
                 to: session.id
             )
         }
-        try await Task.sleep(for: .milliseconds(120))
+        try await waitForEvents(phrases.count, session: session.id, in: store)
 
         let filter = Filter(exclude: "beta")
         let count = try await store.eventCount(sessionId: session.id, filter: filter)
@@ -284,6 +283,37 @@ struct LogStoreTests {
 }
 
 // MARK: - Test helpers
+
+struct WaitTimedOut: Error, CustomStringConvertible {
+    let expected: Int
+    let actual: Int
+    var description: String {
+        "timed out waiting for \(expected) events to flush — store had \(actual)"
+    }
+}
+
+/// Block until `expected` events have actually landed in the store.
+///
+/// `LogStore.append` batches writes behind a 50 ms timer, so asserting
+/// after a fixed sleep is a race: swift-testing runs these suites in
+/// parallel, and on a loaded CI runner the flush lands after the
+/// assertion has already read an empty table. Poll for the condition
+/// instead of guessing a duration.
+func waitForEvents(
+    _ expected: Int,
+    session: Int64,
+    in store: LogStore,
+    timeout: Duration = .seconds(10)
+) async throws {
+    let deadline = ContinuousClock.now.advanced(by: timeout)
+    var seen = 0
+    while ContinuousClock.now < deadline {
+        seen = try await store.eventCount(sessionId: session, filter: .none)
+        if seen >= expected { return }
+        try await Task.sleep(for: .milliseconds(5))
+    }
+    throw WaitTimedOut(expected: expected, actual: seen)
+}
 
 /// Runs `work` with a timeout. Returns `nil` on timeout, otherwise
 /// the result of `work`.
