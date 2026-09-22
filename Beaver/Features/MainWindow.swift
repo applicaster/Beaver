@@ -242,7 +242,10 @@ struct MainWindow: View {
                                    tint: hasEvents ? .red : nil)
             }
             .buttonStyle(.plain)
-            .help("Delete all events in the current session")
+            .keyboardShortcut("k", modifiers: .command)
+            .help("Delete all events in the current session (⌘K)")
+            // Also gates the shortcut, so ⌘K on an already-empty
+            // session is a no-op rather than a stray toast.
             .disabled(!hasEvents)
         }
         ToolbarItem(placement: .primaryAction) {
