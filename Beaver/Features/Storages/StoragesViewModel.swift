@@ -54,6 +54,27 @@ final class StoragesViewModel {
         "\(ns.wireKey):\(r.id)"
     }
 
+    /// Rows currently showing the exact stored string instead of the
+    /// decoded view. Held here rather than in `@State` so the 2-second
+    /// auto-refresh doesn't flip the user back to Formatted mid-read.
+    var rawModeKeys: Set<String> = []
+
+    func isShowingRaw(record: StorageRecord,
+                      in namespace: StorageSnapshot.Namespace) -> Bool {
+        rawModeKeys.contains(expansionKey(record, namespace))
+    }
+
+    func setShowingRaw(_ raw: Bool,
+                       record: StorageRecord,
+                       in namespace: StorageSnapshot.Namespace) {
+        let key = expansionKey(record, namespace)
+        if raw {
+            rawModeKeys.insert(key)
+        } else {
+            rawModeKeys.remove(key)
+        }
+    }
+
     /// Substring filter applied to the visible records — matches the
     /// top-level row OR any nested descendant by key or value.
     var searchTerm: String = ""
@@ -296,6 +317,7 @@ final class StoragesViewModel {
     func clearLocalCache() {
         snapshots.removeAll()
         expandedRecordKeys.removeAll()
+        rawModeKeys.removeAll()
     }
 
     /// Produce the file payload for the Export button. Includes all

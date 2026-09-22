@@ -41,6 +41,24 @@ struct StorageRecordTests {
         #expect((result["arr"] as? NSArray)?.count == 0)
     }
 
+    @Test("A stored JSON string is kept as a string")
+    func jsonStringIsNotAutoExpanded() throws {
+        // The raw string has to survive parsing: copy and edit act on it,
+        // and the Raw tab shows it verbatim. Decoding happens at render
+        // time instead, via LeafDecoder.
+        let records = StorageRecord.parseTopLevel(
+            #"{"featureFlags":"{\"premium\":true}"}"#
+        )
+        let flags = try #require(records.first)
+
+        #expect(flags.children == nil)
+        #expect(flags.valueText == #"{"premium":true}"#)
+        guard case .string = flags.kind else {
+            Issue.record("expected a string leaf, got \(flags.kind)")
+            return
+        }
+    }
+
     @Test("An object key that looks like an array index stays an object key")
     func arrayLikeKeyDoesNotBecomeAnArray() throws {
         // Guards the old serializer, which decided array-vs-object by

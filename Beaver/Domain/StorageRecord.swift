@@ -119,15 +119,11 @@ public struct StorageRecord: Identifiable, Hashable, Sendable {
                 kind: .number(n.stringValue)
             )
         case let s as String:
-            // Auto-expand: if the string is itself a JSON document
-            // (an object or an array), parse it and render as a
-            // sub-tree. Helps with the common case of stringified
-            // JSON in storage values (`featureFlags`, JWT payloads,
-            // etc.). We rebuild against the parsed value so nested
-            // stringified-JSON keeps expanding too.
-            if let expanded = expandedFromJSONString(s, key: key, path: path) {
-                return expanded
-            }
+            // Deliberately NOT unwrapped here. A device stores almost
+            // everything as text, so a string is very often JSON, Base64
+            // or a token — but the raw string has to stay the source of
+            // truth for copy and edit. `LeafDecoder` builds the Formatted
+            // view at render time, alongside the raw one.
             return StorageRecord(id: path, key: key, valueText: s, kind: .string(s))
         default:
             let described = String(describing: value)
@@ -138,28 +134,6 @@ public struct StorageRecord: Identifiable, Hashable, Sendable {
                 kind: .string(described)
             )
         }
-    }
-
-    /// Try to parse a stored String as an object/array JSON
-    /// literal. Returns a built StorageRecord if successful, nil if
-    /// the string isn't JSON-shaped. Only triggers on values that
-    /// start with `{` or `[` (after trimming) so we don't accidentally
-    /// expand simple scalars like `"true"` or `"42"`.
-    private static func expandedFromJSONString(
-        _ raw: String,
-        key: String,
-        path: String
-    ) -> StorageRecord? {
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let first = trimmed.first, first == "{" || first == "[" else {
-            return nil
-        }
-        guard let data = trimmed.data(using: .utf8),
-              let parsed = try? JSONSerialization.jsonObject(with: data, options: [])
-        else { return nil }
-        // Only treat as expandable if it parsed into a container.
-        guard parsed is [String: Any] || parsed is [Any] else { return nil }
-        return build(key: key, value: parsed, path: path)
     }
 
     /// Flat list of self + all descendants — used to find a selected
