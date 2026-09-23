@@ -13,20 +13,24 @@ import Foundation
 /// optional `data`, optional `context`.
 enum EventJSON {
 
-    /// One exported session: its events, and the device storage as it
-    /// stood. A file holding only events still decodes — `storage` is
-    /// simply empty — so everything written before this existed, and
+    /// One exported session: its events, the device storage as it
+    /// stood, and every captured network request. A file holding only
+    /// events still decodes — `storage` and `network` are simply
+    /// empty — so everything written before this existed, and
     /// anything the old Logger app produced, still opens.
     struct Export {
         var events: [DecodedEvent]
         var storage: [StorageSnapshot.Namespace: String]
+        var network: [NetworkEntry]
 
         init(
             events: [DecodedEvent] = [],
-            storage: [StorageSnapshot.Namespace: String] = [:]
+            storage: [StorageSnapshot.Namespace: String] = [:],
+            network: [NetworkEntry] = []
         ) {
             self.events = events
             self.storage = storage
+            self.network = network
         }
     }
 
@@ -55,7 +59,8 @@ enum EventJSON {
         guard let object = json as? [String: Any] else { return Export() }
         return Export(
             events: decodeEvents(object["events"]),
-            storage: decodeStorage(object["storage"])
+            storage: decodeStorage(object["storage"]),
+            network: decodeNetwork(object["network"])
         )
     }
 
@@ -88,6 +93,23 @@ enum EventJSON {
             result[namespace] = json
         }
         return result
+    }
+
+    /// Each element is re-serialised to a string and handed to the
+    /// same parser the store uses, so an imported entry goes through
+    /// the one code path a live one does. Tolerates each element
+    /// arriving as a JSON string, mirroring `decodeEvents`.
+    private static func decodeNetwork(_ value: Any?) -> [NetworkEntry] {
+        if let array = value as? [[String: Any]] {
+            return array.compactMap { dict in
+                guard let json = jsonString(dict) else { return nil }
+                return NetworkEntry.parse(json, fallbackMillis: 0)
+            }
+        }
+        if let strings = value as? [String] {
+            return strings.compactMap { NetworkEntry.parse($0, fallbackMillis: 0) }
+        }
+        return []
     }
 
     private static func makeEvent(_ dict: [String: Any]) -> DecodedEvent? {
@@ -152,32 +174,41 @@ enum EventJSON {
         }
     }
 
-    /// Events plus the device storage in one file, so an exported
-    /// session is self-contained: "why didn't his token refresh" is
-    /// answered by the storage half, and shipping the logs alone left
-    /// it out.
+    /// Events plus the device storage and captured network requests in
+    /// one file, so an exported session is self-contained: "why didn't
+    /// his token refresh" is answered by the storage half, "what did
+    /// that call actually return" by the network half, and shipping
+    /// the logs alone left both out.
     ///
-    /// Falls back to the bare array when there is no storage, keeping
-    /// the file readable by anything that only knows the old shape.
+    /// Falls back to the bare array when there is neither storage nor
+    /// network entries, keeping the file readable by anything that
+    /// only knows the old shape. `"storage"` and `"network"` are each
+    /// omitted when empty rather than written as `{}`/`[]`.
     static func encode(
         _ events: [EventRecord],
         storage: [StorageSnapshot.Namespace: String],
+        network: [NetworkEntry] = [],
         pretty: Bool = true
     ) throws -> Data {
-        guard !storage.isEmpty else {
+        guard !storage.isEmpty || !network.isEmpty else {
             return try encode(events, pretty: pretty)
         }
-        var storageObject: [String: Any] = [:]
-        for (namespace, json) in storage {
-            guard let parsed = try? JSONSerialization.jsonObject(
-                with: Data(json.utf8)
-            ) else { continue }
-            storageObject[namespace.wireKey] = parsed
+        var root: [String: Any] = ["events": eventObjects(events)]
+        if !storage.isEmpty {
+            var storageObject: [String: Any] = [:]
+            for (namespace, json) in storage {
+                guard let parsed = try? JSONSerialization.jsonObject(
+                    with: Data(json.utf8)
+                ) else { continue }
+                storageObject[namespace.wireKey] = parsed
+            }
+            root["storage"] = storageObject
         }
-        let root: [String: Any] = [
-            "events": eventObjects(events),
-            "storage": storageObject,
-        ]
+        if !network.isEmpty {
+            root["network"] = network.compactMap { entry in
+                try? JSONSerialization.jsonObject(with: Data(entry.payloadJSON.utf8))
+            }
+        }
         let options: JSONSerialization.WritingOptions = pretty ? [.prettyPrinted] : []
         return try JSONSerialization.data(withJSONObject: root, options: options)
     }

@@ -3,15 +3,16 @@ import Foundation
 /// Builds the file both Export buttons write.
 ///
 /// There is one shape and one code path: events plus every storage
-/// namespace. Shipping the logs alone left out half of what a bug
-/// report needs — "why didn't his token refresh" is answered by the
-/// storage half — and having the two screens write different files
+/// namespace plus every network entry. Shipping the logs alone left
+/// out what a bug report needs — "why didn't his token refresh" is
+/// answered by the storage half, "what did that call return" by the
+/// network half — and having the two screens write different files
 /// meant neither was self-contained.
 public enum SessionExport {
 
-    /// How much of the log to include. Storage is not scoped: a
-    /// snapshot is small, and there is no filter on the storage screen
-    /// for a partial one to correspond to.
+    /// How much of the log to include. Storage and network entries
+    /// are not scoped: a snapshot is small, and there is no filter on
+    /// those screens for a partial one to correspond to.
     public enum Scope: Sendable {
         /// Only the events matching the log feed's current filter.
         case filtered(Filter)
@@ -51,8 +52,11 @@ public enum SessionExport {
             storage[namespace] = snapshot.dataJSON
         }
 
+        // Whole, not filtered — same reasoning as storage above.
+        let network = (try? await store.networkEntries(sessionId: sessionId)) ?? []
+
         // Nothing to say at all — don't hand the user an empty file.
-        guard !events.isEmpty || !storage.isEmpty else { return nil }
-        return try? EventJSON.encode(events, storage: storage)
+        guard !events.isEmpty || !storage.isEmpty || !network.isEmpty else { return nil }
+        return try? EventJSON.encode(events, storage: storage, network: network)
     }
 }

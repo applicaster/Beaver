@@ -73,6 +73,11 @@ When releasing:
   Each request also still appears once in the Log feed under
   `native_application/network_requests` — that's the SDK's existing
   behaviour and is unchanged (D39).
+- **Session export/import now include network requests.** An
+  exported file carries a top-level `"network"` array alongside
+  `"events"` and `"storage"` whenever the session has any; importing
+  a file replays those entries back into the new session, same as
+  events and storage.
 - **Device context in the toolbar.** A small chip on the leading
   edge of the toolbar shows the app name, version, device model,
   platform, and OS that recorded the active session. Pulled from

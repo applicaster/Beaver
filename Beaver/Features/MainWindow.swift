@@ -256,7 +256,7 @@ struct MainWindow: View {
                                    title: "Export")
             }
             .buttonStyle(.plain)
-            .help("Save the session to a JSON file — events plus the device storage")
+            .help("Save the session to a JSON file — events, network requests and the device storage")
             .disabled(!hasEvents)
             .popover(isPresented: $showingExportChoice, arrowEdge: .bottom) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -470,8 +470,9 @@ struct MainWindow: View {
 
             guard let data = try? Data(contentsOf: url) else { return }
             let imported = (try? EventJSON.decodeExport(data)) ?? .init()
-            // A storage-only file is still worth opening.
-            guard !imported.events.isEmpty || !imported.storage.isEmpty else { return }
+            // A storage-only or network-only file is still worth opening.
+            guard !imported.events.isEmpty || !imported.storage.isEmpty
+                    || !imported.network.isEmpty else { return }
 
             // Create a new "imported" session per D7 — don't destroy the
             // current live session.
@@ -486,6 +487,9 @@ struct MainWindow: View {
                     namespace: namespace,
                     dataJSON: json
                 )
+            }
+            for entry in imported.network {
+                try? await env.store.recordNetworkEntry(entry, sessionId: session.id)
             }
             // Switch the LogFeed to the newly imported session.
             env.viewingSessionId = session.id
