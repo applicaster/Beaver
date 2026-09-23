@@ -45,6 +45,19 @@ public struct StorageRecord: Identifiable, Hashable, Sendable {
 
     /// Decode the snapshot's JSON blob and return its top-level rows
     /// (one per key in the root object). Sorted alphabetically.
+    /// Parse a whole JSON document into a single labelled root.
+    ///
+    /// Used by the log detail pane, where DATA / CONTEXT are rendered as
+    /// one tree. The storage screen uses `parseTopLevel` instead, because
+    /// there the top-level keys are namespaces and each gets its own
+    /// section.
+    public static func parse(_ json: String, rootKey: String = "root") -> StorageRecord? {
+        guard let data = json.data(using: .utf8),
+              let raw = try? JSONSerialization.jsonObject(with: data, options: [])
+        else { return nil }
+        return build(key: rootKey, value: raw, path: "$")
+    }
+
     public static func parseTopLevel(_ json: String) -> [StorageRecord] {
         guard let data = json.data(using: .utf8),
               let parsed = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any]
@@ -52,6 +65,15 @@ public struct StorageRecord: Identifiable, Hashable, Sendable {
         return parsed.keys.sorted().map { key in
             build(key: key, value: parsed[key]!, path: key)
         }
+    }
+
+    /// Build a record from an already-parsed `JSONSerialization` value.
+    ///
+    /// Exposed for `LeafDecoder`, which decodes a wrapped value (Base64 /
+    /// JWT / JSON text) into a plain object graph and needs it rendered
+    /// with the same tree the rest of the storage screen uses.
+    public static func make(key: String, value: Any, path: String) -> StorageRecord {
+        build(key: key, value: value, path: path)
     }
 
     private static func build(key: String, value: Any, path: String) -> StorageRecord {
@@ -97,15 +119,11 @@ public struct StorageRecord: Identifiable, Hashable, Sendable {
                 kind: .number(n.stringValue)
             )
         case let s as String:
-            // Auto-expand: if the string is itself a JSON document
-            // (an object or an array), parse it and render as a
-            // sub-tree. Helps with the common case of stringified
-            // JSON in storage values (`featureFlags`, JWT payloads,
-            // etc.). We rebuild against the parsed value so nested
-            // stringified-JSON keeps expanding too.
-            if let expanded = expandedFromJSONString(s, key: key, path: path) {
-                return expanded
-            }
+            // Deliberately NOT unwrapped here. A device stores almost
+            // everything as text, so a string is very often JSON, Base64
+            // or a token — but the raw string has to stay the source of
+            // truth for copy and edit. `LeafDecoder` builds the Formatted
+            // view at render time, alongside the raw one.
             return StorageRecord(id: path, key: key, valueText: s, kind: .string(s))
         default:
             let described = String(describing: value)
@@ -116,28 +134,6 @@ public struct StorageRecord: Identifiable, Hashable, Sendable {
                 kind: .string(described)
             )
         }
-    }
-
-    /// Try to parse a stored String as an object/array JSON
-    /// literal. Returns a built StorageRecord if successful, nil if
-    /// the string isn't JSON-shaped. Only triggers on values that
-    /// start with `{` or `[` (after trimming) so we don't accidentally
-    /// expand simple scalars like `"true"` or `"42"`.
-    private static func expandedFromJSONString(
-        _ raw: String,
-        key: String,
-        path: String
-    ) -> StorageRecord? {
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let first = trimmed.first, first == "{" || first == "[" else {
-            return nil
-        }
-        guard let data = trimmed.data(using: .utf8),
-              let parsed = try? JSONSerialization.jsonObject(with: data, options: [])
-        else { return nil }
-        // Only treat as expandable if it parsed into a container.
-        guard parsed is [String: Any] || parsed is [Any] else { return nil }
-        return build(key: key, value: parsed, path: path)
     }
 
     /// Flat list of self + all descendants — used to find a selected
@@ -151,62 +147,40 @@ public struct StorageRecord: Identifiable, Hashable, Sendable {
         return result
     }
 
-    /// Serialize a subtree as pretty-printed JSON for the copy
-    /// button in the detail pane. Mirrors what `JSONTreeNode` does
-    /// for log-event data/context; the two could be unified into a
-    /// shared protocol later if a third tree consumer shows up.
+    /// Pretty-print a record back to JSON — the copy action on every
+    /// tree row.
+    ///
+    /// Dispatches on `kind` rather than inspecting the children's key
+    /// shape: a lone object key literally named `[0]` would otherwise be
+    /// emitted as an array, and an empty container as `null`.
     public static func serializeJSON(_ record: StorageRecord, indent: Int = 0) -> String {
         let pad      = String(repeating: "  ", count: indent)
         let innerPad = String(repeating: "  ", count: indent + 1)
 
-        if record.children == nil {
-            return jsonLiteral(for: record)
-        }
-        guard let children = record.children, !children.isEmpty else {
-            return "null"
-        }
-        // Detect "is this an array?" by checking whether every child
-        // label looks like `[0]`, `[1]`, … (the convention used by
-        // StorageRecord.build for array elements).
-        let isArray = children.allSatisfy {
-            $0.key.hasPrefix("[") && $0.key.hasSuffix("]")
-        }
-        if isArray {
+        switch record.kind {
+        case .null:          return "null"
+        case .bool(let b):   return b ? "true" : "false"
+        case .number(let n): return n
+        case .string(let s): return escapedLiteral(s)
+        case .object:
+            guard let children = record.children, !children.isEmpty else { return "{}" }
+            let parts = children.map { child in
+                "\(innerPad)\(escapedLiteral(child.key)): \(serializeJSON(child, indent: indent + 1))"
+            }
+            return "{\n" + parts.joined(separator: ",\n") + "\n\(pad)}"
+        case .array:
+            guard let children = record.children, !children.isEmpty else { return "[]" }
             let parts = children.map { child in
                 "\(innerPad)\(serializeJSON(child, indent: indent + 1))"
             }
             return "[\n" + parts.joined(separator: ",\n") + "\n\(pad)]"
-        } else {
-            let parts = children.map { child in
-                let escapedKey = child.key
-                    .replacingOccurrences(of: "\\", with: "\\\\")
-                    .replacingOccurrences(of: "\"", with: "\\\"")
-                return "\(innerPad)\"\(escapedKey)\": \(serializeJSON(child, indent: indent + 1))"
-            }
-            return "{\n" + parts.joined(separator: ",\n") + "\n\(pad)}"
         }
     }
 
-    /// Convert a leaf record back to a JSON literal for the copy
-    /// action. Uses `kind` directly — that way a stored string like
-    /// `"42"` is emitted as the quoted JSON string `"42"`, not the
-    /// number `42`.
-    private static func jsonLiteral(for record: StorageRecord) -> String {
-        switch record.kind {
-        case .null:                  return "null"
-        case .bool(let b):           return b ? "true" : "false"
-        case .number(let n):         return n
-        case .string(let raw):
-            let escaped = raw
-                .replacingOccurrences(of: "\\", with: "\\\\")
-                .replacingOccurrences(of: "\"", with: "\\\"")
-            return "\"\(escaped)\""
-        case .object:
-            // Empty containers — caller already short-circuited on
-            // non-empty ones, so children must be nil here.
-            return "{}"
-        case .array:
-            return "[]"
-        }
+    private static func escapedLiteral(_ raw: String) -> String {
+        let escaped = raw
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        return "\"\(escaped)\""
     }
 }

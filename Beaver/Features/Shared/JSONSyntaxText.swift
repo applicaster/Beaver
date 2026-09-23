@@ -60,6 +60,61 @@ enum JSONSyntax {
     }
 
     /// `"key"` (object property) or `[N]` (array index).
+    /// Same row, with search matches painted over the syntax colours.
+    /// Falls back to the plain `Text` composition when there is nothing
+    /// to highlight, so the common case stays allocation-free.
+    static func row(
+        key: String,
+        isArrayIndex: Bool,
+        kind: JSONKind,
+        highlight: String?,
+        isRegex: Bool
+    ) -> Text {
+        guard let highlight, !highlight.isEmpty else {
+            return row(key: key, isArrayIndex: isArrayIndex, kind: kind)
+        }
+        var attributed = AttributedString()
+        if isArrayIndex {
+            attributed += styled(key, punctColor)
+        } else {
+            attributed += styled("\"", punctColor)
+            attributed += styled(key, keyColor)
+            attributed += styled("\"", punctColor)
+        }
+        attributed += styled(": ", punctColor)
+        attributed += attributedValue(for: kind)
+
+        Highlighting.markMatches(in: &attributed, term: highlight, isRegex: isRegex)
+        return Text(attributed)
+    }
+
+    private static func attributedValue(for kind: JSONKind) -> AttributedString {
+        switch kind {
+        case .string(let raw):
+            return styled("\"", punctColor)
+                + styled(escape(raw), stringColor)
+                + styled("\"", punctColor)
+        case .number(let n):  return styled(n, numberColor)
+        case .bool(let b):    return styled(b ? "true" : "false", boolColor)
+        case .null:           return styled("null", nullColor, italic: true)
+        case .object(let c):  return styled("{ \(c) }", punctColor, italic: true)
+        case .array(let c):   return styled("[ \(c) ]", punctColor, italic: true)
+        }
+    }
+
+    private static func styled(
+        _ text: String,
+        _ color: Color,
+        italic: Bool = false
+    ) -> AttributedString {
+        var piece = AttributedString(text)
+        piece.foregroundColor = color
+        if italic {
+            piece.inlinePresentationIntent = .emphasized
+        }
+        return piece
+    }
+
     static func keyText(key: String, isArrayIndex: Bool) -> Text {
         if isArrayIndex {
             // Already comes formatted as `[0]`, `[1]`, … from the

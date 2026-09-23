@@ -282,6 +282,236 @@ struct LogStoreTests {
     }
 }
 
+// MARK: - Chip filters
+
+extension LogStoreTests {
+
+    /// Three subsystems × two categories, so include and exclude can be
+    /// told apart from "matched everything".
+    private func seededStore() async throws -> (LogStore, Int64) {
+        let store = try LogStore(source: .inMemory)
+        let session = try await store.createSession(source: .live)
+
+        for (index, subsystem) in ["player", "auth", "network"].enumerated() {
+            for category in ["ui", "net"] {
+                await store.append(
+                    DecodedEvent(
+                        timestampMillis: UInt64(1_000_000 + index * 10),
+                        level: .info,
+                        subsystem: subsystem,
+                        category: category,
+                        message: "\(subsystem)/\(category)",
+                        dataJSON: nil,
+                        contextJSON: nil
+                    ),
+                    to: session.id
+                )
+            }
+        }
+        try await waitForEvents(6, session: session.id, in: store)
+        return (store, session.id)
+    }
+
+    @Test("Including subsystems keeps only those")
+    func includedSubsystemsNarrowTheQuery() async throws {
+        let (store, sessionId) = try await seededStore()
+
+        let filter = Filter(subsystems: ["player", "auth"])
+        let rows = try await store.events(
+            sessionId: sessionId, filter: filter, offset: 0, limit: 100
+        )
+
+        #expect(rows.count == 4)
+        #expect(Set(rows.map(\.subsystem)) == ["player", "auth"])
+    }
+
+    @Test("Excluding a subsystem drops only it")
+    func excludedSubsystemsAreDropped() async throws {
+        let (store, sessionId) = try await seededStore()
+
+        let filter = Filter(excludedSubsystems: ["network"])
+        let rows = try await store.events(
+            sessionId: sessionId, filter: filter, offset: 0, limit: 100
+        )
+
+        #expect(rows.count == 4)
+        #expect(rows.allSatisfy { $0.subsystem != "network" })
+    }
+
+    @Test("Subsystem and category chips compose")
+    func chipsAcrossFacetsCombine() async throws {
+        let (store, sessionId) = try await seededStore()
+
+        // "show only player, and hide the ui category"
+        let filter = Filter(subsystems: ["player"], excludedCategories: ["ui"])
+        let rows = try await store.events(
+            sessionId: sessionId, filter: filter, offset: 0, limit: 100
+        )
+
+        #expect(rows.count == 1)
+        #expect(rows.first?.subsystem == "player")
+        #expect(rows.first?.category == "net")
+
+        // eventCount has to agree with the page it describes.
+        let count = try await store.eventCount(sessionId: sessionId, filter: filter)
+        #expect(count == rows.count)
+    }
+
+    @Test("Distinct values feed the chip menus")
+    func distinctValuesListsEachOnce() async throws {
+        let (store, sessionId) = try await seededStore()
+
+        let subsystems = try await store.distinctValues(sessionId: sessionId, facet: .subsystem)
+        let categories = try await store.distinctValues(sessionId: sessionId, facet: .category)
+
+        #expect(subsystems == ["auth", "network", "player"])
+        #expect(categories == ["net", "ui"])
+    }
+
+    @Test("Clearing the view hides events without deleting them")
+    func clearViewIsNonDestructive() async throws {
+        let (store, sessionId) = try await seededStore()
+
+        let all = try await store.events(
+            sessionId: sessionId, filter: .none, offset: 0, limit: 100
+        )
+        #expect(all.count == 6)
+
+        // "Clear" watermarks the newest event at the time it ran.
+        let watermark = try await store.latestEventId(sessionId: sessionId)
+        #expect(watermark == all.last?.id)
+
+        let cleared = Filter(hiddenThroughEventId: watermark)
+        let visible = try await store.events(
+            sessionId: sessionId, filter: cleared, offset: 0, limit: 100
+        )
+
+        // Screen is empty...
+        #expect(visible.isEmpty)
+        #expect(try await store.eventCount(sessionId: sessionId, filter: cleared) == 0)
+        // ...but the session still holds everything, which is what the
+        // "0 / 6" counter and Export-with-no-filter rely on.
+        #expect(try await store.eventCount(sessionId: sessionId, filter: .none) == 6)
+    }
+
+    @Test("Events after the clear show up again")
+    func eventsAfterClearAreVisible() async throws {
+        let (store, sessionId) = try await seededStore()
+        let watermark = try await store.latestEventId(sessionId: sessionId)
+
+        await store.append(
+            DecodedEvent(
+                timestampMillis: 2_000_000,
+                level: .info,
+                subsystem: "player",
+                category: "ui",
+                message: "after the clear",
+                dataJSON: nil,
+                contextJSON: nil
+            ),
+            to: sessionId
+        )
+        try await waitForEvents(7, session: sessionId, in: store)
+
+        let visible = try await store.events(
+            sessionId: sessionId,
+            filter: Filter(hiddenThroughEventId: watermark),
+            offset: 0,
+            limit: 100
+        )
+
+        #expect(visible.map(\.message) == ["after the clear"])
+    }
+
+    @Test("A saved filter doesn't carry the clear watermark")
+    func savedFilterDropsTheWatermark() async throws {
+        // An event id means nothing in another session, so persisting it
+        // would hide an arbitrary slice the next time the preset is used.
+        let store = try LogStore(source: .inMemory)
+        let filter = Filter(minLevel: .warning, hiddenThroughEventId: 12_345)
+
+        try await store.upsertSavedFilter(name: "Warnings", filter: filter)
+        let loaded = try await store.savedFilters().first
+
+        #expect(loaded?.filter.hiddenThroughEventId == nil)
+        #expect(loaded?.filter.minLevel == .warning)
+    }
+
+    @Test("Size is right even when payloads aren't loaded")
+    func sizeSurvivesPayloadFreeFetch() async throws {
+        // The feed fetches rows without payloads — they are ~97% of the
+        // bytes — so the Size column has to get the payload cost from
+        // SQL rather than from a blob it never received.
+        let store = try LogStore(source: .inMemory)
+        let session = try await store.createSession(source: .live)
+        let payload = #"{"blob":"\#(String(repeating: "x", count: 4096))"}"#
+
+        await store.append(
+            DecodedEvent(
+                timestampMillis: 1_000_000,
+                level: .info,
+                subsystem: "player",
+                category: "net",
+                message: "heavy",
+                dataJSON: payload,
+                contextJSON: nil
+            ),
+            to: session.id
+        )
+        try await waitForEvents(1, session: session.id, in: store)
+
+        let lean = try await store.events(
+            sessionId: session.id, filter: .none, offset: 0, limit: 10,
+            includePayloads: false
+        ).first
+        let full = try await store.events(
+            sessionId: session.id, filter: .none, offset: 0, limit: 10
+        ).first
+
+        // The lean row genuinely has no payload in hand...
+        #expect(lean?.dataJSON == nil)
+        // ...yet reports the same cost as the full one.
+        #expect(lean?.sizeBytes == full?.sizeBytes)
+        #expect(lean?.sizeBytes == "heavy".utf8.count
+                + "player".utf8.count
+                + "net".utf8.count
+                + payload.utf8.count)
+        #expect(lean?.sizeClass == .average)
+    }
+
+    @Test("A saved filter keeps its chips")
+    func savedFilterRoundTripsChips() async throws {
+        let store = try LogStore(source: .inMemory)
+        let filter = Filter(
+            minLevel: .warning,
+            search: "login",
+            subsystems: ["player"],
+            excludedSubsystems: ["network"],
+            categories: ["ui"],
+            excludedCategories: ["net"]
+        )
+
+        try await store.upsertSavedFilter(name: "Player errors", filter: filter)
+        let loaded = try await store.savedFilters()
+
+        #expect(loaded.count == 1)
+        #expect(loaded.first?.filter == filter)
+    }
+
+    @Test("An empty chip set round-trips as empty, not as a stray value")
+    func savedFilterWithoutChipsStaysEmpty() async throws {
+        let store = try LogStore(source: .inMemory)
+        let filter = Filter(minLevel: .error)
+
+        try await store.upsertSavedFilter(name: "Errors only", filter: filter)
+        let loaded = try await store.savedFilters().first
+
+        #expect(loaded?.filter.subsystems.isEmpty == true)
+        #expect(loaded?.filter.excludedCategories.isEmpty == true)
+        #expect(loaded?.filter == filter)
+    }
+}
+
 // MARK: - Test helpers
 
 struct WaitTimedOut: Error, CustomStringConvertible {

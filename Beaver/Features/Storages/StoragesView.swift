@@ -352,12 +352,42 @@ private struct StoragesTopBar: View {
 private struct StoragesSearchBar: View {
     @Bindable var vm: StoragesViewModel
 
+    @FocusState private var isFocused: Bool
+
     var body: some View {
+        HStack(spacing: 8) {
+            searchField
+            if !vm.groupNames.isEmpty {
+                groupPicker
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+    }
+
+    private var searchField: some View {
         HStack(spacing: 6) {
             Image(systemName: "magnifyingglass")
                 .foregroundStyle(.secondary)
-            TextField("Search keys and values…", text: $vm.searchTerm)
+
+            TextField("Discover keys and values…", text: $vm.searchTerm)
                 .textFieldStyle(.plain)
+                .focused($isFocused)
+                // Enter walks matches without leaving the box, so a
+                // search and a jump are one gesture.
+                .onSubmit { vm.nextMatch() }
+                .onKeyPress(.return, phases: .down) { press in
+                    guard press.modifiers.contains(.shift) else { return .ignored }
+                    vm.previousMatch()
+                    return .handled
+                }
+
+            if !vm.searchTerm.isEmpty {
+                MatchNavigatorCompact(vm: vm)
+            }
+
+            RegexToggle(isOn: $vm.searchIsRegex, isInvalid: vm.patternIsInvalid)
+
             if !vm.searchTerm.isEmpty {
                 Button {
                     vm.searchTerm = ""
@@ -377,12 +407,94 @@ private struct StoragesSearchBar: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .strokeBorder(Color(.separatorColor), lineWidth: 1)
+                .strokeBorder(
+                    vm.patternIsInvalid ? Color.red : Color(.separatorColor),
+                    lineWidth: 1
+                )
         )
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .help(vm.patternIsInvalid
+              ? "That regular expression doesn't compile"
+              : "Matches groups, keys and values")
+    }
+
+    private var groupPicker: some View {
+        Picker("", selection: $vm.groupFilter) {
+            Text("All groups").tag(String?.none)
+            Divider()
+            ForEach(vm.groupNames, id: \.self) { name in
+                Text(name).tag(String?.some(name))
+            }
+        }
+        .labelsHidden()
+        .frame(maxWidth: 220)
+        .help("Show only one group")
     }
 }
+
+/// `.*` switch. Turns red rather than empty when the pattern is broken,
+/// so a half-typed expression reads as "not finished" and not "no hits".
+private struct RegexToggle: View {
+    @Binding var isOn: Bool
+    let isInvalid: Bool
+
+    var body: some View {
+        Button {
+            isOn.toggle()
+        } label: {
+            Text(".*")
+                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                .padding(.horizontal, 5)
+                .padding(.vertical, 1)
+                .background(
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(tint.opacity(isOn ? 0.20 : 0))
+                )
+                .foregroundStyle(isOn ? tint : Color.secondary)
+        }
+        .buttonStyle(.plain)
+        .help(isOn ? "Regex: ON" : "Match with a regular expression")
+    }
+
+    private var tint: Color { isInvalid ? .red : .accentColor }
+}
+
+/// `current/total` with ▲ ▼, sized to sit inside the search field.
+private struct MatchNavigatorCompact: View {
+    @Bindable var vm: StoragesViewModel
+
+    var body: some View {
+        HStack(spacing: 2) {
+            Text(counterText)
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(vm.matchCount > 0 ? .primary : .secondary)
+
+            Button { vm.previousMatch() } label: {
+                Image(systemName: "chevron.up")
+                    .font(.caption2.weight(.semibold))
+                    .frame(width: 18, height: 18)
+            }
+            .buttonStyle(.plain)
+            .disabled(vm.matchCount == 0)
+            .help("Previous match (⇧↩)")
+
+            Button { vm.nextMatch() } label: {
+                Image(systemName: "chevron.down")
+                    .font(.caption2.weight(.semibold))
+                    .frame(width: 18, height: 18)
+            }
+            .buttonStyle(.plain)
+            .disabled(vm.matchCount == 0)
+            .help("Next match (↩)")
+        }
+        .fixedSize()
+    }
+
+    private var counterText: String {
+        guard vm.matchCount > 0 else { return "0/0" }
+        return "\((vm.currentMatchIndex ?? 0) + 1)/\(vm.matchCount)"
+    }
+}
+
 
 // MARK: - Outline (single layer, expandable namespaces)
 
@@ -412,24 +524,36 @@ private struct StoragesOutline: View {
     }
 
     var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                if records.isEmpty {
-                    emptyState
-                } else {
-                    ForEach(records) { record in
-                        NamespaceRow(
-                            vm: vm,
-                            namespace: vm.selectedNamespace,
-                            record: record,
-                            onDelete: onDelete,
-                            onAddInside: onAddInside,
-                            onDeleteInside: onDeleteInside
-                        )
-                        Divider().opacity(0.3)
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    if records.isEmpty {
+                        emptyState
+                    } else {
+                        ForEach(records) { record in
+                            NamespaceRow(
+                                vm: vm,
+                                namespace: vm.selectedNamespace,
+                                record: record,
+                                onDelete: onDelete,
+                                onAddInside: onAddInside,
+                                onDeleteInside: onDeleteInside
+                            )
+                            .id(record.id)
+                            Divider().opacity(0.3)
+                        }
                     }
+                    Spacer(minLength: 0)
                 }
-                Spacer(minLength: 0)
+            }
+            // Jumping between Discover matches scrolls the group holding
+            // the match into view. The token changes on every jump, so
+            // landing on the same group twice still scrolls.
+            .onChange(of: vm.scrollTarget?.token) { _, _ in
+                guard let target = vm.scrollTarget?.id else { return }
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    proxy.scrollTo(target, anchor: .top)
+                }
             }
         }
     }
@@ -548,6 +672,35 @@ private struct NamespaceRow: View {
         vm.isExpanded(record: record, in: namespace)
     }
 
+    /// A device may report a layer flat — `{"featureFlags": "{...}"}` —
+    /// so a top-level entry is not always a namespace. Decoding it here
+    /// keeps a stringified value readable instead of stranding it as an
+    /// unexpandable one-line summary.
+    private var decode: LeafDecode? {
+        guard case .string(let raw) = record.kind else { return nil }
+        return LeafDecoder.decode(raw)
+    }
+
+    private var decodedSubtree: StorageRecord? {
+        guard let tree = decode?.tree, !(tree.children?.isEmpty ?? true) else { return nil }
+        return tree
+    }
+
+    /// Expandable when it holds keys, or when its value decodes into
+    /// something worth showing.
+    private var canExpand: Bool {
+        if record.isContainer, !(record.children?.isEmpty ?? true) { return true }
+        guard let decode else { return false }
+        return decode.tree != nil || decode.text != nil
+    }
+
+    private var showingRaw: Binding<Bool> {
+        Binding(
+            get: { vm.isShowingRaw(record: record, in: namespace) },
+            set: { vm.setShowingRaw($0, record: record, in: namespace) }
+        )
+    }
+
     private var isClientConnected: Bool {
         if case .clientConnected = env.serverState { return true }
         return false
@@ -570,6 +723,7 @@ private struct NamespaceRow: View {
                 // eye can lock onto key:value pairs in long lists.
                 ForEach(Array(children.enumerated()), id: \.element.id) { idx, child in
                     InnerKeyRow(
+                        vm: vm,
                         namespace: namespace,
                         parent: record,
                         child: child,
@@ -582,6 +736,34 @@ private struct NamespaceRow: View {
                         }
                     )
                 }
+            } else if isExpanded, decode != nil {
+                decodedContent
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 8)
+            }
+        }
+    }
+
+    /// Same Formatted / Raw treatment an inner row gets, for the case
+    /// where the entry is a value rather than a namespace.
+    @ViewBuilder
+    private var decodedContent: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            DecodeTabBar(showingRaw: showingRaw, note: decode?.note ?? "")
+
+            if showingRaw.wrappedValue {
+                RawValueBlock(text: record.valueText ?? "")
+            } else if let decode {
+                if decode.isJWT {
+                    JWTSummaryView(status: decode.chip, claims: decode.jwtClaims)
+                }
+                if let tree = decodedSubtree, let children = tree.children {
+                    VStack(alignment: .leading, spacing: 2) {
+                        ForEach(children) { JSONTreeView(record: $0) }
+                    }
+                } else if let text = decode.text {
+                    RawValueBlock(text: text)
+                }
             }
         }
     }
@@ -591,9 +773,12 @@ private struct NamespaceRow: View {
         HStack(spacing: 8) {
             chevron
             VStack(alignment: .leading, spacing: 1) {
-                Text(record.key)
-                    .font(.body.weight(.medium))
-                Text(summaryLine)
+                HStack(spacing: 5) {
+                    Text(highlighted(record.key))
+                        .font(.body.weight(.medium))
+                    valueTags
+                }
+                Text(highlighted(summaryLine))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -605,12 +790,13 @@ private struct NamespaceRow: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
         .background(rowBackground)
+        .overlay(currentMatchOutline)
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }
         // Whole row toggles expansion on container rows; scalars
         // can't expand, so the tap is a no-op there.
         .onTapGesture {
-            if record.isContainer {
+            if canExpand {
                 vm.toggleExpansion(record: record, in: namespace)
             }
         }
@@ -639,9 +825,47 @@ private struct NamespaceRow: View {
         }
     }
 
+    private func highlighted(_ text: String) -> AttributedString {
+        Highlighting.highlight(
+            text,
+            term: vm.searchTerm.isEmpty ? nil : vm.searchTerm,
+            isRegex: vm.searchIsRegex
+        )
+    }
+
+    /// Marks the match the user jumped to, so ▲ ▼ has somewhere to land.
+    @ViewBuilder
+    private var currentMatchOutline: some View {
+        if vm.currentMatchId == record.id {
+            RoundedRectangle(cornerRadius: 4)
+                .strokeBorder(Color.accentColor, lineWidth: 2)
+        }
+    }
+
+    @ViewBuilder
+    private var valueTags: some View {
+        let jwt = decode?.chip ?? nestedStatus
+        if let badge = decode?.badgeKind, !(badge == .jwt && jwt != nil) {
+            DecodeBadge(kind: badge)
+        }
+        if let jwt {
+            JWTStatusChip(status: jwt, isNested: decode?.chip == nil)
+        }
+    }
+
+    private var nestedStatus: JWTStatus? {
+        if let tree = decode?.tree {
+            return LeafDecoder.nestedJWTStatus(in: tree)
+        }
+        if record.isContainer {
+            return LeafDecoder.nestedJWTStatus(in: record)
+        }
+        return nil
+    }
+
     @ViewBuilder
     private var chevron: some View {
-        if record.isContainer {
+        if canExpand {
             Button {
                 vm.toggleExpansion(record: record, in: namespace)
             } label: {
@@ -794,6 +1018,7 @@ private struct NamespaceRow: View {
 // MARK: - Inner key/value row (one level inside a namespace)
 
 private struct InnerKeyRow: View {
+    @Bindable var vm: StoragesViewModel
     let namespace: StorageSnapshot.Namespace
     let parent: StorageRecord
     let child: StorageRecord
@@ -812,29 +1037,105 @@ private struct InnerKeyRow: View {
     @State private var showingFullValue = false
     @Environment(ToastCenter.self) private var toasts
 
-    /// True when the row content is likely to be truncated and
-    /// worth surfacing an expand affordance for. Short scalars
-    /// (numbers, bools, null, short strings) fit comfortably and
-    /// don't need it; long strings and any container do.
-    private var canExpand: Bool {
+    // MARK: Decoding
+
+    /// A device stores nearly everything as text, so most leaves are
+    /// really JSON, Base64 or a token. Result is cached inside
+    /// `LeafDecoder`, so re-evaluating `body` is cheap.
+    private var decode: LeafDecode? {
+        guard case .string(let raw) = child.kind else { return nil }
+        return LeafDecoder.decode(raw)
+    }
+
+    /// The exact stored string — what copy and edit act on, and what the
+    /// Raw tab shows. Native containers have no stored string of their
+    /// own, so they fall back to pretty-printed JSON.
+    private var rawText: String {
         switch child.kind {
-        case .string(let s): return s.count > 60
-        case .object, .array: return true
-        default:              return false
+        case .string(let s):  return s
+        case .number(let n):  return n
+        case .bool(let b):    return b ? "true" : "false"
+        case .null:           return "null"
+        case .object, .array: return StorageRecord.serializeJSON(child)
         }
     }
 
+    /// The token's own verdict, when the value *is* a token.
+    private var jwtSelf: JWTStatus? { decode?.chip }
+
+    /// A verdict for a token buried inside the value — so a Base64 blob
+    /// holding a stale token reads `JWT-EXPIRED` un-expanded. The scan is
+    /// depth-bounded, and every string leaf it touches hits the decode
+    /// cache, so this stays cheap on re-render.
+    private var jwtNested: JWTStatus? {
+        guard jwtSelf == nil else { return nil }
+        if let tree = decode?.tree {
+            return LeafDecoder.nestedJWTStatus(in: tree)
+        }
+        if child.isContainer {
+            return LeafDecoder.nestedJWTStatus(in: child)
+        }
+        return nil
+    }
+
+    // MARK: Expansion
+
+    private var isExpanded: Bool {
+        vm.isExpanded(record: child, in: namespace)
+    }
+
+    private var showingRaw: Binding<Bool> {
+        Binding(
+            get: { vm.isShowingRaw(record: child, in: namespace) },
+            set: { vm.setShowingRaw($0, record: child, in: namespace) }
+        )
+    }
+
+    /// Anything with a Formatted view opens in place: a native container,
+    /// or a string that decoded to a tree or to readable text.
+    private var canExpandInline: Bool {
+        if child.isContainer, !(child.children?.isEmpty ?? true) { return true }
+        guard let decode else { return false }
+        return decode.tree != nil || decode.text != nil
+    }
+
+    /// The popover is for reading a value end-to-end. Short scalars fit
+    /// on the row and don't need it.
+    private var canOpenPopover: Bool {
+        if canExpandInline { return true }
+        if case .string(let s) = child.kind { return s.count > 60 }
+        return false
+    }
+
     var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            row
+            if isExpanded, canExpandInline {
+                expandedContent
+                    // Line the subtree up under this row's value column.
+                    .padding(.leading, 44)
+                    .padding(.trailing, 12)
+                    .padding(.bottom, 6)
+            }
+        }
+    }
+
+    // MARK: Row
+
+    private var row: some View {
         HStack(spacing: 6) {
             // Indent past the parent's chevron gutter so the inner
             // key:value column aligns visually under the namespace
             // row's key label.
-            Color.clear.frame(width: 30)
+            Color.clear.frame(width: 16)
+            inlineChevron
 
             JSONSyntax.row(
                 key: child.key,
                 isArrayIndex: child.key.looksLikeJSONArrayIndex,
-                kind: child.kind
+                kind: child.kind,
+                highlight: vm.searchTerm.isEmpty ? nil : vm.searchTerm,
+                isRegex: vm.searchIsRegex
             )
             // .callout monospaced (13pt) — readable at standard
             // zoom without dominating the layout. Was .caption
@@ -844,10 +1145,12 @@ private struct InnerKeyRow: View {
             .lineLimit(1)
             .truncationMode(.tail)
 
+            valueTags
+
             Spacer(minLength: 6)
 
             HStack(spacing: 4) {
-                if canExpand {
+                if canOpenPopover {
                     Button {
                         showingFullValue = true
                     } label: {
@@ -857,8 +1160,8 @@ private struct InnerKeyRow: View {
                             .frame(width: 22, height: 22)
                     }
                     .buttonStyle(.plain)
-                    .help(child.kind.isContainer
-                          ? "Show pretty-printed JSON"
+                    .help(canExpandInline
+                          ? "View formatted / raw"
                           : "Show full value")
                     .popover(isPresented: $showingFullValue,
                              arrowEdge: .leading) {
@@ -899,8 +1202,18 @@ private struct InnerKeyRow: View {
         // (50+ keys) read as a comfortable list instead of a wall.
         .padding(.vertical, 6)
         .background(rowBackground)
+        .overlay {
+            if vm.currentMatchId == child.id {
+                RoundedRectangle(cornerRadius: 4)
+                    .strokeBorder(Color.accentColor, lineWidth: 2)
+            }
+        }
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }
+        .onTapGesture {
+            guard canExpandInline else { return }
+            vm.toggleExpansion(record: child, in: namespace)
+        }
         // Right-click → copy options. Mirrors NamespaceRow's
         // pattern so the muscle memory is the same on both levels.
         .contextMenu {
@@ -918,6 +1231,55 @@ private struct InnerKeyRow: View {
                 copyKeyValueLine()
             } label: {
                 Label("Copy \"key\": value", systemImage: "text.alignleft")
+            }
+        }
+    }
+
+    /// The wrapper badge and the token verdict. The badge is dropped when
+    /// a `jwt` chip is already saying the same thing.
+    @ViewBuilder
+    private var valueTags: some View {
+        let jwt = jwtSelf ?? jwtNested
+        if let badge = decode?.badgeKind, !(badge == .jwt && jwt != nil) {
+            DecodeBadge(kind: badge)
+        }
+        if let jwt {
+            JWTStatusChip(status: jwt, isNested: jwtSelf == nil)
+        }
+    }
+
+    // MARK: Expanded body
+
+    @ViewBuilder
+    private var expandedContent: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            DecodeTabBar(
+                showingRaw: showingRaw,
+                note: decode?.note ?? ""
+            )
+
+            if showingRaw.wrappedValue {
+                RawValueBlock(text: rawText)
+            } else if let decode {
+                if decode.isJWT {
+                    JWTSummaryView(status: decode.chip, claims: decode.jwtClaims)
+                }
+                if let tree = decode.tree {
+                    subtree(of: tree)
+                } else if let text = decode.text {
+                    RawValueBlock(text: text)
+                }
+            } else {
+                subtree(of: child)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func subtree(of record: StorageRecord) -> some View {
+        if let children = record.children, !children.isEmpty {
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(children) { JSONTreeView(record: $0) }
             }
         }
     }
@@ -945,6 +1307,27 @@ private struct InnerKeyRow: View {
         toasts.success("Copied as JSON line")
     }
 
+    @ViewBuilder
+    private var inlineChevron: some View {
+        if canExpandInline {
+            Button {
+                vm.toggleExpansion(record: child, in: namespace)
+            } label: {
+                Image(systemName: "chevron.right")
+                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 10, height: 10)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(isExpanded ? "Collapse" : "Expand")
+        } else {
+            // Reserve the gutter so scalar and container rows align.
+            Color.clear.frame(width: 10, height: 10)
+        }
+    }
+
     /// Hover wins over zebra (hover band needs to be visible);
     /// otherwise alternate rows get a subtle tint so the eye can
     /// scan key:value pairs without counting lines.
@@ -960,6 +1343,7 @@ private struct InnerKeyRow: View {
     }
 }
 
+
 // MARK: - Full-value popover
 
 /// Shown when the user clicks the expand affordance on a long
@@ -969,7 +1353,22 @@ private struct InnerKeyRow: View {
 /// arrays) the body is pretty-printed JSON.
 private struct StorageValuePopover: View {
     let record: StorageRecord
+
     @Environment(ToastCenter.self) private var toasts
+    @State private var showingRaw = false
+
+    private var decode: LeafDecode? {
+        guard case .string(let raw) = record.kind else { return nil }
+        return LeafDecoder.decode(raw)
+    }
+
+    /// True when there is something to show other than the stored
+    /// string — a decoded tree, decoded text, or a native container.
+    private var hasFormattedView: Bool {
+        if record.kind.isContainer { return true }
+        guard let decode else { return false }
+        return decode.tree != nil || decode.text != nil
+    }
 
     /// What goes in the scrollable body — raw string for scalars,
     /// pretty JSON for containers.
@@ -997,6 +1396,13 @@ private struct StorageValuePopover: View {
                 Text(kindLabel)
                     .font(.caption.weight(.medium))
                     .foregroundStyle(.secondary)
+                if let badge = decode?.badgeKind,
+                   !(badge == .jwt && decode?.chip != nil) {
+                    DecodeBadge(kind: badge)
+                }
+                if let status = decode?.chip {
+                    JWTStatusChip(status: status)
+                }
                 if record.kind.isContainer {
                     Text("·")
                         .foregroundStyle(.secondary)
@@ -1028,16 +1434,57 @@ private struct StorageValuePopover: View {
 
             Divider()
 
+            if hasFormattedView {
+                DecodeTabBar(showingRaw: $showingRaw, note: decode?.note ?? "")
+            }
+
             ScrollView {
-                Text(bodyText)
-                    .font(.system(.callout, design: .monospaced))
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 4)
+                if showingRaw || !hasFormattedView {
+                    // The exact stored string, escaping and all.
+                    Text(bodyText)
+                        .font(.system(.callout, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 4)
+                } else {
+                    formattedBody
+                }
             }
         }
         .padding(14)
         .frame(width: 540, height: 380)
+    }
+
+    @ViewBuilder
+    private var formattedBody: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let decode {
+                if decode.isJWT {
+                    JWTSummaryView(status: decode.chip, claims: decode.jwtClaims)
+                }
+                if let tree = decode.tree {
+                    subtree(of: tree)
+                } else if let text = decode.text {
+                    Text(text)
+                        .font(.system(.callout, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            } else {
+                subtree(of: record)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 4)
+    }
+
+    @ViewBuilder
+    private func subtree(of node: StorageRecord) -> some View {
+        if let children = node.children, !children.isEmpty {
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(children) { JSONTreeView(record: $0) }
+            }
+        }
     }
 
     /// One-word kind label for the header chip — "string",

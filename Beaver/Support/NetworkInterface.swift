@@ -65,7 +65,14 @@ public enum NetworkInterface {
                 NI_NUMERICHOST
             )
             guard r == 0 else { continue }
-            let address = String(cString: hostname)
+            // `getnameinfo` NUL-terminates into a fixed NI_MAXHOST
+            // buffer, so the array is mostly trailing zeros. Cut at the
+            // terminator before decoding — the deprecated
+            // `String(cString: [CChar])` did that for us.
+            let address = String(
+                decoding: hostname.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) },
+                as: UTF8.self
+            )
             result.append(Interface(name: name, family: family, address: address))
         }
         return result

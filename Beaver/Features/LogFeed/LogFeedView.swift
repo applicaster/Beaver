@@ -29,6 +29,11 @@ private struct LogFeedContent: View {
     var body: some View {
         VStack(spacing: 0) {
             LogFeedFilterBar(vm: vm)
+            if vm.filter.chipCount(for: .subsystem) > 0
+                || vm.filter.chipCount(for: .category) > 0 {
+                Divider()
+                ActiveChipsBar(vm: vm)
+            }
             Divider()
             HSplitView {
                 LogFeedTable(vm: vm)
@@ -54,6 +59,11 @@ private struct LogFeedContent: View {
             if let target = notification.object as? Date {
                 vm.jumpToTime(target)
             }
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(for: .beaverClearView)
+        ) { _ in
+            Task { await vm.clearView() }
         }
         // Mirror the active filter to env so MainWindow's Export
         // toolbar action can scope its query to the rows currently
@@ -89,6 +99,11 @@ private struct LogFeedFilterBar: View {
             // Level popup — single button showing the current level;
             // click opens a menu of all five.
             LevelMenuButton(vm: vm)
+
+            // Click-to-filter values. Each click cycles
+            // include → exclude → off, same as the web viewer.
+            FacetMenuButton(vm: vm, facet: .subsystem, title: "Subsystem")
+            FacetMenuButton(vm: vm, facet: .category,  title: "Category")
 
             FilterPillField(
                 systemImage: "line.3.horizontal.decrease.circle",
@@ -130,12 +145,42 @@ private struct LogFeedFilterBar: View {
                 MatchNavigator(vm: vm)
             }
 
+            // "42 / 150 events" while filtering, plain count otherwise —
+            // so the filter's effect is visible without doing the maths.
             HStack(spacing: 4) {
                 Text("\(vm.totalCount)").bold().monospacedDigit()
+                if vm.totalCount != vm.unfilteredCount {
+                    Text("/ \(vm.unfilteredCount)")
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
                 Text("events").foregroundStyle(.secondary)
             }
             .font(.caption)
             .fixedSize()
+            .help(vm.totalCount == vm.unfilteredCount
+                  ? "Events in this session"
+                  : "Matching the current filter, out of every event in the session")
+
+            // Nothing was deleted, so say so and offer the way back.
+            // Without this the counter reading "0 / 9034" looks like
+            // data loss rather than a hidden backlog.
+            if vm.isViewCleared {
+                Button {
+                    vm.restoreClearedView()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.uturn.backward")
+                        Text("Show cleared")
+                    }
+                    .font(.caption.weight(.semibold))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Capsule().fill(Color.secondary.opacity(0.18)))
+                }
+                .buttonStyle(.plain)
+                .help("Bring back the events Clear hid — they were never deleted")
+            }
 
             // "↓ N new events" pill — shown only when paused with
             // unseen events queued up. Click resumes the live feed.
@@ -459,6 +504,12 @@ private struct SavedFiltersMenu: View {
 
     private func filterSummary(_ f: Filter) -> String {
         var parts: [String] = ["≥ \(f.minLevel.displayName)"]
+        for facet in [Filter.Facet.subsystem, .category] where f.chipCount(for: facet) > 0 {
+            let included = f.included(facet).sorted()
+            let excluded = f.excluded(facet).sorted()
+            if !included.isEmpty { parts.append("only \(included.joined(separator: ", "))") }
+            if !excluded.isEmpty { parts.append("not \(excluded.joined(separator: ", "))") }
+        }
         if let s = f.search {
             parts.append(f.searchIsRegex ? "match /\(s)/" : "match \"\(s)\"")
         }
@@ -518,6 +569,8 @@ private struct SavedFilterRow: View {
         var parts: [String] = ["≥\(f.minLevel.displayName)"]
         if let s = f.search { parts.append("+\"\(s)\"") }
         if let s = f.exclude { parts.append("−\"\(s)\"") }
+        let chips = f.chipCount(for: .subsystem) + f.chipCount(for: .category)
+        if chips > 0 { parts.append("\(chips) chip\(chips == 1 ? "" : "s")") }
         return parts.joined(separator: " ")
     }
 }
@@ -642,15 +695,153 @@ private struct LevelChip: View {
     }
 }
 
+// MARK: - Subsystem / category chips
+
+/// Browse every value a session has produced and set its state. The
+/// badge counts how many constraints this facet currently carries.
+private struct FacetMenuButton: View {
+    @Bindable var vm: LogFeedViewModel
+    let facet: Filter.Facet
+    let title: String
+
+    private var values: [String] { vm.values(for: facet) }
+    private var activeCount: Int { vm.filter.chipCount(for: facet) }
+
+    var body: some View {
+        Menu {
+            if values.isEmpty {
+                Text("No values yet")
+            } else {
+                ForEach(values, id: \.self) { value in
+                    Button {
+                        vm.cycleChip(value, in: facet)
+                    } label: {
+                        Label(value, systemImage: icon(for: vm.filter.state(of: value, in: facet)))
+                    }
+                }
+            }
+            if activeCount > 0 {
+                Divider()
+                Button("Clear \(title) filters") {
+                    vm.filter.clearChips(in: facet)
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(title)
+                if activeCount > 0 {
+                    Text("\(activeCount)")
+                        .font(.caption2.weight(.bold).monospacedDigit())
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Capsule().fill(Color.accentColor))
+                        .foregroundStyle(.white)
+                }
+            }
+        }
+        .menuStyle(.button)
+        .fixedSize()
+        .help("Show only, or hide, events by \(title.lowercased())")
+    }
+
+    /// Mirrors the web's ✅ / ⛔ / nothing.
+    private func icon(for state: Filter.ChipState) -> String {
+        switch state {
+        case .off:     "circle"
+        case .include: "checkmark.circle.fill"
+        case .exclude: "minus.circle.fill"
+        }
+    }
+}
+
+/// The active chips, on their own row so the filter bar keeps its
+/// height. Clicking one advances it, which is also how it is removed.
+private struct ActiveChipsBar: View {
+    @Bindable var vm: LogFeedViewModel
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                chips(for: .subsystem)
+                chips(for: .category)
+
+                Button {
+                    vm.filter.clearChips(in: .subsystem)
+                    vm.filter.clearChips(in: .category)
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Clear every chip")
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+        }
+    }
+
+    @ViewBuilder
+    private func chips(for facet: Filter.Facet) -> some View {
+        ForEach(vm.filter.included(facet).sorted(), id: \.self) { value in
+            FilterChip(value: value, state: .include) {
+                vm.cycleChip(value, in: facet)
+            }
+        }
+        ForEach(vm.filter.excluded(facet).sorted(), id: \.self) { value in
+            FilterChip(value: value, state: .exclude) {
+                vm.cycleChip(value, in: facet)
+            }
+        }
+    }
+}
+
+private struct FilterChip: View {
+    let value: String
+    let state: Filter.ChipState
+    let onTap: () -> Void
+
+    private var tint: Color { state == .include ? .green : .red }
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: 4) {
+                Image(systemName: state == .include ? "checkmark" : "minus")
+                    .font(.caption2.weight(.bold))
+                Text(value)
+                    .lineLimit(1)
+            }
+            .font(.caption)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(Capsule().fill(tint.opacity(0.18)))
+            .foregroundStyle(tint)
+        }
+        .buttonStyle(.plain)
+        .help(state == .include
+              ? "Showing only \"\(value)\" — click to hide it instead"
+              : "Hiding \"\(value)\" — click to clear")
+    }
+}
+
 // MARK: - Table
 
 private struct LogFeedTable: View {
     @Bindable var vm: LogFeedViewModel
     @Environment(ToastCenter.self) private var toasts
 
+    /// Column widths / order / visibility, remembered between launches.
+    /// `TableColumnCustomization` is Codable, so it round-trips through
+    /// a single defaults string.
+    @AppStorage("logFeed.columnLayout") private var storedColumnLayout = ""
+    @State private var columnLayout = TableColumnCustomization<LogFeedViewModel.CollapsedRow>()
+
     var body: some View {
         ScrollViewReader { proxy in
-            Table(vm.collapsedRows, selection: $vm.selectedEventId) {
+            Table(
+                vm.collapsedRows,
+                selection: $vm.selectedEventId,
+                columnCustomization: $columnLayout
+            ) {
                 TableColumn("Level") { (row: LogFeedViewModel.CollapsedRow) in
                     HStack(spacing: 4) {
                         if vm.isBookmarked(row.event.id) {
@@ -667,6 +858,7 @@ private struct LogFeedTable: View {
                     }
                 }
                 .width(95)
+                .customizationID("level")
 
                 TableColumn("Message") { (row: LogFeedViewModel.CollapsedRow) in
                     HStack(spacing: 6) {
@@ -687,16 +879,30 @@ private struct LogFeedTable: View {
                     }
                 }
                 .width(min: 400, ideal: 600)
+                .customizationID("message")
 
                 TableColumn("Subsystem") { (row: LogFeedViewModel.CollapsedRow) in
                     Text(highlighted(row.event.subsystem))
                 }
                 .width(min: 150, ideal: 200)
+                .customizationID("subsystem")
 
                 TableColumn("Category") { (row: LogFeedViewModel.CollapsedRow) in
                     Text(highlighted(row.event.category))
                 }
                 .width(min: 120, ideal: 150)
+                .customizationID("category")
+
+                // What this entry costs on the wire. Colour-coded so an
+                // expensive log stands out while scrolling.
+                TableColumn("Size") { (row: LogFeedViewModel.CollapsedRow) in
+                    Text(row.event.sizeText)
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(sizeTint(row.event.sizeClass))
+                        .help(sizeHelp(row.event.sizeClass))
+                }
+                .width(70)
+                .customizationID("size")
 
                 TableColumn("Time") { (row: LogFeedViewModel.CollapsedRow) in
                     Text(row.event.timeOfDayWithMillis)
@@ -704,6 +910,36 @@ private struct LogFeedTable: View {
                         .foregroundStyle(.secondary)
                 }
                 .width(120)
+                .customizationID("time")
+            }
+            // j / k mirror the arrow keys, and Esc closes the detail
+            // pane — the shortcuts the web viewer documents.
+            .onKeyPress { press in
+                switch press.key {
+                case "j": vm.selectNextRow();     return .handled
+                case "k": vm.selectPreviousRow(); return .handled
+                default:  return .ignored
+                }
+            }
+            .onKeyPress(.escape) {
+                guard vm.selectedEventId != nil else { return .ignored }
+                vm.selectedEventId = nil
+                return .handled
+            }
+            .onAppear {
+                guard let data = storedColumnLayout.data(using: .utf8),
+                      let saved = try? JSONDecoder().decode(
+                          TableColumnCustomization<LogFeedViewModel.CollapsedRow>.self,
+                          from: data
+                      )
+                else { return }
+                columnLayout = saved
+            }
+            .onChange(of: columnLayout) { _, layout in
+                guard let data = try? JSONEncoder().encode(layout),
+                      let text = String(data: data, encoding: .utf8)
+                else { return }
+                storedColumnLayout = text
             }
             .contextMenu(forSelectionType: EventRecord.ID.self) { ids in
                 rowContextMenu(for: events(forSelection: ids))
@@ -773,6 +1009,22 @@ private struct LogFeedTable: View {
         }
     }
 
+    private func sizeTint(_ sizeClass: EventRecord.SizeClass) -> Color {
+        switch sizeClass {
+        case .normal:    .secondary
+        case .average:   .yellow
+        case .oversized: .red
+        }
+    }
+
+    private func sizeHelp(_ sizeClass: EventRecord.SizeClass) -> String {
+        switch sizeClass {
+        case .normal:    "Ordinary size"
+        case .average:   "Over 1 KB — on the heavy side"
+        case .oversized: "Over 8 KB — worth asking why"
+        }
+    }
+
     private func highlighted(_ text: String) -> AttributedString {
         // Visual highlight only — uses the dedicated `highlight` field,
         // not the `filter.search` (which controls which rows show).
@@ -817,29 +1069,28 @@ private struct LogFeedTable: View {
             }
             Button("Copy as JSON")   { copyAsJSON(ids: [event.id], label: "Event JSON") }
         }
+        // These set a chip rather than overwriting the free-text
+        // fields, so "filter to this subsystem" no longer wipes
+        // whatever the user had typed there.
         Section {
             Button("Filter to this Subsystem") {
-                vm.filter.search = event.subsystem
-                vm.filter.searchIsRegex = false
-                toasts.info("Filtered to subsystem")
+                vm.setChip(.include, for: event.subsystem, in: .subsystem)
+                toasts.info("Showing only \(event.subsystem)")
             }
             Button("Exclude this Subsystem") {
-                vm.filter.exclude = event.subsystem
-                vm.filter.excludeIsRegex = false
-                toasts.info("Excluding subsystem")
+                vm.setChip(.exclude, for: event.subsystem, in: .subsystem)
+                toasts.info("Hiding \(event.subsystem)")
             }
         }
         if !event.category.isEmpty {
             Section {
                 Button("Filter to this Category") {
-                    vm.filter.search = event.category
-                    vm.filter.searchIsRegex = false
-                    toasts.info("Filtered to category")
+                    vm.setChip(.include, for: event.category, in: .category)
+                    toasts.info("Showing only \(event.category)")
                 }
                 Button("Exclude this Category") {
-                    vm.filter.exclude = event.category
-                    vm.filter.excludeIsRegex = false
-                    toasts.info("Excluding category")
+                    vm.setChip(.exclude, for: event.category, in: .category)
+                    toasts.info("Hiding \(event.category)")
                 }
             }
         }

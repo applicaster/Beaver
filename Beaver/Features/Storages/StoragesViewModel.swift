@@ -23,7 +23,15 @@ final class StoragesViewModel {
 
     /// The currently-active storage layer tab (Session / Local /
     /// Keychain). Drives which set of records the outline displays.
-    var selectedNamespace: StorageSnapshot.Namespace = .session
+    var selectedNamespace: StorageSnapshot.Namespace = .session {
+        didSet {
+            guard oldValue != selectedNamespace else { return }
+            // Group names are per-layer, so a filter picked on one tab
+            // means nothing on the next.
+            groupFilter = nil
+            recomputeMatches()
+        }
+    }
 
     /// Latest snapshot per namespace. Refreshed from the store after
     /// any `.storageUpdated` broadcast for this session.
@@ -54,9 +62,123 @@ final class StoragesViewModel {
         "\(ns.wireKey):\(r.id)"
     }
 
+    /// Rows currently showing the exact stored string instead of the
+    /// decoded view. Held here rather than in `@State` so the 2-second
+    /// auto-refresh doesn't flip the user back to Formatted mid-read.
+    var rawModeKeys: Set<String> = []
+
+    func isShowingRaw(record: StorageRecord,
+                      in namespace: StorageSnapshot.Namespace) -> Bool {
+        rawModeKeys.contains(expansionKey(record, namespace))
+    }
+
+    func setShowingRaw(_ raw: Bool,
+                       record: StorageRecord,
+                       in namespace: StorageSnapshot.Namespace) {
+        let key = expansionKey(record, namespace)
+        if raw {
+            rawModeKeys.insert(key)
+        } else {
+            rawModeKeys.remove(key)
+        }
+    }
+
     /// Substring filter applied to the visible records — matches the
     /// top-level row OR any nested descendant by key or value.
-    var searchTerm: String = ""
+    // MARK: - Discover
+
+    var searchTerm: String = "" {
+        didSet {
+            guard oldValue != searchTerm else { return }
+            recomputeMatches()
+        }
+    }
+
+    /// `.*` mode — the only way to match two different keys at once,
+    /// e.g. `device(Make|Name)`.
+    var searchIsRegex: Bool = false {
+        didSet {
+            guard oldValue != searchIsRegex else { return }
+            recomputeMatches()
+        }
+    }
+
+    /// Show only this top-level group; `nil` shows them all.
+    var groupFilter: String? = nil {
+        didSet {
+            guard oldValue != groupFilter else { return }
+            recomputeMatches()
+        }
+    }
+
+    /// Ids of every matching node, in document order — a single key can
+    /// hold several matches deep inside it, and each one is reachable.
+    private(set) var matchIds: [String] = []
+
+    /// Top-level record each match lives under, so jumping to one can
+    /// expand the right group.
+    private var matchOwners: [String: String] = [:]
+
+    private(set) var currentMatchIndex: Int? = nil
+
+    /// Node the user last jumped to — outlined in the list.
+    private(set) var currentMatchId: String? = nil
+
+    /// Changes identity on every jump so the list scrolls even when the
+    /// same row is targeted twice.
+    private(set) var scrollTarget: (id: String, token: UUID)? = nil
+
+    var matchCount: Int { matchIds.count }
+
+    /// True when `.*` is on and the pattern doesn't compile. The box
+    /// turns red and nothing matches, but the list stays visible so the
+    /// user doesn't lose their place.
+    var patternIsInvalid: Bool { matcher.isInvalid }
+
+    private var matcher: StorageSearch.Matcher {
+        StorageSearch.matcher(term: searchTerm, isRegex: searchIsRegex)
+    }
+
+    /// Every group in the current layer, for the picker.
+    var groupNames: [String] {
+        records(in: selectedNamespace).map(\.key)
+    }
+
+    func nextMatch() { step(by: 1) }
+    func previousMatch() { step(by: -1) }
+
+    private func step(by delta: Int) {
+        guard !matchIds.isEmpty else { return }
+        let current = currentMatchIndex ?? (delta > 0 ? -1 : 0)
+        let count = matchIds.count
+        let next = ((current + delta) % count + count) % count
+
+        currentMatchIndex = next
+        let id = matchIds[next]
+        currentMatchId = id
+
+        guard let ownerId = matchOwners[id],
+              let owner = records(in: selectedNamespace).first(where: { $0.id == ownerId })
+        else { return }
+        // The match may be buried inside a collapsed group.
+        expandedRecordKeys.insert(expansionKey(owner, selectedNamespace))
+        scrollTarget = (ownerId, UUID())
+    }
+
+    private func recomputeMatches() {
+        let found = StorageSearch.collectMatches(
+            in: groupScopedRecords(in: selectedNamespace),
+            with: matcher
+        )
+        matchIds = found.map(\.id)
+        matchOwners = Dictionary(
+            found.map { ($0.id, $0.ownerId) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        currentMatchIndex = matchIds.isEmpty ? nil : 0
+        currentMatchId = matchIds.first
+    }
+
 
     /// Periodic auto-refresh toggle. When on, the view fires a
     /// `storage.list` every `autoRefreshInterval` seconds via a
@@ -118,17 +240,17 @@ final class StoragesViewModel {
     /// Records in a namespace narrowed by `searchTerm`. A top-level
     /// record matches if any descendant key or value contains the
     /// term (case-insensitive). Empty search term returns all.
-    func filteredRecords(in namespace: StorageSnapshot.Namespace) -> [StorageRecord] {
+    /// Records left after the group picker, before Discover narrows them.
+    private func groupScopedRecords(
+        in namespace: StorageSnapshot.Namespace
+    ) -> [StorageRecord] {
         let all = records(in: namespace)
-        let trimmed = searchTerm.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return all }
-        let needle = trimmed.lowercased()
-        return all.filter { record in
-            record.allDescendants().contains { node in
-                node.key.lowercased().contains(needle) ||
-                (node.valueText?.lowercased().contains(needle) ?? false)
-            }
-        }
+        guard let groupFilter else { return all }
+        return all.filter { $0.key == groupFilter }
+    }
+
+    func filteredRecords(in namespace: StorageSnapshot.Namespace) -> [StorageRecord] {
+        StorageSearch.filter(groupScopedRecords(in: namespace), with: matcher)
     }
 
     /// Total namespaces present in the latest snapshot set.
@@ -296,6 +418,8 @@ final class StoragesViewModel {
     func clearLocalCache() {
         snapshots.removeAll()
         expandedRecordKeys.removeAll()
+        rawModeKeys.removeAll()
+        recomputeMatches()
     }
 
     /// Produce the file payload for the Export button. Includes all
@@ -329,6 +453,7 @@ final class StoragesViewModel {
             }
         }
         snapshots = fresh
+        recomputeMatches()
     }
 
     private func subscribeToChanges() async {

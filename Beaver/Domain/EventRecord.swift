@@ -23,6 +23,15 @@ public struct EventRecord: Identifiable, Hashable, Sendable {
     public let dataJSON: String?           // raw JSON blob
     public let contextJSON: String?        // raw JSON blob
 
+    /// UTF-8 bytes of `data_json` + `context_json`, measured by SQLite.
+    ///
+    /// The feed deliberately fetches rows without payloads (they are
+    /// ~97% of the bytes), so the Size column can't measure what it
+    /// isn't holding. `LENGTH(CAST(… AS BLOB))` costs nothing next to
+    /// transferring the blob itself. `nil` means "not measured" — the
+    /// size then falls back to whatever strings are actually loaded.
+    public let payloadBytes: Int?
+
     public init(
         id: Int64,
         sessionId: Int64,
@@ -32,7 +41,8 @@ public struct EventRecord: Identifiable, Hashable, Sendable {
         category: String,
         message: String,
         dataJSON: String?,
-        contextJSON: String?
+        contextJSON: String?,
+        payloadBytes: Int? = nil
     ) {
         self.id = id
         self.sessionId = sessionId
@@ -43,6 +53,52 @@ public struct EventRecord: Identifiable, Hashable, Sendable {
         self.message = message
         self.dataJSON = dataJSON
         self.contextJSON = contextJSON
+        self.payloadBytes = payloadBytes
+    }
+
+    /// UTF-8 byte cost of the whole entry — the honest wire/storage
+    /// price of one log line. Mirrors the web viewer's Size column, so
+    /// "which log is expensive?" gets the same answer in both apps.
+    public var sizeBytes: Int {
+        let header = message.utf8.count
+            + subsystem.utf8.count
+            + category.utf8.count
+        if let payloadBytes { return header + payloadBytes }
+        return header
+            + (dataJSON?.utf8.count ?? 0)
+            + (contextJSON?.utf8.count ?? 0)
+    }
+
+    public enum SizeClass: Sendable {
+        case normal
+        case average
+        case oversized
+    }
+
+    /// Same thresholds as the web viewer: under 1 KB is unremarkable,
+    /// 8 KB and up is worth asking about.
+    public var sizeClass: SizeClass {
+        switch sizeBytes {
+        case ..<1024:      .normal
+        case ..<(8 * 1024): .average
+        default:            .oversized
+        }
+    }
+
+    /// Compact and human-readable: "512 B", "3.2 KB", "1.4 MB".
+    public var sizeText: String {
+        let bytes = sizeBytes
+        if bytes < 1024 { return "\(bytes) B" }
+        let kb = Double(bytes) / 1024
+        if kb < 1024 {
+            return kb < 10
+                ? String(format: "%.1f KB", kb)
+                : "\(Int(kb.rounded())) KB"
+        }
+        let mb = kb / 1024
+        return mb < 10
+            ? String(format: "%.1f MB", mb)
+            : "\(Int(mb.rounded())) MB"
     }
 
     public var date: Date {
