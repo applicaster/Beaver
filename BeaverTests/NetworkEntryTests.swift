@@ -90,6 +90,8 @@ struct NetworkEntryTests {
     @Test(arguments: [
         (200, NetworkEntry.StatusClass.success), (301, .redirect),
         (404, .clientError), (500, .serverError), (101, .other),
+        // iOS sends NSURLError codes as status: cancelled, offline.
+        (-999, .failed), (-1009, .failed), (0, .failed),
     ])
     func statusClassBuckets(status: Int, expected: NetworkEntry.StatusClass) throws {
         let e = try #require(NetworkEntry.parse(#"{"url":"u","status":\#(status)}"#, fallbackMillis: 0))

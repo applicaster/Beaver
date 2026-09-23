@@ -276,7 +276,7 @@ outer envelope (double-encoded).
 | `timing.endTime`    | number or numeric string, ms since epoch | optional | used to derive `duration` when `timing.duration` is absent |
 | `timing.duration`   | number or numeric string, ms    | optional     | preferred over `endTime − startTime` when present |
 | `timestamp`         | number, ms since epoch          | optional     | fallback for `timing.startTime` |
-| `status`            | number or numeric string        | optional     | absent means a transport failure (see `error`) |
+| `status`            | number or numeric string        | optional     | absent, or below 100 (iOS sends NSURLError codes such as `-999` cancelled, `-1009` offline), means a transport failure (see `error`) |
 | `statusText`        | string                          | optional     | |
 | `requestHeaders`    | object, string → string         | optional     | defaults to `{}`; the SDK redacts sensitive values (e.g. `Authorization`) to `"[REDACTED]"` before sending |
 | `responseHeaders`   | object, string → string         | optional     | defaults to `{}` |

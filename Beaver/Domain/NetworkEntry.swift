@@ -55,7 +55,9 @@ public struct NetworkEntry: Identifiable, Hashable, Sendable {
     }
 
     public var statusClass: StatusClass {
-        guard let status else { return .failed }
+        // No status, or a non-HTTP code: iOS sends NSURLError codes here
+        // (-999 cancelled, -1009 offline), so they are transport failures.
+        guard let status, status >= 100 else { return .failed }
         switch status {
         case 200..<300: return .success
         case 300..<400: return .redirect
