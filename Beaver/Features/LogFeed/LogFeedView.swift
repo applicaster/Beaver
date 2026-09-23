@@ -71,7 +71,9 @@ private struct LogFeedContent: View {
         // the view mounts with a non-empty filter (saved-preset
         // selection survives session switches).
         .onAppear { env.activeFilter = vm.filter }
-        .onDisappear { env.activeFilter = .none }
+        // Deliberately NOT cleared on disappear: the Storages tab has
+        // an Export too, and "Export filtered" there has to mean the
+        // same filter the user set on this screen.
         .onChange(of: vm.filter) { _, newValue in
             env.activeFilter = newValue
         }
