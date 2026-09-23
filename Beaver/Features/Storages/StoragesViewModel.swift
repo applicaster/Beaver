@@ -59,7 +59,12 @@ final class StoragesViewModel {
 
     private func expansionKey(_ r: StorageRecord,
                               _ ns: StorageSnapshot.Namespace) -> String {
-        "\(ns.wireKey):\(r.id)"
+        expansionKey(id: r.id, ns)
+    }
+
+    private func expansionKey(id: String,
+                              _ ns: StorageSnapshot.Namespace) -> String {
+        "\(ns.wireKey):\(id)"
     }
 
     /// Rows currently showing the exact stored string instead of the
@@ -115,9 +120,9 @@ final class StoragesViewModel {
     /// hold several matches deep inside it, and each one is reachable.
     private(set) var matchIds: [String] = []
 
-    /// Top-level record each match lives under, so jumping to one can
-    /// expand the right group.
-    private var matchOwners: [String: String] = [:]
+    /// Where each match is shown: its top-level group, and the row in
+    /// that group holding it — so a jump can open both and land on it.
+    private var matchPlaces: [String: (ownerId: String, rowId: String)] = [:]
 
     private(set) var currentMatchIndex: Int? = nil
 
@@ -126,7 +131,7 @@ final class StoragesViewModel {
 
     /// Changes identity on every jump so the list scrolls even when the
     /// same row is targeted twice.
-    private(set) var scrollTarget: (id: String, token: UUID)? = nil
+    private(set) var scrollTarget: (ownerId: String, rowId: String, token: UUID)? = nil
 
     var matchCount: Int { matchIds.count }
 
@@ -157,12 +162,14 @@ final class StoragesViewModel {
         let id = matchIds[next]
         currentMatchId = id
 
-        guard let ownerId = matchOwners[id],
-              let owner = records(in: selectedNamespace).first(where: { $0.id == ownerId })
-        else { return }
-        // The match may be buried inside a collapsed group.
-        expandedRecordKeys.insert(expansionKey(owner, selectedNamespace))
-        scrollTarget = (ownerId, UUID())
+        guard let place = matchPlaces[id] else { return }
+        // The match may be buried inside a collapsed group, and deeper
+        // still inside a collapsed row of it.
+        expandedRecordKeys.insert(expansionKey(id: place.ownerId, selectedNamespace))
+        if place.rowId != id {
+            expandedRecordKeys.insert(expansionKey(id: place.rowId, selectedNamespace))
+        }
+        scrollTarget = (place.ownerId, place.rowId, UUID())
     }
 
     private func recomputeMatches() {
@@ -171,8 +178,8 @@ final class StoragesViewModel {
             with: matcher
         )
         matchIds = found.map(\.id)
-        matchOwners = Dictionary(
-            found.map { ($0.id, $0.ownerId) },
+        matchPlaces = Dictionary(
+            found.map { ($0.id, (ownerId: $0.ownerId, rowId: $0.rowId)) },
             uniquingKeysWith: { first, _ in first }
         )
         currentMatchIndex = matchIds.isEmpty ? nil : 0

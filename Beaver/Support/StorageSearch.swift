@@ -72,17 +72,24 @@ public enum StorageSearch {
     }
 
     /// Every matching node in document order, each paired with the
-    /// top-level record it lives under — so jumping to a match can
-    /// expand the right group.
+    /// top-level record it lives under and the row that shows it — the
+    /// record itself, or the first-level child it sits in. Jumping to a
+    /// match expands both and scrolls to that row; the owner alone left a
+    /// deep match collapsed and a far-down one off screen.
     public static func collectMatches(
         in records: [StorageRecord],
         with matcher: Matcher
-    ) -> [(id: String, ownerId: String)] {
+    ) -> [(id: String, ownerId: String, rowId: String)] {
         guard matcher.isFiltering else { return [] }
-        var found: [(id: String, ownerId: String)] = []
+        var found: [(id: String, ownerId: String, rowId: String)] = []
         for top in filter(records, with: matcher) {
-            for node in top.allDescendants() where matches(node, matcher) {
-                found.append((id: node.id, ownerId: top.id))
+            if matches(top, matcher) {
+                found.append((id: top.id, ownerId: top.id, rowId: top.id))
+            }
+            for child in top.children ?? [] {
+                for node in child.allDescendants() where matches(node, matcher) {
+                    found.append((id: node.id, ownerId: top.id, rowId: child.id))
+                }
             }
         }
         return found

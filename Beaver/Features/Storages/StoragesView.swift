@@ -553,9 +553,16 @@ private struct StoragesOutline: View {
             // the match into view. The token changes on every jump, so
             // landing on the same group twice still scrolls.
             .onChange(of: vm.scrollTarget?.token) { _, _ in
-                guard let target = vm.scrollTarget?.id else { return }
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    proxy.scrollTo(target, anchor: .top)
+                guard let target = vm.scrollTarget else { return }
+                // The group first: it may be off screen and so not yet
+                // built by the lazy stack, and a row inside an unbuilt
+                // group has no position to scroll to.
+                proxy.scrollTo(target.ownerId, anchor: .top)
+                guard target.rowId != target.ownerId else { return }
+                DispatchQueue.main.async {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        proxy.scrollTo(target.rowId, anchor: .center)
+                    }
                 }
             }
         }
@@ -738,6 +745,7 @@ private struct NamespaceRow: View {
                             onDeleteInside(namespace, record.key, child.key)
                         }
                     )
+                    .id(child.id)  // Discover scrolls to it
                 }
             } else if isExpanded, decode != nil {
                 decodedContent
