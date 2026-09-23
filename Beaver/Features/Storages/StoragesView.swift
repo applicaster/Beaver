@@ -953,6 +953,10 @@ private struct NamespaceRow: View {
                     Text(highlighted(record.key))
                         .font(.body.weight(.medium))
                     valueTags
+                    // Beside the key it acts on, not at the far edge,
+                    // where on a wide window it was unclear which row
+                    // it belonged to.
+                    actions
                 }
                 Text(highlighted(summaryLine))
                     .font(.caption)
@@ -960,8 +964,6 @@ private struct NamespaceRow: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
             }
-            // Right next to the name, not pinned far right.
-            actions
             Spacer(minLength: 8)
         }
         .padding(.horizontal, 12)
@@ -1320,7 +1322,8 @@ private struct InnerKeyRow: View {
 
             valueTags
 
-            // Buttons sit right after the value (Spacer comes last).
+            // Right after the value, same as the JSON tree: at the far
+            // edge it was unclear which row the buttons acted on.
             HStack(spacing: 4) {
                 if canOpenPopover {
                     RowIconButton(
@@ -1369,7 +1372,7 @@ private struct InnerKeyRow: View {
             .opacity(isHovered ? 1 : 0)
             .allowsHitTesting(isHovered)
 
-            Spacer(minLength: 6)
+            Spacer(minLength: 0)
         }
         .padding(.horizontal, 12)
         // Vertical breathing room: was 3, now 6. Long namespaces
