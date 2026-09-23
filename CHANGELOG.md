@@ -14,6 +14,43 @@ When releasing:
 
 ## [Unreleased]
 
+### Added
+- **Storages: edit and copy-key on every key row.** Hover a key for
+  **copy key / copy value / edit / delete**; edit reuses the Add-key
+  sheet with the key locked. Namespace rows show **＋ / copy** right
+  next to the name, and Add key is now a green **＋** tile beside the
+  Session / Local / Keychain tabs.
+- **Storages: changed values flash.** After a Reload or auto-refresh,
+  keys that appeared or changed get a brief yellow highlight (a
+  collapsed namespace flashes on their behalf).
+- **Storages: spaces are caught before sending.** The device splits
+  commands on spaces, so a space in the key or namespace now blocks
+  Save and a space in the value shows a warning.
+- **Storages: the full-value popover has the row's buttons** — copy key,
+  copy value, edit, delete — plus **copy decoded value** (pretty-printed
+  JSON / decoded text) for JSON-string, Base64 and JWT values.
+- **Storages: edit and delete fields inside a JSON value.** Expand a
+  value stored as JSON text (e.g. `player-storage` →
+  `{"volume":0.8}`) and hover a field for **edit / delete**. The SDK
+  can only replace a whole key, so Beaver rewrites the JSON with that
+  one change and sends it back; the sheet previews the full command.
+  Base64 and JWT values stay read-only (re-encoding / a broken
+  signature). Row buttons on top-level keys now appear on hover, like
+  inner rows.
+- **Storages: layer tabs show an icon** (clock / database / lock), the
+  name in sentence case and a namespace count with a tooltip; empty
+  layers are dimmed.
+
+### Fixed
+- **Storages: the list could stop updating.** After a new snapshot
+  arrived the key list could keep showing old values until the tab was
+  reopened. It now refreshes as soon as the device reports new storage.
+- **JSON `0` and `1` showed as `false` / `true`** in every tree (storage,
+  log detail). They are numbers again; only real booleans read as such.
+- **Storages: keys stored without a namespace** (the SDK reports them
+  as `{"player-storage": {"undefined": …}}`) now show as a plain key,
+  and edit / delete target the key itself instead of `undefined`.
+
 ### Changed
 - **Storages tab restructured (D30 + D31).** Session / Local /
   Keychain are back as **tabs at the top** (one layer visible at a

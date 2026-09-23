@@ -1,5 +1,19 @@
 import SwiftUI
 
+/// Edit / delete for the fields of a stored JSON value. Set by the
+/// storage screen around a decoded tree; `nil` everywhere else (log
+/// detail, popover), so those trees stay copy-only.
+struct StorageFieldEditor {
+    /// False while the device is disconnected — buttons show disabled.
+    let canWrite: Bool
+    let edit: @MainActor (StorageRecord) -> Void
+    let delete: @MainActor (StorageRecord) -> Void
+}
+
+extension EnvironmentValues {
+    @Entry var storageFieldEditor: StorageFieldEditor? = nil
+}
+
 /// Recursive JSON tree, shared by the log detail pane (DATA / CONTEXT)
 /// and the storage inspector — the same arrangement the web viewer uses,
 /// where one `<xray-json-tree>` serves both screens.
@@ -86,6 +100,9 @@ struct JSONTreeView: View {
                 if let decoded = decodedContent {
                     decodedBody(decoded)
                         .padding(.leading, CGFloat(depth + 1) * Self.indentStep)
+                        // A value decoded out of a field would need
+                        // re-encoding to write back — copy-only.
+                        .environment(\.storageFieldEditor, nil)
                 } else if let children = record.children, !children.isEmpty {
                     JSONTreeList(children: children, depth: depth + 1)
                 }
@@ -159,6 +176,7 @@ private struct JSONTreeRow: View {
     let rowIndex: Int
 
     @State private var isHovered = false
+    @Environment(\.storageFieldEditor) private var editor
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -187,6 +205,23 @@ private struct JSONTreeRow: View {
             .help(record.kind.isContainer ? "Copy as JSON" : "Copy value")
             .opacity(isHovered ? 1 : 0)
             .allowsHitTesting(isHovered)
+
+            if let editor {
+                HStack(spacing: 6) {
+                    // Containers are removed whole; only leaves take a new value.
+                    if !record.kind.isContainer {
+                        treeButton("pencil", editor.canWrite ? "Edit this field" : "Reconnect the device to edit") {
+                            editor.edit(record)
+                        }
+                    }
+                    treeButton("trash", editor.canWrite ? "Delete this field" : "Reconnect the device to delete") {
+                        editor.delete(record)
+                    }
+                }
+                .disabled(!editor.canWrite)
+                .opacity(isHovered ? 1 : 0)
+                .allowsHitTesting(isHovered)
+            }
 
             // Keeps the hover area the full row width.
             Spacer(minLength: 0)
@@ -224,6 +259,17 @@ private struct JSONTreeRow: View {
                 JWTStatusChip(status: status)
             }
         }
+    }
+
+    private func treeButton(_ systemImage: String, _ help: String,
+                            action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .buttonStyle(.plain)
+        .help(help)
     }
 
     /// Copies what was stored, never the decoded view.
