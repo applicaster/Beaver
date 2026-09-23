@@ -37,6 +37,14 @@ public struct Filter: Equatable, Hashable, Sendable {
 
     public var excludedCategories: Set<String>
 
+    /// Hide every event up to and including this id — what "Clear"
+    /// does. Nothing is deleted: the events stay in the store, keep
+    /// their bookmarks, and come back when this is cleared.
+    ///
+    /// Deliberately *not* saved with a named filter: an event id only
+    /// means something inside one session.
+    public var hiddenThroughEventId: Int64?
+
     public init(
         minLevel: LogLevel = .verbose,
         search: String? = nil,
@@ -46,7 +54,8 @@ public struct Filter: Equatable, Hashable, Sendable {
         subsystems: Set<String> = [],
         excludedSubsystems: Set<String> = [],
         categories: Set<String> = [],
-        excludedCategories: Set<String> = []
+        excludedCategories: Set<String> = [],
+        hiddenThroughEventId: Int64? = nil
     ) {
         self.minLevel = minLevel
         self.search = search?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
@@ -57,6 +66,7 @@ public struct Filter: Equatable, Hashable, Sendable {
         self.excludedSubsystems = excludedSubsystems
         self.categories = categories
         self.excludedCategories = excludedCategories
+        self.hiddenThroughEventId = hiddenThroughEventId
     }
 
     public static let none = Filter()
@@ -69,6 +79,7 @@ public struct Filter: Equatable, Hashable, Sendable {
             && excludedSubsystems.isEmpty
             && categories.isEmpty
             && excludedCategories.isEmpty
+            && hiddenThroughEventId == nil
     }
 
     /// Number of active chips, for the facet menu's badge.

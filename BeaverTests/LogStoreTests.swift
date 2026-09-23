@@ -368,6 +368,75 @@ extension LogStoreTests {
         #expect(categories == ["net", "ui"])
     }
 
+    @Test("Clearing the view hides events without deleting them")
+    func clearViewIsNonDestructive() async throws {
+        let (store, sessionId) = try await seededStore()
+
+        let all = try await store.events(
+            sessionId: sessionId, filter: .none, offset: 0, limit: 100
+        )
+        #expect(all.count == 6)
+
+        // "Clear" watermarks the newest event at the time it ran.
+        let watermark = try await store.latestEventId(sessionId: sessionId)
+        #expect(watermark == all.last?.id)
+
+        let cleared = Filter(hiddenThroughEventId: watermark)
+        let visible = try await store.events(
+            sessionId: sessionId, filter: cleared, offset: 0, limit: 100
+        )
+
+        // Screen is empty...
+        #expect(visible.isEmpty)
+        #expect(try await store.eventCount(sessionId: sessionId, filter: cleared) == 0)
+        // ...but the session still holds everything, which is what the
+        // "0 / 6" counter and Export-with-no-filter rely on.
+        #expect(try await store.eventCount(sessionId: sessionId, filter: .none) == 6)
+    }
+
+    @Test("Events after the clear show up again")
+    func eventsAfterClearAreVisible() async throws {
+        let (store, sessionId) = try await seededStore()
+        let watermark = try await store.latestEventId(sessionId: sessionId)
+
+        await store.append(
+            DecodedEvent(
+                timestampMillis: 2_000_000,
+                level: .info,
+                subsystem: "player",
+                category: "ui",
+                message: "after the clear",
+                dataJSON: nil,
+                contextJSON: nil
+            ),
+            to: sessionId
+        )
+        try await waitForEvents(7, session: sessionId, in: store)
+
+        let visible = try await store.events(
+            sessionId: sessionId,
+            filter: Filter(hiddenThroughEventId: watermark),
+            offset: 0,
+            limit: 100
+        )
+
+        #expect(visible.map(\.message) == ["after the clear"])
+    }
+
+    @Test("A saved filter doesn't carry the clear watermark")
+    func savedFilterDropsTheWatermark() async throws {
+        // An event id means nothing in another session, so persisting it
+        // would hide an arbitrary slice the next time the preset is used.
+        let store = try LogStore(source: .inMemory)
+        let filter = Filter(minLevel: .warning, hiddenThroughEventId: 12_345)
+
+        try await store.upsertSavedFilter(name: "Warnings", filter: filter)
+        let loaded = try await store.savedFilters().first
+
+        #expect(loaded?.filter.hiddenThroughEventId == nil)
+        #expect(loaded?.filter.minLevel == .warning)
+    }
+
     @Test("Size is right even when payloads aren't loaded")
     func sizeSurvivesPayloadFreeFetch() async throws {
         // The feed fetches rows without payloads — they are ~97% of the

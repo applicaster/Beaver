@@ -234,18 +234,21 @@ struct MainWindow: View {
             .disabled(!hasEvents)
         }
         ToolbarItem(placement: .primaryAction) {
-            Button(role: .destructive) {
-                Task { await clearEvents() }
+            Button {
+                NotificationCenter.default.post(name: .beaverClearView, object: nil)
             } label: {
                 ToolbarButtonLabel(systemImage: "xmark.circle",
-                                   title: "Clear",
-                                   tint: hasEvents ? .red : nil)
+                                   title: "Clear")
             }
             .buttonStyle(.plain)
             .keyboardShortcut("k", modifiers: .command)
-            .help("Delete all events in the current session (⌘K)")
-            // Also gates the shortcut, so ⌘K on an already-empty
-            // session is a no-op rather than a stray toast.
+            // Deliberately non-destructive, like the web viewer's Clear:
+            // it hides the backlog so the next reproduction starts on a
+            // clean screen. Everything stays in the store — so no
+            // confirmation dialog is needed, and ⌘K is safe to hammer.
+            // Actually deleting is the Sessions screen's job, where it
+            // asks first.
+            .help("Hide the events on screen and start fresh — nothing is deleted (⌘K)")
             .disabled(!hasEvents)
         }
         ToolbarItem(placement: .primaryAction) {
@@ -399,23 +402,6 @@ struct MainWindow: View {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(url, forType: .string)
         toasts.success("Copied \(url)")
-    }
-
-    private func clearEvents() async {
-        guard let sid = env.viewingSessionId else { return }
-        try? await env.store.clearEvents(sessionId: sid)
-        toasts.success("Session cleared")
-
-        // If no client is currently connected, drop back to the
-        // "Waiting for a client…" placeholder. An empty session
-        // without a live feed is a dead end; the placeholder is the
-        // more useful empty state. While a client IS connected we
-        // stay on the session — new events will resume the feed.
-        if case .clientConnected = env.serverState {
-            // active client → stay
-        } else {
-            env.viewingSessionId = nil
-        }
     }
 
     private func prepareExport() async {
@@ -684,6 +670,11 @@ extension Notification.Name {
     /// and tells the active view model to scroll to the nearest event
     /// (respecting the active filter). See D27.
     static let beaverJumpToTime = Notification.Name("BeaverJumpToTime")
+
+    /// Posted by the toolbar Clear button (⌘K). LogFeedView forwards it
+    /// to the active view model, which hides the backlog without
+    /// deleting anything.
+    static let beaverClearView = Notification.Name("BeaverClearView")
 }
 
 private struct BookmarksPopover: View {

@@ -399,6 +399,18 @@ public actor LogStore {
         }
     }
 
+    /// Highest event id in a session, or `nil` when it has none.
+    /// "Clear" uses it as the watermark for what to hide.
+    public func latestEventId(sessionId: Int64) async throws -> Int64? {
+        try await dbQueue.read { db in
+            try Int64.fetchOne(
+                db,
+                sql: "SELECT MAX(id) FROM event WHERE session_id = ?",
+                arguments: [sessionId]
+            )
+        }
+    }
+
     public func eventCount(sessionId: Int64, filter: Filter) async throws -> Int {
         try await dbQueue.read { db in
             let (whereClause, args) = Self.where(filter: filter, sessionId: sessionId)
@@ -714,6 +726,9 @@ public actor LogStore {
         name: String,
         filter: Filter
     ) async throws -> SavedFilter {
+        // `hiddenThroughEventId` is intentionally dropped: it is a
+        // per-session view state, and an event id from one session
+        // would hide an arbitrary slice of another.
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             // Invariant should be enforced by the UI's Save button
@@ -1026,6 +1041,12 @@ public actor LogStore {
                 )
                 args.append(contentsOf: [likeTerm, likeTerm, likeTerm])
             }
+        }
+
+        // "Clear" hides what's on screen without deleting it.
+        if let hiddenThrough = filter.hiddenThroughEventId {
+            clauses.append("id > ?")
+            args.append(hiddenThrough)
         }
 
         // Subsystem / category chips. Sorted so the SQL text is stable

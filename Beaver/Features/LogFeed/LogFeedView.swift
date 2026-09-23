@@ -60,6 +60,11 @@ private struct LogFeedContent: View {
                 vm.jumpToTime(target)
             }
         }
+        .onReceive(
+            NotificationCenter.default.publisher(for: .beaverClearView)
+        ) { _ in
+            Task { await vm.clearView() }
+        }
         // Mirror the active filter to env so MainWindow's Export
         // toolbar action can scope its query to the rows currently
         // shown in the table (D26). Initialize on appear in case
@@ -156,6 +161,26 @@ private struct LogFeedFilterBar: View {
             .help(vm.totalCount == vm.unfilteredCount
                   ? "Events in this session"
                   : "Matching the current filter, out of every event in the session")
+
+            // Nothing was deleted, so say so and offer the way back.
+            // Without this the counter reading "0 / 9034" looks like
+            // data loss rather than a hidden backlog.
+            if vm.isViewCleared {
+                Button {
+                    vm.restoreClearedView()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.uturn.backward")
+                        Text("Show cleared")
+                    }
+                    .font(.caption.weight(.semibold))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Capsule().fill(Color.secondary.opacity(0.18)))
+                }
+                .buttonStyle(.plain)
+                .help("Bring back the events Clear hid — they were never deleted")
+            }
 
             // "↓ N new events" pill — shown only when paused with
             // unseen events queued up. Click resumes the live feed.

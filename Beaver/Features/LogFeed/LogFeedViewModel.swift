@@ -412,6 +412,29 @@ final class LogFeedViewModel {
         // didSet on isPaused handles unseenCount reset + reload.
     }
 
+    // MARK: - Clearing the view
+
+    /// True while "Clear" is hiding a stretch of the session.
+    var isViewCleared: Bool { filter.hiddenThroughEventId != nil }
+
+    /// Hide everything currently in the session and start fresh from the
+    /// next event. Nothing is deleted — the events keep their bookmarks
+    /// and come back via `restoreClearedView()` or an Export with the
+    /// filter cleared.
+    func clearView() async {
+        // `try?` flattens the double optional, which suits us: a throw
+        // and an empty session both mean "nothing to hide".
+        guard let latest = try? await store.latestEventId(sessionId: sessionId) else {
+            return
+        }
+        selectedEventId = nil
+        filter.hiddenThroughEventId = latest
+    }
+
+    func restoreClearedView() {
+        filter.hiddenThroughEventId = nil
+    }
+
     // MARK: - Keyboard row navigation
 
     /// `j` / `k` walk the rows as displayed, so a collapsed group counts
