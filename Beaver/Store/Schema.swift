@@ -190,6 +190,25 @@ enum Schema {
             """)
         }
 
+        migrator.registerMigration("v5_network_entry") { db in
+            // One row per `network` frame (PROTOCOL.md §4.3). The payload is
+            // kept verbatim and re-parsed by NetworkEntry.parse on read, so
+            // there is a single parser and new optional wire fields need no
+            // migration. timestamp_ms is a column only for ordering.
+            try db.execute(sql: """
+                CREATE TABLE network_entry (
+                    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id   INTEGER NOT NULL REFERENCES session(id) ON DELETE CASCADE,
+                    timestamp_ms INTEGER NOT NULL,
+                    payload_json TEXT    NOT NULL
+                );
+            """)
+            try db.execute(sql: """
+                CREATE INDEX idx_network_session_ts
+                    ON network_entry(session_id, timestamp_ms);
+            """)
+        }
+
         return migrator
     }
 }
