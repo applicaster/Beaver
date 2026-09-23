@@ -786,7 +786,7 @@ private struct NamespaceRow: View {
                 }
                 if let tree = decodedSubtree, let children = tree.children {
                     VStack(alignment: .leading, spacing: 2) {
-                        ForEach(children) { JSONTreeView(record: $0) }
+                        JSONTreeList(children: children)
                     }
                 } else if let text = decode.text {
                     RawValueBlock(text: text)
@@ -1306,7 +1306,7 @@ private struct InnerKeyRow: View {
     private func subtree(of record: StorageRecord) -> some View {
         if let children = record.children, !children.isEmpty {
             VStack(alignment: .leading, spacing: 2) {
-                ForEach(children) { JSONTreeView(record: $0) }
+                JSONTreeList(children: children)
             }
         }
     }
@@ -1509,7 +1509,7 @@ private struct StorageValuePopover: View {
     private func subtree(of node: StorageRecord) -> some View {
         if let children = node.children, !children.isEmpty {
             VStack(alignment: .leading, spacing: 2) {
-                ForEach(children) { JSONTreeView(record: $0) }
+                JSONTreeList(children: children)
             }
         }
     }
