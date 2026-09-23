@@ -524,6 +524,9 @@ private struct StoragesOutline: View {
     }
 
     var body: some View {
+        // Filtering walks every node (7–22 ms on a real layer) — once per
+        // render, not once per use.
+        let records = self.records
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {

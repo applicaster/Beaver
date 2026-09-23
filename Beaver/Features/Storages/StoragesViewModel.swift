@@ -273,8 +273,7 @@ final class StoragesViewModel {
 
     /// Total namespaces present in the latest snapshot set.
     func recordCount(in namespace: StorageSnapshot.Namespace) -> Int {
-        guard let snap = snapshots[namespace] else { return 0 }
-        return StorageRecord.parseTopLevel(snap.dataJSON).count
+        records(in: namespace).count
     }
 
     /// True if at least one namespace has data.
@@ -321,9 +320,7 @@ final class StoragesViewModel {
     }
 
     private func appContext(in layer: StorageSnapshot.Namespace) -> AppContext? {
-        guard let snap = snapshots[layer] else { return nil }
-        let tops = StorageRecord.parseTopLevel(snap.dataJSON)
-        guard let v2 = tops.first(where: { $0.key == "applicaster.v2" }),
+        guard let v2 = records(in: layer).first(where: { $0.key == "applicaster.v2" }),
               let children = v2.children else { return nil }
 
         // Tiny closure that resolves a key inside applicaster.v2 to
@@ -471,6 +468,10 @@ final class StoragesViewModel {
                 fresh[ns] = snap
             }
         }
+        // The device re-reports storage about once a second, mostly
+        // unchanged (one real session: 6 132 snapshots, 6 distinct).
+        // Assigning anyway would re-render every row for nothing.
+        guard fresh.mapValues(\.dataJSON) != snapshots.mapValues(\.dataJSON) else { return }
         parsedCache.removeAll()
         snapshots = fresh
         recomputeMatches()
