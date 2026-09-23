@@ -19,6 +19,8 @@ import SwiftUI
 struct JSONTreeView: View {
     let record: StorageRecord
     var depth: Int = 0
+    /// Position among its siblings, for zebra striping.
+    var rowIndex: Int = 0
 
     /// `nil` until the user touches this node, then their choice.
     /// Containers start open (the structure is the point); a decodable
@@ -65,7 +67,7 @@ struct JSONTreeView: View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 disclosureChevron
-                JSONTreeRow(record: record, decode: decode)
+                JSONTreeRow(record: record, decode: decode, rowIndex: rowIndex)
             }
             .padding(.leading, CGFloat(depth) * Self.indentStep)
             .contentShape(Rectangle())
@@ -79,9 +81,7 @@ struct JSONTreeView: View {
                     decodedBody(decoded)
                         .padding(.leading, CGFloat(depth + 1) * Self.indentStep)
                 } else if let children = record.children, !children.isEmpty {
-                    ForEach(children) { child in
-                        JSONTreeView(record: child, depth: depth + 1)
-                    }
+                    JSONTreeList(children: children, depth: depth + 1)
                 }
             }
         }
@@ -100,12 +100,10 @@ struct JSONTreeView: View {
                 JWTSummaryView(status: decoded.chip, claims: decoded.jwtClaims)
             }
             if let tree = decoded.tree, let children = tree.children, !children.isEmpty {
-                ForEach(children) { child in
-                    // Carries the depth on: a decoded subtree is deeper
-                    // than its parent, not a fresh tree, so it neither
-                    // restarts the auto-expand budget nor the indent.
-                    JSONTreeView(record: child, depth: depth + 1)
-                }
+                // Carries the depth on: a decoded subtree is deeper than
+                // its parent, not a fresh tree, so it neither restarts the
+                // auto-expand budget nor the indent.
+                JSONTreeList(children: children, depth: depth + 1)
             } else if let text = decoded.text {
                 Text(text)
                     .font(.system(.caption, design: .monospaced))
@@ -136,9 +134,23 @@ struct JSONTreeView: View {
     }
 }
 
+/// Sibling rows of one tree level, each told its position so the rows
+/// can stripe.
+struct JSONTreeList: View {
+    let children: [StorageRecord]
+    var depth: Int = 0
+
+    var body: some View {
+        ForEach(Array(children.enumerated()), id: \.element.id) { index, child in
+            JSONTreeView(record: child, depth: depth, rowIndex: index)
+        }
+    }
+}
+
 private struct JSONTreeRow: View {
     let record: StorageRecord
     let decode: LeafDecode?
+    let rowIndex: Int
 
     @State private var isHovered = false
 
@@ -174,8 +186,24 @@ private struct JSONTreeRow: View {
             Spacer(minLength: 0)
         }
         .font(.system(.caption, design: .monospaced))
+        .background(rowBackground)
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }
+    }
+
+    /// Same tints as a storage key row. Hover marks the row the copy
+    /// button belongs to; the faint stripes keep the eye on one line
+    /// from key to value across a wide pane. Striping counts siblings,
+    /// so where levels meet two neighbours can share a shade.
+    @ViewBuilder
+    private var rowBackground: some View {
+        if isHovered {
+            Color.secondary.opacity(0.10)
+        } else if rowIndex.isMultiple(of: 2) {
+            Color.clear
+        } else {
+            Color.secondary.opacity(0.07)
+        }
     }
 
     /// Wrapper badge and token verdict, same rules as a storage row: the

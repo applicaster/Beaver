@@ -16,6 +16,7 @@ struct MainWindow: View {
     @State private var selectedTab: Tab = .logFeed
     @State private var showingImporter = false
     @State private var showingExporter = false
+    @State private var showingExportChoice = false
     @State private var exportDocument: JSONExportDocument?
     @State private var showingBookmarks = false
     @State private var bookmarksSnapshot: [BookmarkedEvent] = []
@@ -226,21 +227,34 @@ struct MainWindow: View {
             // should be able to tell what a file will hold before
             // writing it. Storage always goes in either way, so an
             // exported session is self-contained.
-            Menu {
-                Button("Export filtered") {
-                    Task { await prepareExport(scope: .filtered(env.activeFilter)) }
-                }
-                .disabled(!hasFilter)
-                Button("Export all") {
-                    Task { await prepareExport(scope: .everything) }
-                }
+            //
+            // A plain button opening a popover, not a `Menu`: in a macOS
+            // toolbar a `Menu` draws its own one-line "icon Export ▾"
+            // label, shorter than every button next to it.
+            Button {
+                showingExportChoice = true
             } label: {
                 ToolbarButtonLabel(systemImage: "square.and.arrow.up",
                                    title: "Export")
             }
-            .menuStyle(.borderlessButton)
+            .buttonStyle(.plain)
             .help("Save the session to a JSON file — events plus the device storage")
             .disabled(!hasEvents)
+            .popover(isPresented: $showingExportChoice, arrowEdge: .bottom) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Button("Export filtered") {
+                        showingExportChoice = false
+                        Task { await prepareExport(scope: .filtered(env.activeFilter)) }
+                    }
+                    .disabled(!hasFilter)
+                    Button("Export all") {
+                        showingExportChoice = false
+                        Task { await prepareExport(scope: .everything) }
+                    }
+                }
+                .buttonStyle(.borderless)
+                .padding(10)
+            }
         }
         ToolbarItem(placement: .primaryAction) {
             Button {
