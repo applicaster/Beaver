@@ -11,6 +11,9 @@ import SwiftUI
 /// hand-rolled `DataModel` walker (see ARCHITECTURE.md §13).
 struct DetailPaneView: View {
     let event: EventRecord?
+    /// Already parsed by the caller — never parse in `body`.
+    var data: StorageRecord?
+    var context: StorageRecord?
 
     var body: some View {
         if let event {
@@ -19,13 +22,13 @@ struct DetailPaneView: View {
                     header(event)
                     Divider()
                     metadata(event)
-                    if let data = event.dataJSON, let tree = StorageRecord.parse(data) {
+                    if let data {
                         sectionHeader("Data")
-                        treeView(root: tree)
+                        treeView(root: data)
                     }
-                    if let context = event.contextJSON, let tree = StorageRecord.parse(context) {
+                    if let context {
                         sectionHeader("Context")
-                        treeView(root: tree)
+                        treeView(root: context)
                     }
                 }
                 .padding(16)

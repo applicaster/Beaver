@@ -111,4 +111,16 @@ struct StorageSearchTests {
         }
         #expect(runs == displayed)
     }
+
+    @Test("A deep match names the first-level row that shows it")
+    func deepMatchNamesItsRow() {
+        let nested = StorageRecord.parseTopLevel(#"""
+        {"app": {"flags": {"beta": {"needle": 1}}, "needle": 2}, "needle": 3}
+        """#)
+        let found = StorageSearch.collectMatches(in: nested, with: matcher("needle"))
+
+        #expect(found.map(\.id) == ["app.flags.beta.needle", "app.needle", "needle"])
+        #expect(found.map(\.rowId) == ["app.flags", "app.needle", "needle"])
+        #expect(found.map(\.ownerId) == ["app", "app", "needle"])
+    }
 }

@@ -67,9 +67,7 @@ public enum ProtocolDecoder {
         guard let subsystem = inner["subsystem"] as? String else {
             return .failure(.malformedEvent("missing 'subsystem'"))
         }
-        guard let timestamp = inner["timestamp"] as? UInt64
-            ?? (inner["timestamp"] as? Int).map(UInt64.init)
-            ?? (inner["timestamp"] as? Double).map({ UInt64($0) }) else {
+        guard let timestamp = timestampMillis(inner["timestamp"]) else {
             return .failure(.malformedEvent("missing or non-numeric 'timestamp'"))
         }
         guard let message = inner["message"] as? String else {
@@ -126,6 +124,18 @@ public enum ProtocolDecoder {
     }
 
     // MARK: - Helpers
+
+    /// A wire timestamp, or `nil` when it can't be one.
+    ///
+    /// The value comes from whoever reaches the port, so a negative, huge
+    /// or fractional number must be rejected, not converted: `UInt64(-1)`
+    /// traps. The upper bound is `Int64.max` because the store keeps
+    /// timestamps in a signed INTEGER column and converts with `Int(_:)`.
+    static func timestampMillis(_ value: Any?) -> UInt64? {
+        if let v = value as? Int64 { return v >= 0 ? UInt64(v) : nil }
+        if let v = value as? Double, v >= 0, v < Double(Int64.max) { return UInt64(v) }
+        return nil
+    }
 
     private static func reencodeJSON(_ value: Any) -> String? {
         // `isValidJSONObject` walks the whole object graph, so it is

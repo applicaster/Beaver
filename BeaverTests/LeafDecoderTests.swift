@@ -143,6 +143,15 @@ struct LeafDecoderTests {
         #expect(pending.chip == .pending)
     }
 
+    @Test("A cached token still expires on time")
+    func cachedTokenExpires() async throws {
+        let token = Self.makeJWT(payload: #"{"exp":\#(Self.nowSeconds + 2)}"#)
+        #expect(LeafDecoder.decode(token)?.chip == .valid)
+        try await Task.sleep(for: .milliseconds(2_100))
+        // Same string → same cache entry; the verdict must still move.
+        #expect(LeafDecoder.decode(token)?.chip == .expired)
+    }
+
     @Test("Chip text matches the web viewer's row badge")
     func chipTextFormatting() {
         #expect(JWTStatus.valid.chipText == "JWT-VALID")
@@ -249,5 +258,16 @@ struct LeafDecoderTests {
         )
 
         #expect(LeafDecoder.nestedJWTStatus(in: record) == nil)
+    }
+
+    @Test("A value past the size cap is left raw, however decodable")
+    func hugeValueIsNotDecoded() {
+        let filler = String(repeating: "x", count: LeafDecoder.maxDecodableLength)
+        #expect(LeafDecoder.decode(#"{"a":"\#(filler)"}"#) == nil)
+    }
+
+    @Test("Surrounding whitespace doesn't hide a value")
+    func whitespaceAroundValueStillDecodes() {
+        #expect(LeafDecoder.decode("  {\"a\": 1}\n")?.kinds == [.json])
     }
 }

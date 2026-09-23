@@ -93,12 +93,33 @@ public actor LogStore {
         guard
             let pattern = String.fromDatabaseValue(values[0]),
             let value   = String.fromDatabaseValue(values[1]),
-            let regex   = try? NSRegularExpression(pattern: pattern)
+            let regex   = compiledRegex(pattern)
         else {
             return false
         }
         let range = NSRange(value.startIndex..<value.endIndex, in: value)
         return regex.firstMatch(in: value, range: range) != nil
+    }
+
+    /// SQLite calls REGEXP once per row and column with the same pattern;
+    /// compiling it each time cost ~350 ms over 50k events. Failures are
+    /// remembered too, so a half-typed pattern isn't recompiled per row.
+    private nonisolated(unsafe) static let regexCache: NSCache<NSString, RegexBox> = {
+        let c = NSCache<NSString, RegexBox>()
+        c.countLimit = 32
+        return c
+    }()
+
+    private final class RegexBox: Sendable {
+        let regex: NSRegularExpression?
+        init(_ regex: NSRegularExpression?) { self.regex = regex }
+    }
+
+    private nonisolated static func compiledRegex(_ pattern: String) -> NSRegularExpression? {
+        if let hit = regexCache.object(forKey: pattern as NSString) { return hit.regex }
+        let regex = try? NSRegularExpression(pattern: pattern)
+        regexCache.setObject(RegexBox(regex), forKey: pattern as NSString)
+        return regex
     }
 
     /// Canonical on-disk location used by the app target.
@@ -433,6 +454,11 @@ public actor LogStore {
     ///   with payloads versus ~85 MB without. The detail pane and "Copy as
     ///   JSON" refetch the handful of rows they actually need via
     ///   `events(ids:)`. Export keeps the default and takes the full rows.
+    ///
+    ///   The size column uses `octet_length`, which SQLite answers from the
+    ///   record header. `LENGTH(CAST(x AS BLOB))` looked equivalent but
+    ///   loaded every payload to measure it — 859 MB read per reload on a
+    ///   67k-event session (160–230 ms warm vs 33 ms).
     public func events(
         sessionId: Int64,
         filter: Filter,
@@ -448,8 +474,8 @@ public actor LogStore {
             let sql = """
                 SELECT id, session_id, timestamp_ms, level, subsystem,
                        category, message, \(payloadColumns),
-                       COALESCE(LENGTH(CAST(data_json AS BLOB)), 0)
-                     + COALESCE(LENGTH(CAST(context_json AS BLOB)), 0)
+                       COALESCE(octet_length(data_json), 0)
+                     + COALESCE(octet_length(context_json), 0)
                        AS payload_bytes
                 FROM event
                 \(whereClause)
@@ -476,8 +502,8 @@ public actor LogStore {
                 sql: """
                     SELECT id, session_id, timestamp_ms, level, subsystem,
                            category, message, data_json, context_json,
-                           COALESCE(LENGTH(CAST(data_json AS BLOB)), 0)
-                         + COALESCE(LENGTH(CAST(context_json AS BLOB)), 0)
+                           COALESCE(octet_length(data_json), 0)
+                         + COALESCE(octet_length(context_json), 0)
                            AS payload_bytes
                     FROM event
                     WHERE id IN (\(placeholders))
@@ -668,36 +694,6 @@ public actor LogStore {
             fullArgs.append(targetMillisSinceMidnight)
             fullArgs.append(targetMillisSinceMidnight)
             return try Int64.fetchOne(db, sql: sql, arguments: StatementArguments(fullArgs))
-        }
-    }
-
-    /// Returns the zero-based offset of `eventId` in the filtered
-    /// ordering. Used by jump-to-match to figure out which page-window
-    /// position to scroll to.
-    public func offset(of eventId: Int64,
-                       sessionId: Int64,
-                       filter: Filter) async throws -> Int? {
-        try await dbQueue.read { db in
-            // 1) Look up the target's timestamp_ms.
-            guard let row = try Row.fetchOne(
-                db,
-                sql: "SELECT timestamp_ms FROM event WHERE id = ? AND session_id = ?",
-                arguments: [eventId, sessionId]
-            ) else { return nil }
-            let ts: Int = row["timestamp_ms"]
-
-            // 2) Count filtered events that sort before it.
-            let (whereClause, args) = Self.where(filter: filter, sessionId: sessionId)
-            let sql = """
-                SELECT COUNT(*) FROM event
-                \(whereClause)
-                AND (timestamp_ms < ? OR (timestamp_ms = ? AND id < ?))
-            """
-            var fullArgs = args
-            fullArgs.append(ts)
-            fullArgs.append(ts)
-            fullArgs.append(eventId)
-            return try Int.fetchOne(db, sql: sql, arguments: StatementArguments(fullArgs)) ?? 0
         }
     }
 
