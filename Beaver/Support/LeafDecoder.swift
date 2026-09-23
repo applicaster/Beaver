@@ -77,8 +77,20 @@ public struct LeafDecode: Hashable, Sendable {
     /// Decoded plain text, when the final content isn't structured.
     public let text: String?
 
+    /// The token's `exp` / `nbf` claims (seconds since 1970) — only for
+    /// values that are themselves a JWT.
+    let expiresAt: Double?
+    let notBefore: Double?
+
     /// Validity chip — only for values that are themselves a JWT.
-    public let chip: JWTStatus?
+    ///
+    /// Worked out on read, not at decode time: decodes are cached for the
+    /// life of the process, so a token that expired while the app was
+    /// open kept reading `valid`.
+    public var chip: JWTStatus? {
+        LeafDecoder.status(expiresAt: expiresAt, notBefore: notBefore,
+                           now: Date().timeIntervalSince1970)
+    }
 
     /// Friendly Expires / Issued / Issuer / Subject / Audience summary.
     public let jwtClaims: [JWTClaim]
@@ -205,7 +217,8 @@ public enum LeafDecoder {
             kinds: detected.kinds,
             tree: detected.tree.map(buildRecord(from:)),
             text: detected.text,
-            chip: isJWT ? jwtStatus(of: detected.tree) : nil,
+            expiresAt: isJWT ? claim("exp", of: detected.tree) : nil,
+            notBefore: isJWT ? claim("nbf", of: detected.tree) : nil,
             jwtClaims: isJWT ? jwtClaims(of: detected.tree) : [],
             note: formatNote(detected.kinds)
         )
@@ -315,12 +328,11 @@ public enum LeafDecoder {
         (tree as? [String: Any])?["payload"] as? [String: Any]
     }
 
-    private static func jwtStatus(of tree: Any?) -> JWTStatus? {
-        guard let p = payload(of: tree) else { return nil }
-        let now = Date().timeIntervalSince1970
-        let exp = (p["exp"] as? NSNumber)?.doubleValue
-        let nbf = (p["nbf"] as? NSNumber)?.doubleValue
+    private static func claim(_ name: String, of tree: Any?) -> Double? {
+        (payload(of: tree)?[name] as? NSNumber)?.doubleValue
+    }
 
+    static func status(expiresAt exp: Double?, notBefore nbf: Double?, now: Double) -> JWTStatus? {
         if let nbf, now < nbf { return .pending }
         if let exp { return now >= exp ? .expired : .valid }
         return nil
