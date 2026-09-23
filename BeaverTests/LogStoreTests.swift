@@ -57,6 +57,29 @@ struct LogStoreTests {
         #expect(page.first?.timestampMillis == 1_000_000)
     }
 
+    /// The Size column counts UTF-8 bytes on disk, with or without the
+    /// payloads fetched — and multi-byte text must not be counted as
+    /// characters.
+    @Test
+    func payloadBytesAreUTF8Bytes() async throws {
+        let store = try LogStore(source: .inMemory)
+        let session = try await store.createSession(source: .live)
+        let data = #"{"city":"Zürich 🚀"}"#
+        await store.append(
+            DecodedEvent(timestampMillis: 1, level: .info, subsystem: "s", category: "",
+                         message: "m", dataJSON: data, contextJSON: "{}"),
+            to: session.id
+        )
+        try await waitForEvents(1, session: session.id, in: store)
+
+        let expected = data.utf8.count + 2
+        let lean = try await store.events(sessionId: session.id, filter: .none,
+                                          offset: 0, limit: 10, includePayloads: false)
+        #expect(lean.first?.payloadBytes == expected)
+        let full = try await store.events(ids: [lean.first!.id])
+        #expect(full.first?.payloadBytes == expected)
+    }
+
     // MARK: - Payload-free feed query
 
     /// The log feed renders level / message / subsystem / category / time
