@@ -261,6 +261,28 @@ final class LogFeedViewModel {
         return result
     }
 
+    /// The row that actually displays `eventId`.
+    ///
+    /// With Collapse on, a run of identical events becomes one row
+    /// represented by the first of them; the rest have no row of their
+    /// own. Selecting or scrolling to a folded id silently does
+    /// nothing, which is what made match navigation look dead — the
+    /// counter advanced while the table never moved.
+    func displayedRowId(for eventId: EventRecord.ID) -> EventRecord.ID {
+        guard collapseRepeats else { return eventId }
+        var representative: EventRecord?
+        for event in page {
+            if let last = representative, isSameKind(last, event) {
+                // Same group: the representative still stands.
+            } else {
+                representative = event
+            }
+            if event.id == eventId { return representative?.id ?? eventId }
+        }
+        return eventId
+    }
+
+
     private func isSameKind(_ a: EventRecord, _ b: EventRecord) -> Bool {
         a.level == b.level &&
         a.subsystem == b.subsystem &&
@@ -625,21 +647,31 @@ final class LogFeedViewModel {
 
     /// Step to the next matching event (wraps). Pauses Follow so the
     /// jump isn't immediately undone by tail-scroll.
-    func nextMatch() {
-        guard !matchIds.isEmpty else { return }
-        let curr = currentMatchIndex ?? -1
-        let next = (curr + 1) % matchIds.count
-        currentMatchIndex = next
-        Task { await jumpTo(eventId: matchIds[next]) }
-    }
+    func nextMatch() { stepMatch(by: 1) }
+    func previousMatch() { stepMatch(by: -1) }
 
-    /// Step to the previous matching event (wraps).
-    func previousMatch() {
+    /// Move to the next match that has a row of its own.
+    ///
+    /// Collapse folds a run of identical events into a single row, so a
+    /// long `×20` group can hold twenty matches that all resolve to the
+    /// same row. Landing on each in turn leaves the table motionless and
+    /// the button looking broken, so those are walked past. The counter
+    /// still reports every match — it just skips ahead.
+    private func stepMatch(by delta: Int) {
         guard !matchIds.isEmpty else { return }
-        let curr = currentMatchIndex ?? 1
-        let prev = curr <= 0 ? matchIds.count - 1 : curr - 1
-        currentMatchIndex = prev
-        Task { await jumpTo(eventId: matchIds[prev]) }
+        let count = matchIds.count
+        let currentRow = selectedEventId
+        var index = currentMatchIndex ?? (delta > 0 ? -1 : 0)
+
+        for _ in 0..<count {
+            index = ((index + delta) % count + count) % count
+            let candidate = matchIds[index]
+            guard displayedRowId(for: candidate) != currentRow else { continue }
+            currentMatchIndex = index
+            Task { await jumpTo(eventId: candidate) }
+            return
+        }
+        // Every match folds into the row already selected.
     }
 
     private func scheduleMatchRecompute() {
@@ -694,8 +726,11 @@ final class LogFeedViewModel {
         // Auto-pause so incoming events don't scroll us off the
         // match we just navigated to.
         isPaused = true
-        // Trigger scroll + selection.
-        scrollTarget = (eventId, UUID())
-        selectedEventId = eventId
+        // Trigger scroll + selection — on the row that actually shows
+        // this event. Resolved after the reload, because `page` has to
+        // hold the target before its displaying row can be found.
+        let rowId = displayedRowId(for: eventId)
+        scrollTarget = (rowId, UUID())
+        selectedEventId = rowId
     }
 }
