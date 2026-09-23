@@ -113,6 +113,27 @@ public struct EventRecord: Identifiable, Hashable, Sendable {
         Self.timeFormatter.string(from: date)
     }
 
+    /// `subsystem` without the app's bundle id in front — see
+    /// `shortSubsystem(_:)`.
+    public var shortSubsystem: String { Self.shortSubsystem(subsystem) }
+
+    /// The SDK prefixes JS subsystems with the bundle id —
+    /// `com.appadventuresinodyssey/quick_brick/General` — which fills the
+    /// column and the chip menu with the same string on every row. Drops
+    /// a leading reverse-DNS segment (letters, digits, `-`, `_`, at least
+    /// one dot) when something follows it. `native_application/…` and
+    /// `loggernext.protocol` stay as they are. Display only: filters,
+    /// chips and copy keep the full value.
+    public static func shortSubsystem(_ subsystem: String) -> String {
+        guard let slash = subsystem.firstIndex(of: "/") else { return subsystem }
+        let head = subsystem[..<slash]
+        let rest = subsystem[subsystem.index(after: slash)...]
+        guard !rest.isEmpty, head.contains("."),
+              head.allSatisfy({ $0.isLetter || $0.isNumber || "._-".contains($0) })
+        else { return subsystem }
+        return String(rest)
+    }
+
     /// Full date + time with millis. Used in the detail pane.
     public var fullTimestamp: String {
         Self.fullFormatter.string(from: date)

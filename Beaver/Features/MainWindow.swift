@@ -842,7 +842,7 @@ private struct BookmarkRow: View {
                 Text(bookmarked.event.message)
                     .font(.caption)
                     .lineLimit(2)
-                Text("\(bookmarked.event.subsystem) · \(bookmarked.event.timeOfDayWithMillis)")
+                Text("\(bookmarked.event.shortSubsystem) · \(bookmarked.event.timeOfDayWithMillis)")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }

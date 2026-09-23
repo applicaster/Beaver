@@ -6,6 +6,12 @@ public struct Filter: Equatable, Hashable, Sendable {
     public enum Facet: Hashable, Sendable {
         case subsystem
         case category
+
+        /// How a value reads in menus and chips; the value itself is
+        /// what the filter stores and matches.
+        public func displayName(_ value: String) -> String {
+            self == .subsystem ? EventRecord.shortSubsystem(value) : value
+        }
     }
 
     /// Where a value sits in the include → exclude → off cycle.
