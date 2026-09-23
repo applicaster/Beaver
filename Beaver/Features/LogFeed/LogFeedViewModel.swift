@@ -647,21 +647,31 @@ final class LogFeedViewModel {
 
     /// Step to the next matching event (wraps). Pauses Follow so the
     /// jump isn't immediately undone by tail-scroll.
-    func nextMatch() {
-        guard !matchIds.isEmpty else { return }
-        let curr = currentMatchIndex ?? -1
-        let next = (curr + 1) % matchIds.count
-        currentMatchIndex = next
-        Task { await jumpTo(eventId: matchIds[next]) }
-    }
+    func nextMatch() { stepMatch(by: 1) }
+    func previousMatch() { stepMatch(by: -1) }
 
-    /// Step to the previous matching event (wraps).
-    func previousMatch() {
+    /// Move to the next match that has a row of its own.
+    ///
+    /// Collapse folds a run of identical events into a single row, so a
+    /// long `×20` group can hold twenty matches that all resolve to the
+    /// same row. Landing on each in turn leaves the table motionless and
+    /// the button looking broken, so those are walked past. The counter
+    /// still reports every match — it just skips ahead.
+    private func stepMatch(by delta: Int) {
         guard !matchIds.isEmpty else { return }
-        let curr = currentMatchIndex ?? 1
-        let prev = curr <= 0 ? matchIds.count - 1 : curr - 1
-        currentMatchIndex = prev
-        Task { await jumpTo(eventId: matchIds[prev]) }
+        let count = matchIds.count
+        let currentRow = selectedEventId
+        var index = currentMatchIndex ?? (delta > 0 ? -1 : 0)
+
+        for _ in 0..<count {
+            index = ((index + delta) % count + count) % count
+            let candidate = matchIds[index]
+            guard displayedRowId(for: candidate) != currentRow else { continue }
+            currentMatchIndex = index
+            Task { await jumpTo(eventId: candidate) }
+            return
+        }
+        // Every match folds into the row already selected.
     }
 
     private func scheduleMatchRecompute() {
