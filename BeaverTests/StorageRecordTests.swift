@@ -33,6 +33,19 @@ struct StorageRecordTests {
         #expect(result == original)
     }
 
+    @Test("A string with control characters serializes to valid, round-trippable JSON")
+    func controlCharactersAreEscaped() throws {
+        // escapedLiteral only escaped \ and " — a newline, tab or other
+        // control character landed in the output literally, which
+        // JSONSerialization then refuses to parse back.
+        let record = StorageRecord.make(key: "note", value: "line1\nline2\t\"q\"", path: "$")
+        let json = StorageRecord.serializeJSON(record)
+
+        let data = try #require(json.data(using: .utf8))
+        let value = try JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]) as? String
+        #expect(value == "line1\nline2\t\"q\"")
+    }
+
     @Test("Empty containers stay containers")
     func emptyContainersSerializeAsThemselves() throws {
         let result = try roundTrip(#"{"obj":{},"arr":[]}"#)

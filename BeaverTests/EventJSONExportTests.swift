@@ -22,6 +22,11 @@ struct EventJSONExportTests {
         .keychain: #"{"authToken":"abc"}"#,
     ]
 
+    private func networkEntry(url: String, status: Int) -> NetworkEntry {
+        let json = #"{"url":"\#(url)","method":"GET","status":\#(status),"timestamp":1700000000000}"#
+        return NetworkEntry.parse(json, fallbackMillis: 0)!
+    }
+
     // MARK: Round trip
 
     @Test("Events and storage survive a round trip")
@@ -33,6 +38,53 @@ struct EventJSONExportTests {
         #expect(back.events.first?.message == "hello")
         #expect(back.storage.count == 3)
         #expect(back.storage[.local]?.contains("flag") == true)
+    }
+
+    @Test("Events, storage and network all survive a round trip")
+    func roundTripCarriesNetworkToo() throws {
+        let entries = [
+            networkEntry(url: "https://a.example/one", status: 200),
+            networkEntry(url: "https://a.example/two", status: 404),
+        ]
+        let data = try EventJSON.encode([event("hello")], storage: storage, network: entries)
+        let back = try EventJSON.decodeExport(data)
+
+        #expect(back.network.count == 2)
+        #expect(back.network.map(\.url) == ["https://a.example/one", "https://a.example/two"])
+        #expect(back.network.map(\.status) == [200, 404])
+    }
+
+    @Test("Network elements are JSON objects in the file")
+    func networkPayloadsStayStructured() throws {
+        let entries = [networkEntry(url: "https://a.example/one", status: 200)]
+        let data = try EventJSON.encode([event("hello")], storage: storage, network: entries)
+        let root = try #require(
+            try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        let network = try #require(root["network"] as? [[String: Any]])
+
+        #expect(network.first?["url"] as? String == "https://a.example/one")
+    }
+
+    @Test("A network-only file decodes")
+    func networkWithoutEventsOrStorageDecodes() throws {
+        let entries = [networkEntry(url: "https://a.example/one", status: 200)]
+        let data = try EventJSON.encode([], storage: [:], network: entries)
+        let back = try EventJSON.decodeExport(data)
+
+        #expect(back.events.isEmpty)
+        #expect(back.storage.isEmpty)
+        #expect(back.network.count == 1)
+    }
+
+    @Test("With no network entries there is no network key")
+    func encodingWithoutNetworkOmitsTheKey() throws {
+        let data = try EventJSON.encode([event("hello")], storage: storage)
+        let root = try #require(
+            try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+
+        #expect(root["network"] == nil)
     }
 
     @Test("Keychain travels under its wire name")
@@ -182,5 +234,59 @@ struct SessionExportTests {
         )
 
         #expect(data == nil, "an empty file would just waste the user's click")
+    }
+
+    @Test("Exporting everything carries the recorded network entries")
+    func everythingIncludesNetwork() async throws {
+        let (store, sessionId) = try await seeded()
+        try await store.recordNetworkEntry(
+            NetworkEntry.parse(#"{"url":"https://a.example","status":200}"#, fallbackMillis: 0)!,
+            sessionId: sessionId
+        )
+
+        let data = try #require(
+            await SessionExport.make(store: store, sessionId: sessionId, scope: .everything)
+        )
+        let back = try EventJSON.decodeExport(data)
+
+        #expect(back.network.count == 1)
+        #expect(back.network.first?.url == "https://a.example")
+    }
+
+    @Test("Exporting filtered still carries every network entry")
+    func filteredKeepsNetworkWhole() async throws {
+        let (store, sessionId) = try await seeded()
+        try await store.recordNetworkEntry(
+            NetworkEntry.parse(#"{"url":"https://a.example","status":200}"#, fallbackMillis: 0)!,
+            sessionId: sessionId
+        )
+
+        let data = try #require(
+            await SessionExport.make(
+                store: store,
+                sessionId: sessionId,
+                scope: .filtered(Filter(subsystems: ["player"]))
+            )
+        )
+        let back = try EventJSON.decodeExport(data)
+
+        // The filter narrows events only, same as storage.
+        #expect(back.network.count == 1)
+    }
+
+    @Test("A session with only network entries produces a file")
+    func networkOnlySessionExportsAFile() async throws {
+        let store = try LogStore(source: .inMemory)
+        let session = try await store.createSession(source: .live)
+        try await store.recordNetworkEntry(
+            NetworkEntry.parse(#"{"url":"https://a.example","status":200}"#, fallbackMillis: 0)!,
+            sessionId: session.id
+        )
+
+        let data = await SessionExport.make(
+            store: store, sessionId: session.id, scope: .everything
+        )
+
+        #expect(data != nil)
     }
 }

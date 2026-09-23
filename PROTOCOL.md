@@ -37,7 +37,7 @@ object has a `type` discriminator field.
 ```jsonc
 // Generic envelope:
 {
-  "type": "<one of: handshake | event | storage | command>",
+  "type": "<one of: handshake | event | storage | network | command>",
   ...                                 // type-specific fields
 }
 ```
@@ -139,7 +139,7 @@ remove the event-feed pollution from the discovery side-channel.
 
 ## 4. Direction: client → server
 
-The SDK sends two message types.
+The SDK sends three message types.
 
 ### 4.1 `event`
 
@@ -248,6 +248,53 @@ A snapshot of the client's storage namespaces, sent in response to
 3. **Snapshot vs delta.** Is this always a full snapshot, or might the
    SDK ever send only the diff? **(inferred to be always-full.)**
 
+### 4.3 `network`
+
+One finished HTTP(S) request. Sent once the response (or a transport
+failure) is known — there is no separate "request started" frame, so
+each `network` frame stands alone; Beaver never pairs two frames into
+one row. Like `event`, the payload is a JSON string nested inside the
+outer envelope (double-encoded).
+
+```json
+{
+  "type": "network",
+  "id": "550E8400-E29B-41D4-A716-446655440000",
+  "event": "{\"requestId\":\"R1\",\"url\":\"https:\\/\\/api.example.com\\/v1\\/feed?page=2\",\"method\":\"GET\",\"timing\":{\"startTime\":1715784000000,\"endTime\":1715784000250,\"duration\":250},\"timestamp\":1715784000000,\"status\":200,\"statusText\":\"no error\",\"requestHeaders\":{\"Authorization\":\"[REDACTED]\",\"Accept\":\"application\\/json\"},\"responseHeaders\":{\"Content-Type\":\"application\\/json\"},\"responseBody\":\"{\\\"items\\\":[1,2]}\"}"
+}
+```
+
+- `id` — UUID; ignored by current desktop, same as `event` / `storage`.
+- `event` — a JSON string (same double-encoding as §4.1). Decoded fields:
+
+| Field               | Type                          | Required     | Notes |
+|---------------------|--------------------------------|--------------|-------|
+| `requestId`         | string                         | optional     | defaults to `""` |
+| `url`               | string                          | **required** | absolute URL; frame is rejected without it |
+| `method`            | string                          | optional     | defaults to `"GET"`, normalized to uppercase |
+| `timing.startTime`  | number, ms since epoch          | optional     | falls back to top-level `timestamp`, then to receipt time |
+| `timing.endTime`    | number or numeric string, ms since epoch | optional | used to derive `duration` when `timing.duration` is absent |
+| `timing.duration`   | number or numeric string, ms    | optional     | preferred over `endTime − startTime` when present |
+| `timestamp`         | number, ms since epoch          | optional     | fallback for `timing.startTime` |
+| `status`            | number or numeric string        | optional     | absent, or below 100 (iOS sends NSURLError codes such as `-999` cancelled, `-1009` offline), means a transport failure (see `error`) |
+| `statusText`        | string                          | optional     | |
+| `requestHeaders`    | object, string → string         | optional     | defaults to `{}`; the SDK redacts sensitive values (e.g. `Authorization`) to `"[REDACTED]"` before sending |
+| `responseHeaders`   | object, string → string         | optional     | defaults to `{}` |
+| `requestBody`       | string                          | optional     | the SDK caps this at 100 KB before sending |
+| `responseBody`      | string                          | optional     | same 100 KB cap |
+| `requestBodySize`   | number or numeric string        | optional     | the original body size in bytes (UTF-8) before the SDK's 100 000-char cap. Senders: Android ≥ #2869 |
+| `responseBodySize`  | number or numeric string        | optional     | the original body size in bytes (UTF-8) before the SDK's 100 000-char cap. Senders: Android ≥ #2869 |
+| `error`             | string                          | optional     | set instead of `status` when the request never got a response (timeout, no connection, …) |
+
+**Senders.** iOS: quick-brick-xray ≥
+[#2676](https://github.com/applicaster/Zapp-Frameworks/pull/2676)
+(`WebSocketSink+NetworkEvent.swift`). Android:
+[#2869](https://github.com/applicaster/Zapp-Frameworks/pull/2869)
+(`NetworkEntryMapper.kt`), pending merge — joins multi-value headers
+with `", "` and derives `startTime` as the event's end time minus its
+recorded elapsed duration, since `NetworkRequestLogger` only captures
+elapsed time, not a start timestamp.
+
 ---
 
 ## 5. Encoding rules
@@ -266,7 +313,8 @@ A snapshot of the client's storage namespaces, sent in response to
 1. Client opens WebSocket connection to `ws://<desktop-ip>:9080`.
 2. Beaver (per D2: single-client) either:
    - Accepts: sends `handshake` immediately, opens a new session in the
-     store, and starts forwarding inbound `event` / `storage` frames.
+     store, and starts forwarding inbound `event` / `storage` / `network`
+     frames.
    - Rejects: closes with WebSocket close code **1008 (policy violation)**
      and reason text `"another client is already connected"`. The
      rejected client should not retry rapidly.

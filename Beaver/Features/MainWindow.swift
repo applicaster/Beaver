@@ -33,10 +33,12 @@ struct MainWindow: View {
     /// (see `.task(id:)` below).
     @State private var logFeedVM: LogFeedViewModel?
     @State private var storagesVM: StoragesViewModel?
+    @State private var networkVM: NetworkViewModel?
 
     enum Tab: Hashable {
         case logFeed
         case storages
+        case network
         case sessions
     }
 
@@ -99,6 +101,7 @@ struct MainWindow: View {
             guard let sid = env.viewingSessionId else {
                 logFeedVM = nil
                 storagesVM = nil
+                networkVM = nil
                 return
             }
             if logFeedVM?.sessionId != sid {
@@ -110,6 +113,7 @@ struct MainWindow: View {
                 // `.storageUpdated` broadcast isn't dropped. See
                 // StoragesViewModel.bootstrap() docstring.
                 await fresh.bootstrap()
+                guard !Task.isCancelled else { return }
                 storagesVM = fresh
                 // Auto-fetch the first storage snapshot so the user
                 // doesn't have to click Reload to see anything.
@@ -119,10 +123,16 @@ struct MainWindow: View {
                 // both this VM and any future visit pick it up.
                 fresh.requestRefresh(via: env.server)
             }
+            if networkVM?.sessionId != sid {
+                let fresh = NetworkViewModel(store: env.store, sessionId: sid)
+                await fresh.bootstrap()
+                guard !Task.isCancelled else { return }
+                networkVM = fresh
+            }
         }
         .fileImporter(
             isPresented: $showingImporter,
-            allowedContentTypes: [.json],
+            allowedContentTypes: [.json, .har],
             allowsMultipleSelection: false,
             onCompletion: handleImport
         )
@@ -144,6 +154,8 @@ struct MainWindow: View {
                 .tag(Tab.logFeed)
             Label("Storages",  systemImage: "externaldrive")
                 .tag(Tab.storages)
+            Label("Network",   systemImage: "network")
+                .tag(Tab.network)
             Label("Sessions",  systemImage: "clock.arrow.circlepath")
                 .tag(Tab.sessions)
         }
@@ -176,6 +188,12 @@ struct MainWindow: View {
                 // session arrives.
                 if let vm = storagesVM {
                     StoragesView(vm: vm)
+                } else {
+                    ConnectionPlaceholder(state: env.serverState)
+                }
+            case .network:
+                if let vm = networkVM {
+                    NetworkView(vm: vm)
                 } else {
                     ConnectionPlaceholder(state: env.serverState)
                 }
@@ -219,7 +237,7 @@ struct MainWindow: View {
                                    title: "Import")
             }
             .buttonStyle(.plain)
-            .help("Load events from a JSON file")
+            .help("Load a session from a JSON export or a HAR file")
         }
         ToolbarItem(placement: .primaryAction) {
             // Two explicit choices rather than a single button whose
@@ -238,8 +256,9 @@ struct MainWindow: View {
                                    title: "Export")
             }
             .buttonStyle(.plain)
-            .help("Save the session to a JSON file — events plus the device storage")
-            .disabled(!hasEvents)
+            .help("Save the session to a JSON file — events, network requests and the device storage")
+            // A session can hold only network requests (an imported HAR).
+            .disabled(!hasEvents && env.viewingNetworkCount == 0)
             .popover(isPresented: $showingExportChoice, arrowEdge: .bottom) {
                 VStack(alignment: .leading, spacing: 2) {
                     Button("Export filtered") {
@@ -402,6 +421,7 @@ struct MainWindow: View {
         switch selectedTab {
         case .logFeed:  "Log feed"
         case .storages: "Storages"
+        case .network:  "Network"
         case .sessions: "Sessions"
         }
     }
@@ -450,9 +470,14 @@ struct MainWindow: View {
             defer { if didStart { url.stopAccessingSecurityScopedResource() } }
 
             guard let data = try? Data(contentsOf: url) else { return }
-            let imported = (try? EventJSON.decodeExport(data)) ?? .init()
-            // A storage-only file is still worth opening.
-            guard !imported.events.isEmpty || !imported.storage.isEmpty else { return }
+            var imported = (try? EventJSON.decodeExport(data)) ?? .init()
+            // Not a Beaver export: maybe a HAR (Beaver's, Chrome's, Charles'…).
+            if imported.events.isEmpty && imported.storage.isEmpty && imported.network.isEmpty {
+                imported.network = HARExport.decode(data)
+            }
+            // A storage-only or network-only file is still worth opening.
+            guard !imported.events.isEmpty || !imported.storage.isEmpty
+                    || !imported.network.isEmpty else { return }
 
             // Create a new "imported" session per D7 — don't destroy the
             // current live session.
@@ -467,6 +492,9 @@ struct MainWindow: View {
                     namespace: namespace,
                     dataJSON: json
                 )
+            }
+            for entry in imported.network {
+                try? await env.store.recordNetworkEntry(entry, sessionId: session.id)
             }
             // Switch the LogFeed to the newly imported session.
             env.viewingSessionId = session.id
@@ -884,9 +912,18 @@ private struct BookmarkRow: View {
 
 // MARK: - FileDocument for export
 
+extension UTType {
+    /// HAR is JSON; macOS declares no type for it, so this app imports its
+    /// own (see Info.plist's UTImportedTypeDeclarations). Falls back to a
+    /// dynamic type, then plain JSON, if the declaration is ever missing.
+    static let har = UTType("com.applicaster.beaver.har")
+        ?? UTType(filenameExtension: "har", conformingTo: .json)
+        ?? .json
+}
+
 struct JSONExportDocument: FileDocument {
-    static var readableContentTypes: [UTType] { [.json] }
-    static var writableContentTypes: [UTType] { [.json] }
+    static var readableContentTypes: [UTType] { [.json, .har] }
+    static var writableContentTypes: [UTType] { [.json, .har] }
 
     let data: Data
 

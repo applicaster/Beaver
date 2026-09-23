@@ -145,6 +145,9 @@ struct BeaverApp: App {
                     await env.refreshViewingEventCount()
                 case .cleared(let sid) where sid == env.viewingSessionId:
                     await env.refreshViewingEventCount()
+                // Only the first request changes what the toolbar enables.
+                case .networkAppended(let sid) where sid == env.viewingSessionId && env.viewingNetworkCount == 0:
+                    await env.refreshViewingEventCount()
                 case .sessionStarted, .sessionEnded:
                     await env.refreshViewingEventCount()
                 case .sessionDeleted(let id):
@@ -189,6 +192,8 @@ struct BeaverApp: App {
                     dataJSON: json
                 )
             }
+        case .success(.network(let entry)):
+            try? await env.store.recordNetworkEntry(entry, sessionId: sessionId)
         case .success(.unknown(let typeRaw)):
             // PROTOCOL.md §7: tolerate unknown types, log as a synthetic
             // event so the user sees them.

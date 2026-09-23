@@ -29,6 +29,8 @@ public actor LogStore {
         case storageUpdated(sessionId: Int64, namespace: StorageSnapshot.Namespace)
         case bookmarksChanged(sessionId: Int64)
         case savedFiltersChanged
+        case networkAppended(sessionId: Int64)
+        case networkBookmarksChanged(sessionId: Int64)
     }
 
     public enum Source {
@@ -115,7 +117,8 @@ public actor LogStore {
         init(_ regex: NSRegularExpression?) { self.regex = regex }
     }
 
-    private nonisolated static func compiledRegex(_ pattern: String) -> NSRegularExpression? {
+    /// Also used by `NetworkFilter`, which asks for `(?i)` patterns.
+    nonisolated static func compiledRegex(_ pattern: String) -> NSRegularExpression? {
         if let hit = regexCache.object(forKey: pattern as NSString) { return hit.regex }
         let regex = try? NSRegularExpression(pattern: pattern)
         regexCache.setObject(RegexBox(regex), forKey: pattern as NSString)
@@ -302,6 +305,10 @@ public actor LogStore {
             // orphaned rows.
             try db.execute(
                 sql: "DELETE FROM event_bookmark WHERE session_id = ?",
+                arguments: [sessionId]
+            )
+            try db.execute(
+                sql: "DELETE FROM network_entry WHERE session_id = ?",
                 arguments: [sessionId]
             )
         }
@@ -904,6 +911,84 @@ public actor LogStore {
                 arguments: [sessionId, namespace.rawValue]
             )
             return row.map(Self.makeStorageSnapshot)
+        }
+    }
+
+    // MARK: - Network entries
+
+    public func recordNetworkEntry(_ entry: NetworkEntry, sessionId: Int64) async throws {
+        try await dbQueue.write { db in
+            try db.execute(
+                sql: """
+                    INSERT INTO network_entry (session_id, timestamp_ms, payload_json)
+                    VALUES (?, ?, ?)
+                """,
+                arguments: [sessionId, Int(entry.startMillis), entry.payloadJSON]
+            )
+        }
+        broadcast(.networkAppended(sessionId: sessionId))
+    }
+
+    public func networkEntries(sessionId: Int64, afterId: Int64 = 0) async throws -> [NetworkEntry] {
+        try await dbQueue.read { db in
+            try Row.fetchAll(
+                db,
+                sql: """
+                    SELECT id, timestamp_ms, payload_json
+                    FROM network_entry
+                    WHERE session_id = ? AND id > ?
+                    ORDER BY id
+                """,
+                arguments: [sessionId, afterId]
+            ).compactMap { row in
+                NetworkEntry.parse(
+                    row["payload_json"],
+                    id: row["id"],
+                    fallbackMillis: UInt64(row["timestamp_ms"] as Int)
+                )
+            }
+        }
+    }
+
+    /// Cheap existence check for the toolbar: a session can hold
+    /// requests and no events (an imported HAR).
+    public func networkEntryCount(sessionId: Int64) async throws -> Int {
+        try await dbQueue.read { db in
+            try Int.fetchOne(
+                db,
+                sql: "SELECT COUNT(*) FROM network_entry WHERE session_id = ?",
+                arguments: [sessionId]
+            ) ?? 0
+        }
+    }
+
+    // MARK: - Network bookmarks
+
+    /// Bookmarks `entryId`, or removes its bookmark. Returns `true` when
+    /// the entry is bookmarked afterwards.
+    @discardableResult
+    public func toggleNetworkBookmark(entryId: Int64, sessionId: Int64) async throws -> Bool {
+        let now = Int(Date().timeIntervalSince1970 * 1000)
+        let isOn = try await dbQueue.write { db -> Bool in
+            try db.execute(sql: "DELETE FROM network_bookmark WHERE entry_id = ?", arguments: [entryId])
+            guard db.changesCount == 0 else { return false }
+            try db.execute(
+                sql: "INSERT INTO network_bookmark (session_id, entry_id, created_at) VALUES (?, ?, ?)",
+                arguments: [sessionId, entryId, now]
+            )
+            return true
+        }
+        broadcast(.networkBookmarksChanged(sessionId: sessionId))
+        return isOn
+    }
+
+    public func networkBookmarkIds(sessionId: Int64) async throws -> Set<Int64> {
+        try await dbQueue.read { db in
+            Set(try Int64.fetchAll(
+                db,
+                sql: "SELECT entry_id FROM network_bookmark WHERE session_id = ?",
+                arguments: [sessionId]
+            ))
         }
     }
 

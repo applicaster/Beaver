@@ -13,6 +13,7 @@ public enum ProtocolDecoder {
     public enum InboundPacket: Sendable {
         case event(DecodedEvent)
         case storage(namespaces: [StorageSnapshot.Namespace: String])
+        case network(NetworkEntry)
         case unknown(typeRaw: String)
     }
 
@@ -21,6 +22,7 @@ public enum ProtocolDecoder {
         case noTypeField
         case malformedEvent(String)        // human-readable reason
         case malformedStorage(String)
+        case malformedNetwork(String)
     }
 
     /// Decode a raw WebSocket text frame.
@@ -40,6 +42,8 @@ public enum ProtocolDecoder {
             return decodeEvent(envelope: envelope)
         case "storage":
             return decodeStorage(envelope: envelope)
+        case "network":
+            return decodeNetwork(envelope: envelope)
         default:
             return .success(.unknown(typeRaw: typeRaw))
         }
@@ -121,6 +125,20 @@ public enum ProtocolDecoder {
             }
         }
         return .success(.storage(namespaces: result))
+    }
+
+    // MARK: - Network
+
+    private static func decodeNetwork(envelope: [String: Any]) -> Result<InboundPacket, DecodeError> {
+        // PROTOCOL.md §4.3: same double encoding as `event`.
+        guard let payload = envelope["event"] as? String else {
+            return .failure(.malformedNetwork("missing 'event' string field"))
+        }
+        let now = UInt64(Date().timeIntervalSince1970 * 1000)
+        guard let entry = NetworkEntry.parse(payload, fallbackMillis: now) else {
+            return .failure(.malformedNetwork("payload is not a JSON object with a string 'url'"))
+        }
+        return .success(.network(entry))
     }
 
     // MARK: - Helpers

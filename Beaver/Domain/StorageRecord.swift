@@ -209,10 +209,21 @@ public struct StorageRecord: Identifiable, Hashable, Sendable {
         }
     }
 
+    /// A JSON string literal for `raw`, `"`/`\` and control characters
+    /// (newline, tab, …) all escaped. Delegates to `JSONSerialization`
+    /// rather than hand-rolling the control-character table.
     private static func escapedLiteral(_ raw: String) -> String {
-        let escaped = raw
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-        return "\"\(escaped)\""
+        guard let data = try? JSONSerialization.data(
+            withJSONObject: raw, options: [.fragmentsAllowed, .withoutEscapingSlashes]
+        ) else {
+            // Every String is representable as a JSON string; this is
+            // unreachable in practice, but fall back to the old
+            // (unsafe-for-control-characters) escaping rather than crash.
+            let escaped = raw
+                .replacingOccurrences(of: "\\", with: "\\\\")
+                .replacingOccurrences(of: "\"", with: "\\\"")
+            return "\"\(escaped)\""
+        }
+        return String(decoding: data, as: UTF8.self)
     }
 }

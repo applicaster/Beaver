@@ -165,4 +165,34 @@ struct ProtocolDecoderTests {
             return
         }
     }
+
+    // MARK: - Network frames
+
+    @Test
+    func networkFrameDecodes() throws {
+        let envelope: [String: Any] = [
+            "type": "network",
+            "id": UUID().uuidString,
+            "event": #"{"url":"https://a.io/x","method":"GET","status":200,"timing":{"startTime":10,"duration":5}}"#,
+        ]
+        let result = ProtocolDecoder.decode(try JSONSerialization.data(withJSONObject: envelope))
+        guard case .success(.network(let entry)) = result else {
+            Issue.record("expected .network, got \(result)"); return
+        }
+        #expect(entry.url == "https://a.io/x")
+        #expect(entry.status == 200)
+        #expect(entry.startMillis == 10)
+    }
+
+    @Test(arguments: [
+        ["type": "network", "id": "1"],                                  // no event string
+        ["type": "network", "id": "1", "event": #"{"method":"GET"}"#],   // no url
+        ["type": "network", "id": "1", "event": "nope"],                 // not JSON
+    ] as [[String: String]])
+    func networkFrameWithoutURLFails(envelope: [String: String]) throws {
+        let result = ProtocolDecoder.decode(try JSONSerialization.data(withJSONObject: envelope))
+        guard case .failure(.malformedNetwork) = result else {
+            Issue.record("expected .malformedNetwork, got \(result)"); return
+        }
+    }
 }

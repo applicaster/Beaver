@@ -73,5 +73,31 @@
          too gives Sparkle a backstop if the delegate ever fails. -->
     <key>SUFeedURL</key>
     <string>https://applicaster.github.io/Beaver/appcast.xml</string>
+
+    <!-- ── Imported types ───────────────────────────────────────── -->
+    <!-- macOS declares no UTI for .har; without one, Export HAR's
+         `UTType(filenameExtension:conformingTo:)` still works but the
+         type stays anonymous (dynamic.*), so this gives it a stable
+         identity for Finder / Launch Services / Quick Look. -->
+    <key>UTImportedTypeDeclarations</key>
+    <array>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>com.applicaster.beaver.har</string>
+            <key>UTTypeDescription</key>
+            <string>HTTP Archive</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.json</string>
+            </array>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>har</string>
+                </array>
+            </dict>
+        </dict>
+    </array>
 </dict>
 </plist>

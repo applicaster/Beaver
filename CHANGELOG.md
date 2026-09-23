@@ -97,6 +97,24 @@ When releasing:
   available so past sessions are still browsable.
 
 ### Added
+- **Network tab.** A new tab lists every HTTP(S) request the SDK
+  reports (`network` wire frames, PROTOCOL.md §4.3): method, host +
+  path, status (colour-coded: green 2xx, orange 4xx, red 5xx/
+  failed), and duration. Select a row to see request/response
+  headers and the body rendered as a JSON tree. Filter by search
+  text, method, status class, or host (include/exclude); the filter
+  bar mirrors the Log feed's. Rows persist per session and reopen
+  with it; clearing the log feed clears the Network tab too. Sent
+  today by iOS (quick-brick-xray ≥ #2676); Android support is in
+  review ([Zapp-Frameworks#2869](https://github.com/applicaster/Zapp-Frameworks/pull/2869)).
+  Each request also still appears once in the Log feed under
+  `native_application/network_requests` — that's the SDK's existing
+  behaviour and is unchanged (D39).
+- **Session export/import now include network requests.** An
+  exported file carries a top-level `"network"` array alongside
+  `"events"` and `"storage"` whenever the session has any; importing
+  a file replays those entries back into the new session, same as
+  events and storage.
 - **Device context in the toolbar.** A small chip on the leading
   edge of the toolbar shows the app name, version, device model,
   platform, and OS that recorded the active session. Pulled from

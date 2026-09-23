@@ -1715,3 +1715,91 @@ D21 down to the two identifiers that really must not change.
 - Bundle ID looks like a brand name in `defaults`, Keychain,
   and `codesign -d`. Invisible to end users; only matters to
   devs who actively look.
+
+---
+
+## D39. Network tab: store raw network payloads, filter in memory
+
+**Status:** Accepted (2026-09-23)
+
+**Decision.** Add a `network` frame type (PROTOCOL.md §4.3) and a
+Network tab, with these choices:
+
+1. **Store the raw payload, re-parse on read.** `network_entry` keeps
+   `payload_json` verbatim (migration `v5_network_entry`) instead of a
+   column per field. `NetworkEntry.parse` is the single parser, called
+   both by the live decode path (`ProtocolDecoder.decodeNetwork`) and
+   by `LogStore.networkEntries` when a session is reopened. A new
+   optional field on the wire needs a `NetworkEntry.parse` change and
+   nothing else — no schema migration, no backfill.
+2. **Filter in memory.** `NetworkFilter.matches` runs as a plain
+   `Array.filter` in `NetworkViewModel.filtered` over the session's
+   full `entries` array, not a SQL `WHERE` clause. Ceiling: fine up to
+   a few thousand requests per session (marked with a `ponytail:`
+   comment at the call site); move to SQL or incremental filtering,
+   the way the Log feed already does for `event`, if a session ever
+   gets much bigger.
+3. **`clearEvents` deletes network rows.** The "Clear" toolbar action
+   deletes from `event`, `event_bookmark`, and now `network_entry` in
+   the same transaction. Unlike `storage_snapshot` — which is a
+   point-in-time snapshot the user may still want after clearing the
+   noisy log feed — network rows are a stream like `event`, so they
+   clear with it.
+4. **Rows are kept in arrival order, not start time.**
+   `LogStore.networkEntries` reads back `ORDER BY id`, matching the
+   order `NetworkViewModel` builds live by appending each new row as
+   it arrives. Arrival order is completion order, since the SDK sends
+   a `network` frame only once a request finishes (PROTOCOL.md §4.3,
+   "no pairing") — so a live session and a reopened one show requests
+   in the same order, even though two requests can finish out of the
+   order they started in.
+5. **The Log feed keeps the SDK's duplicate `event`, on purpose.**
+   quick-brick-xray sends each finished request as both a `network`
+   frame and a regular `event` frame (subsystem
+   `native_application/network_requests`). Beaver doesn't suppress the
+   `event` copy: it's the only place a user watching the live feed
+   (not the Network tab) sees the request happen, and de-duplicating
+   would require matching a `network` frame to an unrelated `event`
+   frame with no shared id — see §4.3, "no pairing".
+
+**Why raw-payload-and-reparse over a normalized table.** The
+alternative — a column per `NetworkEntry` field — was rejected because
+every optional field the SDK might add (a new `timing` sub-field, a
+`cache` flag, …) would need a migration before Beaver could store it,
+and old rows would need backfill or nullable columns forever. One
+parser, run twice (decode, reopen), is a smaller surface than a
+migration on every SDK addition. `event` already sets this precedent:
+`data_json` / `context_json` are opaque blobs for the same reason.
+
+**Alternatives considered.**
+- *Normalized columns per field*: rejected above.
+- *SQL-side filtering* (`WHERE method = ? AND status BETWEEN ? AND ?`,
+  etc.): more correct at scale, but `NetworkFilter` also matches
+  free-text search across headers/bodies, which doesn't map cleanly
+  to SQL without FTS. Punted until the in-memory ceiling is actually
+  hit; the Log feed's own `LIKE`-based approach (D15) suggests a SQL
+  rewrite is worth doing the same way if the day comes.
+- *Don't clear `network_entry` on Clear*: considered for symmetry with
+  `storage_snapshot`, but `network_entry` behaves like `event` (a
+  stream you're actively trying to declutter), not like a storage
+  snapshot (a state you asked for and want to keep referring to).
+
+**Android.** iOS sends `network` frames today
+(quick-brick-xray ≥ [#2676](https://github.com/applicaster/Zapp-Frameworks/pull/2676)).
+Android support is open as
+[applicaster/Zapp-Frameworks#2869](https://github.com/applicaster/Zapp-Frameworks/pull/2869)
+(`NetworkEntryMapper.kt`), pending merge — Beaver needs no change to
+receive it once merged, since the wire shape is the same `network`
+frame (see PROTOCOL.md §4.3 for the two platforms' minor differences
+in header joining and `startTime` derivation).
+
+**Implications.**
+- `ProtocolDecoder.InboundPacket.network(NetworkEntry)` and
+  `.malformedNetwork` join `.event` / `.storage` and their existing
+  error cases; `BeaverApp.handleInbound` routes `network` the same way
+  `event` and `storage` are routed, so a malformed `network` frame
+  produces one `decode failed: malformedNetwork(...)` warning event
+  and nothing else — it never surfaces as "unknown packet type".
+- `LogStore.Change.networkAppended(sessionId:)` is a new broadcast
+  case; `NetworkViewModel` subscribes to it the same way
+  `StoragesViewModel` subscribes to `.storageUpdated`.

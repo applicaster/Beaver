@@ -32,6 +32,12 @@ public final class AppEnvironment {
     /// actions only make sense when there's something to act on.
     public var viewingEventCount: Int = 0
 
+    /// Whether the viewing session has any network requests, kept as a
+    /// count for parity with `viewingEventCount`. Only gates the toolbar
+    /// (zero vs. non-zero) — callers stop refreshing it once it's above
+    /// zero, so it is not kept accurate as more requests arrive.
+    public var viewingNetworkCount: Int = 0
+
     /// Commands the connected SDK exposes (from its `cmdlist` reply).
     /// Refreshed automatically on connect; cleared on disconnect.
     /// Merged with `CommandRegistry` for syntax help in the
@@ -87,9 +93,11 @@ public final class AppEnvironment {
     public func refreshViewingEventCount() async {
         guard let sid = viewingSessionId else {
             viewingEventCount = 0
+            viewingNetworkCount = 0
             return
         }
         let count = (try? await store.eventCount(sessionId: sid, filter: .none)) ?? 0
         viewingEventCount = count
+        viewingNetworkCount = (try? await store.networkEntryCount(sessionId: sid)) ?? 0
     }
 }
