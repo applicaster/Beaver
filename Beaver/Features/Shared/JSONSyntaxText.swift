@@ -92,7 +92,7 @@ enum JSONSyntax {
         switch kind {
         case .string(let raw):
             return styled("\"", punctColor)
-                + styled(escape(raw), stringColor)
+                + styled(escape(oneLine(raw)), stringColor)
                 + styled("\"", punctColor)
         case .number(let n):  return styled(n, numberColor)
         case .bool(let b):    return styled(b ? "true" : "false", boolColor)
@@ -131,7 +131,7 @@ enum JSONSyntax {
         switch kind {
         case .string(let raw):
             return punctText("\"")
-                + Text(escape(raw)).foregroundColor(stringColor)
+                + Text(escape(oneLine(raw))).foregroundColor(stringColor)
                 + punctText("\"")
         case .number(let n):
             return Text(n).foregroundColor(numberColor)
@@ -147,6 +147,19 @@ enum JSONSyntax {
     }
 
     // MARK: - Helpers
+
+    /// Longest value a one-line row carries. More would never be seen —
+    /// `lineLimit(1)` cuts it — but it would still be escaped, attributed
+    /// and laid out on every render: a 24 MB string leaf spent 0.4 s in
+    /// `escape` alone. Copy and the popover use the full value.
+    static let oneLineLimit = 500
+
+    /// `s`, or its first `oneLineLimit` characters and an ellipsis.
+    /// Costs O(limit), not O(length).
+    static func oneLine(_ s: String) -> String {
+        let head = s.prefix(oneLineLimit)
+        return head.endIndex == s.endIndex ? s : head + "…"
+    }
 
     private static func punctText(_ s: String) -> Text {
         Text(s).foregroundColor(punctColor)

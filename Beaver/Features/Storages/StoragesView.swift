@@ -885,7 +885,7 @@ private struct NamespaceRow: View {
 
     private var summaryLine: String {
         if let valueText = record.valueText {
-            return valueText
+            return JSONSyntax.oneLine(valueText)
         }
         if record.isContainer {
             return record.itemCount == 1 ? "1 key" : "\(record.itemCount) keys"
