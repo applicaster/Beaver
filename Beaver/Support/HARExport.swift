@@ -122,7 +122,9 @@ public enum HARExport {
         }
 
         var content: [String: Any] = [
-            "size": responseBody?.utf8.count ?? 0,
+            // The reported (real, pre-truncation) size when the SDK sent
+            // one, else what was actually captured.
+            "size": e.responseBodySize ?? responseBody?.utf8.count ?? 0,
             "mimeType": header("Content-Type", in: e.responseHeaders) ?? "x-unknown",
         ]
         if let responseBody { content["text"] = responseBody }

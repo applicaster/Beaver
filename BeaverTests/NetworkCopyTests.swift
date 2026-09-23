@@ -268,6 +268,101 @@ struct NetworkCopyTests {
         #expect(NetworkEntry.compactSize(25_000_000) == "25 MB")
     }
 
+    // MARK: Real body size
+
+    @Test
+    func responseSizeReportedTakesPriorityOverEverything() {
+        let entry = e(#"""
+        {"url":"https://api.io/x","responseBodySize":312450,"responseBody":"short... [TRUNCATED]",
+         "responseHeaders":{"Content-Length":"8197"}}
+        """#)
+        #expect(entry.responseSize == NetworkEntry.BodySize(bytes: 312450, source: .reported, isLowerBound: false))
+    }
+
+    @Test
+    func responseSizeUsesContentLengthWhenTruncatedAndNoReportedSize() {
+        let entry = e(#"""
+        {"url":"https://api.io/x","responseBody":"short... [TRUNCATED]","responseHeaders":{"Content-Length":"8197"}}
+        """#)
+        #expect(entry.responseSize == NetworkEntry.BodySize(bytes: 8197, source: .contentLength(compressed: false), isLowerBound: false))
+    }
+
+    @Test
+    func responseSizeContentLengthIsCaseInsensitive() {
+        let entry = e(#"""
+        {"url":"https://api.io/x","responseBody":"short... [TRUNCATED]","responseHeaders":{"content-length":"8197"}}
+        """#)
+        #expect(entry.responseSize?.bytes == 8197)
+    }
+
+    @Test
+    func responseSizeContentEncodingGzipMeansCompressed() {
+        let entry = e(#"""
+        {"url":"https://api.io/x","responseBody":"short... [TRUNCATED]",
+         "responseHeaders":{"Content-Length":"8197","Content-Encoding":"gzip"}}
+        """#)
+        #expect(entry.responseSize?.source == .contentLength(compressed: true))
+    }
+
+    @Test
+    func responseSizeContentEncodingIdentityMeansNotCompressed() {
+        let entry = e(#"""
+        {"url":"https://api.io/x","responseBody":"short... [TRUNCATED]",
+         "responseHeaders":{"Content-Length":"8197","Content-Encoding":"identity"}}
+        """#)
+        #expect(entry.responseSize?.source == .contentLength(compressed: false))
+    }
+
+    @Test
+    func responseSizeIgnoresContentLengthWhenNotTruncated() {
+        let entry = e(#"""
+        {"url":"https://api.io/x","responseBody":"{\"a\":1}","responseHeaders":{"Content-Length":"999999"}}
+        """#)
+        #expect(entry.responseSize == NetworkEntry.BodySize(bytes: 7, source: .captured, isLowerBound: false))
+    }
+
+    @Test
+    func responseSizeIgnoresNonNumericContentLength() {
+        let entry = e(#"""
+        {"url":"https://api.io/x","responseBody":"short... [TRUNCATED]","responseHeaders":{"Content-Length":"nope"}}
+        """#)
+        #expect(entry.responseSize?.source == .captured)
+        #expect(entry.responseSize?.isLowerBound == true)
+    }
+
+    @Test
+    func responseSizeCapturedWhenNoSizeInfoAtAll() {
+        let entry = e(#"{"url":"https://api.io/x","responseBody":"{\"a\":1}"}"#)
+        #expect(entry.responseSize == NetworkEntry.BodySize(bytes: 7, source: .captured, isLowerBound: false))
+    }
+
+    @Test
+    func responseSizeIsNilWithNoBodyAndNoReportedSize() {
+        #expect(e(#"{"url":"https://api.io/x"}"#).responseSize == nil)
+        #expect(e(#"{"url":"https://api.io/x","responseBody":""}"#).responseSize == nil)
+    }
+
+    @Test
+    func requestSizeReportedTakesPriority() {
+        let entry = e(#"{"url":"https://api.io/x","requestBodySize":100,"requestBody":"ab"}"#)
+        #expect(entry.requestSize == NetworkEntry.BodySize(bytes: 100, source: .reported, isLowerBound: false))
+    }
+
+    @Test
+    func requestSizeNeverUsesContentLength() {
+        // Request headers rarely carry Content-Length; even truncated, skip straight to captured.
+        let entry = e(#"""
+        {"url":"https://api.io/x","requestBody":"short... [TRUNCATED]","requestHeaders":{"Content-Length":"999999"}}
+        """#)
+        #expect(entry.requestSize?.source == .captured)
+        #expect(entry.requestSize?.bytes == entry.requestBody?.utf8.count)
+    }
+
+    @Test
+    func requestSizeIsNilWithNoBodyAndNoReportedSize() {
+        #expect(e(#"{"url":"https://api.io/x"}"#).requestSize == nil)
+    }
+
     // MARK: Short URL
 
     /// Synthetic stand-in for a long token.

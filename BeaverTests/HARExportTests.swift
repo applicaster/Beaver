@@ -68,6 +68,24 @@ struct HARExportTests {
     }
 
     @Test
+    func contentSizeUsesTheReportedSizeOverTheCapturedOne() throws {
+        let truncated = e(#"""
+        {"url":"https://api.io/x","status":200,"responseBodySize":312450,"responseBody":"short... [TRUNCATED]"}
+        """#)
+        let content = try #require((try firstEntry(truncated)["response"] as? [String: Any])?["content"] as? [String: Any])
+        #expect(content["size"] as? Int == 312450)
+        // bodySize (unrelated field) still reflects what was actually captured.
+        #expect(try firstEntry(truncated)["response"] as? [String: Any] != nil)
+        let response = try #require(try firstEntry(truncated)["response"] as? [String: Any])
+        #expect(response["bodySize"] as? Int == truncated.responseBody?.utf8.count)
+
+        // No reported size: falls back to the captured body's length.
+        #expect(try firstEntry(get)["response"] as? [String: Any] != nil)
+        let getContent = try #require((try firstEntry(get)["response"] as? [String: Any])?["content"] as? [String: Any])
+        #expect(getContent["size"] as? Int == get.responseBody?.utf8.count)
+    }
+
+    @Test
     func getWithoutBodyHasNoPostData() throws {
         let request = try #require(try firstEntry(get)["request"] as? [String: Any])
         #expect(request["postData"] == nil)

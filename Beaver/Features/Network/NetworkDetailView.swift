@@ -215,11 +215,58 @@ private struct NetworkDetailContent: View {
             row("Ended", entry.durationMillis.map {
                 NetworkView.time(entry.startMillis + UInt64(max($0, 0)))
             } ?? "—")
-            row("Size", NetworkView.size(entry), help: NetworkView.sizeHelp(entry))
+            sizeRows(label: "Response size", size: entry.responseSize, capturedBytes: entry.responseBytes,
+                     truncated: entry.isResponseBodyTruncated)
+            if let requestSize = entry.requestSize {
+                sizeRows(label: "Request size", size: requestSize, capturedBytes: entry.requestBody?.utf8.count,
+                          truncated: entry.isRequestBodyTruncated)
+            }
             // No "Error" row here — the red line under the status above
             // already shows it (see `header`).
         }
         .font(.caption)
+    }
+
+    /// The size row, plus a second "Captured" row when the shown size is
+    /// exact (reported or Content-Length) but the body itself was cut —
+    /// so it's clear the captured bytes on screen are only a prefix.
+    @ViewBuilder
+    private func sizeRows(label: String, size: NetworkEntry.BodySize?, capturedBytes: Int?, truncated: Bool) -> some View {
+        if let size {
+            let (text, isWarning) = Self.sizeText(size)
+            row(label, text, color: isWarning ? .orange : nil)
+            if truncated, Self.isCaptureNoteNeeded(size.source) {
+                row("Captured", "\(NetworkEntry.compactSize(capturedBytes ?? 0)) (truncated)")
+            }
+        } else {
+            row(label, "—")
+        }
+    }
+
+    /// "312,450 bytes (312 KB)" — reported; with the source noted for
+    /// Content-Length, or a real-size warning when only a truncated
+    /// capture is known.
+    private static func sizeText(_ size: NetworkEntry.BodySize) -> (text: String, isWarning: Bool) {
+        let grouped = size.bytes.formatted()
+        let compact = NetworkEntry.compactSize(size.bytes)
+        switch size.source {
+        case .reported:
+            return ("\(grouped) bytes (\(compact))", false)
+        case .contentLength(let compressed):
+            let note = compressed ? ", gzip-compressed on the wire" : ""
+            return ("\(grouped) bytes (\(compact)) · Content-Length\(note)", false)
+        case .captured where size.isLowerBound:
+            return ("≥ \(grouped) bytes (\(compact)+) · real size unknown — the SDK cut the body", true)
+        case .captured:
+            return ("\(grouped) bytes (\(compact))", false)
+        }
+    }
+
+    private static func isCaptureNoteNeeded(_ source: NetworkEntry.BodySize.Source) -> Bool {
+        switch source {
+        case .reported, .contentLength: true
+        case .captured: false
+        }
     }
 
     private func row(_ label: String, _ value: String, color: Color? = nil, help: String = "") -> some View {
@@ -254,13 +301,13 @@ private struct NetworkDetailContent: View {
                                tree: trees.query, raw: entry.rawQuery ?? "")
                 }
                 headers(entry.requestHeaders, tree: trees.requestHeaders, name: "request headers")
-                bodySection(entry.requestBody, tree: trees.requestBody,
-                            truncated: entry.isRequestBodyTruncated, name: "request body")
+                bodySection(entry.requestBody, tree: trees.requestBody, truncated: entry.isRequestBodyTruncated,
+                            name: "request body", reportedSize: entry.requestBodySize)
             }
             group("Response", copy: { toasts.copy(entry.responseJSON, "Copied response") }) {
                 headers(entry.responseHeaders, tree: trees.responseHeaders, name: "response headers")
-                bodySection(entry.responseBody, tree: trees.responseBody,
-                     truncated: entry.isResponseBodyTruncated, name: "response body")
+                bodySection(entry.responseBody, tree: trees.responseBody, truncated: entry.isResponseBodyTruncated,
+                            name: "response body", reportedSize: entry.responseBodySize)
             }
         }
     }
@@ -288,11 +335,13 @@ private struct NetworkDetailContent: View {
     }
 
     @ViewBuilder
-    private func bodySection(_ text: String?, tree: StorageRecord?, truncated: Bool, name: String) -> some View {
+    private func bodySection(_ text: String?, tree: StorageRecord?, truncated: Bool, name: String,
+                              reportedSize: Int?) -> some View {
         if let text, !text.isEmpty {
             // A truncated JSON body that won't repair is still JSON.
             let isJSON = tree != nil || text.first == "{" || text.first == "["
-            let size = NetworkEntry.compactSize(text.utf8.count)
+            let size = reportedSize.map { "\(NetworkEntry.compactSize($0)) (showing first 100 KB)" }
+                ?? NetworkEntry.compactSize(text.utf8.count)
             Subsection(title: "Body · \(isJSON ? "JSON" : "Text") · \(size)", name: name,
                        tree: tree, raw: text, truncated: truncated)
         }

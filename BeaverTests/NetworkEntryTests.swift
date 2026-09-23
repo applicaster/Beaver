@@ -108,4 +108,36 @@ struct NetworkEntryTests {
         let e = try #require(NetworkEntry.parse(#"{"url":"u","responseHeaders":{"Content-Length":123}}"#, fallbackMillis: 0))
         #expect(e.responseHeaders["Content-Length"] == "123")
     }
+
+    // MARK: Body size
+
+    @Test(arguments: [
+        (#"312450"#, 312450),      // number
+        (#""312450""#, 312450),    // numeric string, lenient like status
+    ])
+    func bodySizeAcceptsNumberOrNumericString(raw: String, expected: Int) throws {
+        let e = try #require(NetworkEntry.parse(#"{"url":"u","requestBodySize":\#(raw),"responseBodySize":\#(raw)}"#, fallbackMillis: 0))
+        #expect(e.requestBodySize == expected)
+        #expect(e.responseBodySize == expected)
+    }
+
+    @Test
+    func negativeBodySizeIsRejected() throws {
+        let e = try #require(NetworkEntry.parse(#"{"url":"u","requestBodySize":-1,"responseBodySize":-5}"#, fallbackMillis: 0))
+        #expect(e.requestBodySize == nil)
+        #expect(e.responseBodySize == nil)
+    }
+
+    @Test
+    func booleanBodySizeIsRejected() throws {
+        let e = try #require(NetworkEntry.parse(#"{"url":"u","responseBodySize":true}"#, fallbackMillis: 0))
+        #expect(e.responseBodySize == nil)
+    }
+
+    @Test
+    func absentBodySizeIsNil() throws {
+        let e = try #require(NetworkEntry.parse(#"{"url":"u"}"#, fallbackMillis: 0))
+        #expect(e.requestBodySize == nil)
+        #expect(e.responseBodySize == nil)
+    }
 }

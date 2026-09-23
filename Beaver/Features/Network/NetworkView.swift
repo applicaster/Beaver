@@ -245,9 +245,12 @@ struct NetworkView: View {
             }
             .width(min: 60, ideal: 70, max: 90)
             TableColumn("Size") { e in
-                if let bytes = e.responseBytes {
+                // The reported size when the SDK sent one (exact, no "+");
+                // Content-Length is never used here — compressed, it would
+                // read as a wrong body size.
+                if let bytes = e.responseBodySize ?? e.responseBytes {
                     let pill = Pill(text: Self.size(e), tint: bytes < 50_000 ? .green : .orange)
-                    if e.isResponseBodyTruncated {
+                    if e.isResponseBodyTruncated && e.responseBodySize == nil {
                         pill.help(Self.sizeHelp(e))
                     } else {
                         pill
@@ -291,8 +294,10 @@ struct NetworkView: View {
         return ms < 100 ? .green : ms < 500 ? .orange : .red
     }
 
-    /// `100 KB+` when the SDK cut the body short.
+    /// The reported (real) size when the SDK sent one; otherwise the
+    /// captured size, `100 KB+` when the SDK cut the body short.
     static func size(_ e: NetworkEntry) -> String {
+        if let reported = e.responseBodySize { return NetworkEntry.compactSize(reported) }
         guard let bytes = e.responseBytes else { return "—" }
         return NetworkEntry.compactSize(bytes) + (e.isResponseBodyTruncated ? "+" : "")
     }

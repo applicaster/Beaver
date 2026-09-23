@@ -39,6 +39,11 @@ public struct NetworkEntry: Identifiable, Hashable, Sendable {
     public let responseHeaders: [String: String]
     public let requestBody: String?
     public let responseBody: String?
+    /// Original body size in bytes (UTF-8), before the SDK's 100 000-char
+    /// cap. Sent only by SDKs that report it (PROTOCOL.md §4.3); `nil`
+    /// otherwise, or when negative (rejected as malformed).
+    public let requestBodySize: Int?
+    public let responseBodySize: Int?
     public let startMillis: UInt64
     public let durationMillis: Int?
     public let error: String?
@@ -96,6 +101,8 @@ public struct NetworkEntry: Identifiable, Hashable, Sendable {
             responseHeaders: headers(o["responseHeaders"]),
             requestBody: o["requestBody"] as? String,
             responseBody: o["responseBody"] as? String,
+            requestBodySize: nonNegativeInt(o["requestBodySize"]),
+            responseBodySize: nonNegativeInt(o["responseBodySize"]),
             startMillis: start,
             durationMillis: duration,
             error: o["error"] as? String,
@@ -112,6 +119,12 @@ public struct NetworkEntry: Identifiable, Hashable, Sendable {
         if let s = value as? String { return Int(s) }
         if let n = value as? NSNumber, CFGetTypeID(n) != CFBooleanGetTypeID() { return n.intValue }
         return nil
+    }
+
+    /// Like `int(_:)`, but rejects a negative value as malformed.
+    private static func nonNegativeInt(_ value: Any?) -> Int? {
+        guard let n = int(value), n >= 0 else { return nil }
+        return n
     }
 
     private static func headers(_ value: Any?) -> [String: String] {

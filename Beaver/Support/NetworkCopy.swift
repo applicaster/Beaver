@@ -99,6 +99,47 @@ extension NetworkEntry {
         return responseBody.utf8.count
     }
 
+    /// The original body size, best source first: the SDK's own reported
+    /// size, then (for a truncated response) the `Content-Length` header,
+    /// then the bytes actually captured.
+    public struct BodySize: Equatable, Sendable {
+        public enum Source: Equatable, Sendable {
+            case reported
+            case contentLength(compressed: Bool)
+            case captured
+        }
+        public let bytes: Int
+        public let source: Source
+        /// True only for `.captured` when the SDK cut the body short — the
+        /// real size is at least this many bytes, possibly more.
+        public let isLowerBound: Bool
+    }
+
+    public var responseSize: BodySize? {
+        if let responseBodySize { return BodySize(bytes: responseBodySize, source: .reported, isLowerBound: false) }
+        if isResponseBodyTruncated, let bytes = Self.contentLength(responseHeaders) {
+            let compressed = Self.header("Content-Encoding", in: responseHeaders)
+                .map { $0.lowercased() != "identity" } ?? false
+            return BodySize(bytes: bytes, source: .contentLength(compressed: compressed), isLowerBound: false)
+        }
+        guard let responseBytes else { return nil }
+        return BodySize(bytes: responseBytes, source: .captured, isLowerBound: isResponseBodyTruncated)
+    }
+
+    public var requestSize: BodySize? {
+        if let requestBodySize { return BodySize(bytes: requestBodySize, source: .reported, isLowerBound: false) }
+        guard let requestBody, !requestBody.isEmpty else { return nil }
+        return BodySize(bytes: requestBody.utf8.count, source: .captured, isLowerBound: isRequestBodyTruncated)
+    }
+
+    private static func contentLength(_ headers: [String: String]) -> Int? {
+        header("Content-Length", in: headers).flatMap { Int($0) }
+    }
+
+    private static func header(_ name: String, in headers: [String: String]) -> String? {
+        headers.first { $0.key.caseInsensitiveCompare(name) == .orderedSame }?.value
+    }
+
     /// "403 Forbidden", "-999 — cancelled", or the error / "—" with no status.
     public var statusLine: String {
         guard let status else { return error ?? "—" }

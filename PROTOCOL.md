@@ -282,6 +282,8 @@ outer envelope (double-encoded).
 | `responseHeaders`   | object, string → string         | optional     | defaults to `{}` |
 | `requestBody`       | string                          | optional     | the SDK caps this at 100 KB before sending |
 | `responseBody`      | string                          | optional     | same 100 KB cap |
+| `requestBodySize`   | number or numeric string        | optional     | the original body size in bytes (UTF-8) before the SDK's 100 000-char cap. Senders: Android ≥ #2869 |
+| `responseBodySize`  | number or numeric string        | optional     | the original body size in bytes (UTF-8) before the SDK's 100 000-char cap. Senders: Android ≥ #2869 |
 | `error`             | string                          | optional     | set instead of `status` when the request never got a response (timeout, no connection, …) |
 
 **Senders.** iOS: quick-brick-xray ≥
