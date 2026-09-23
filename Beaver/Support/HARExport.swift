@@ -24,8 +24,9 @@ public enum HARExport {
 
     /// The HAR's entries as network payloads, parsed by `NetworkEntry.parse`
     /// like any other. Entries without a request URL are skipped; anything
-    /// that isn't a HAR decodes to `[]`. Bodies are taken as they are, so a
-    /// base64-encoded `content.text` stays base64.
+    /// that isn't a HAR decodes to `[]`. A base64-encoded `content.text`
+    /// (`content.encoding == "base64"`) is decoded when it's valid UTF-8
+    /// text; otherwise (binary, or bad base64) the raw text is kept as is.
     public static func decode(_ data: Data) -> [NetworkEntry] {
         guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
               let entries = (root["log"] as? [String: Any])?["entries"] as? [[String: Any]]
@@ -48,7 +49,9 @@ public enum HARExport {
         if let status = (response["status"] as? NSNumber)?.intValue, status > 0 { o["status"] = status }
         if let text = response["statusText"] as? String, !text.isEmpty { o["statusText"] = text }
         if let body = (request["postData"] as? [String: Any])?["text"] as? String { o["requestBody"] = body }
-        if let body = (response["content"] as? [String: Any])?["text"] as? String { o["responseBody"] = body }
+        if let content = response["content"] as? [String: Any], let body = content["text"] as? String {
+            o["responseBody"] = bodyText(body, encoding: content["encoding"] as? String)
+        }
         if let error = h["_error"] as? String { o["error"] = error }
 
         let start = (h["startedDateTime"] as? String).flatMap(millis)
@@ -65,6 +68,17 @@ public enum HARExport {
 
         guard let json = try? JSONSerialization.data(withJSONObject: o) else { return nil }
         return NetworkEntry.parse(String(decoding: json, as: UTF8.self), fallbackMillis: start ?? 0)
+    }
+
+    /// Decodes a base64 `content.text` when it decodes to valid UTF-8 text;
+    /// otherwise (not base64-encoded, binary content, or malformed base64)
+    /// returns `text` unchanged.
+    private static func bodyText(_ text: String, encoding: String?) -> String {
+        guard encoding == "base64",
+              let data = Data(base64Encoded: text),
+              let decoded = String(data: data, encoding: .utf8)
+        else { return text }
+        return decoded
     }
 
     /// `[{name, value}]` to a dictionary; a repeated name joins with ", ".

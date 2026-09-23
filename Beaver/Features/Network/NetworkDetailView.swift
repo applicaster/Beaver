@@ -129,9 +129,11 @@ private struct NetworkDetailContent: View {
         let short = entry.shortURL
         let isCut = short != entry.url
         HStack(alignment: .firstTextBaseline, spacing: 6) {
+            // Not `.textSelection(.enabled)` here: it can conflict with the
+            // tap gesture below on macOS. The copy button and the
+            // expanded block (which stays selectable) cover selection.
             Text(short)
                 .font(.title3)
-                .textSelection(.enabled)
                 .lineLimit(2)
                 .truncationMode(.middle)
                 .fixedSize(horizontal: false, vertical: true)
@@ -212,9 +214,8 @@ private struct NetworkDetailContent: View {
                 NetworkView.time(entry.startMillis + UInt64(max($0, 0)))
             } ?? "—")
             row("Size", NetworkView.size(entry), help: NetworkView.sizeHelp(entry))
-            if let error = entry.error {
-                row("Error", error, color: .red)
-            }
+            // No "Error" row here — the red line under the status above
+            // already shows it (see `header`).
         }
         .font(.caption)
     }
@@ -224,10 +225,16 @@ private struct NetworkDetailContent: View {
             Text(label)
                 .foregroundStyle(.secondary)
                 .frame(minWidth: 70, alignment: .leading)
-            Text(value)
-                .foregroundStyle(color ?? .primary)
-                .textSelection(.enabled)
-                .help(help)
+            if help.isEmpty {
+                Text(value)
+                    .foregroundStyle(color ?? .primary)
+                    .textSelection(.enabled)
+            } else {
+                Text(value)
+                    .foregroundStyle(color ?? .primary)
+                    .textSelection(.enabled)
+                    .help(help)
+            }
         }
     }
 
@@ -237,9 +244,12 @@ private struct NetworkDetailContent: View {
     private func groups(_ trees: ParsedEntry) -> some View {
         VStack(alignment: .leading, spacing: 20) {
             group("Request", copy: { toasts.copy(entry.requestJSON, "Copied request") }) {
-                if let rawQuery = entry.rawQuery {
+                // Not `rawQuery != nil`: a URL ending in a bare "?" has an
+                // empty (non-nil) query component, which would otherwise
+                // show an empty "(0) None" section.
+                if !entry.queryItems.isEmpty {
                     Subsection(title: "Query parameters (\(entry.queryItems.count))", name: "query",
-                               tree: trees.query, raw: rawQuery)
+                               tree: trees.query, raw: entry.rawQuery ?? "")
                 }
                 headers(entry.requestHeaders, tree: trees.requestHeaders, name: "request headers")
                 bodySection(entry.requestBody, tree: trees.requestBody, truncated: false, name: "request body")

@@ -13,6 +13,7 @@ struct NetworkView: View {
     /// The entry open in the large detail sheet.
     @State private var expanded: NetworkEntry?
     @State private var harDocument: JSONExportDocument?
+    @State private var harDefaultFilename = ""
     @State private var showingHARExporter = false
 
     var body: some View {
@@ -55,7 +56,7 @@ struct NetworkView: View {
             isPresented: $showingHARExporter,
             document: harDocument,
             contentType: .har,
-            defaultFilename: Self.harFilename(),
+            defaultFilename: harDefaultFilename,
             onCompletion: { _ in harDocument = nil }
         )
     }
@@ -190,6 +191,7 @@ struct NetworkView: View {
             return
         }
         harDocument = JSONExportDocument(data: data)
+        harDefaultFilename = Self.harFilename()
         showingHARExporter = true
     }
 
@@ -244,8 +246,12 @@ struct NetworkView: View {
             .width(min: 60, ideal: 70, max: 90)
             TableColumn("Size") { e in
                 if let bytes = e.responseBytes {
-                    Pill(text: Self.size(e), tint: bytes < 50_000 ? .green : .orange)
-                        .help(Self.sizeHelp(e))
+                    let pill = Pill(text: Self.size(e), tint: bytes < 50_000 ? .green : .orange)
+                    if e.isResponseBodyTruncated {
+                        pill.help(Self.sizeHelp(e))
+                    } else {
+                        pill
+                    }
                 } else {
                     Text("—").foregroundStyle(.secondary)
                 }

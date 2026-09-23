@@ -913,8 +913,12 @@ private struct BookmarkRow: View {
 // MARK: - FileDocument for export
 
 extension UTType {
-    /// HAR is JSON; macOS declares no type for it, so this is a dynamic one.
-    static let har = UTType(filenameExtension: "har", conformingTo: .json) ?? .json
+    /// HAR is JSON; macOS declares no type for it, so this app imports its
+    /// own (see Info.plist's UTImportedTypeDeclarations). Falls back to a
+    /// dynamic type, then plain JSON, if the declaration is ever missing.
+    static let har = UTType("com.applicaster.beaver.har")
+        ?? UTType(filenameExtension: "har", conformingTo: .json)
+        ?? .json
 }
 
 struct JSONExportDocument: FileDocument {

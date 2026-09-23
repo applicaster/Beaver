@@ -172,6 +172,36 @@ struct HARExportTests {
     }
 
     @Test
+    func decodeDecodesBase64ContentTextWhenItIsValidUTF8() {
+        // "hello world" base64-encoded, as a browser HAR would write a
+        // text response under content.encoding == "base64".
+        let har = #"""
+        {"log":{"entries":[{"request":{"method":"GET","url":"https://a.io/"},
+         "response":{"content":{"text":"aGVsbG8gd29ybGQ=","encoding":"base64"}}}]}}
+        """#
+        let entries = HARExport.decode(Data(har.utf8))
+        #expect(entries.first?.responseBody == "hello world")
+    }
+
+    @Test
+    func decodeKeepsRawTextWhenBase64DoesNotDecodeToUTF8() {
+        // Not valid base64 at all — kept as-is rather than dropped.
+        let notBase64 = #"""
+        {"log":{"entries":[{"request":{"method":"GET","url":"https://a.io/"},
+         "response":{"content":{"text":"not base64 !!","encoding":"base64"}}}]}}
+        """#
+        #expect(HARExport.decode(Data(notBase64.utf8)).first?.responseBody == "not base64 !!")
+
+        // Valid base64 but binary (invalid UTF-8) — kept as the raw base64
+        // text rather than turned into mojibake.
+        let binary = #"""
+        {"log":{"entries":[{"request":{"method":"GET","url":"https://a.io/"},
+         "response":{"content":{"text":"/////w==","encoding":"base64"}}}]}}
+        """#
+        #expect(HARExport.decode(Data(binary.utf8)).first?.responseBody == "/////w==")
+    }
+
+    @Test
     func decodeRejectsNonHAR() {
         #expect(HARExport.decode(Data(#"{"events":[]}"#.utf8)).isEmpty)
         #expect(HARExport.decode(Data("nope".utf8)).isEmpty)

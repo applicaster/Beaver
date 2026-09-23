@@ -32,8 +32,10 @@ public final class AppEnvironment {
     /// actions only make sense when there's something to act on.
     public var viewingEventCount: Int = 0
 
-    /// Number of network requests in the viewing session. Export also
-    /// works for a session that has requests and no events.
+    /// Whether the viewing session has any network requests, kept as a
+    /// count for parity with `viewingEventCount`. Only gates the toolbar
+    /// (zero vs. non-zero) — callers stop refreshing it once it's above
+    /// zero, so it is not kept accurate as more requests arrive.
     public var viewingNetworkCount: Int = 0
 
     /// Commands the connected SDK exposes (from its `cmdlist` reply).
