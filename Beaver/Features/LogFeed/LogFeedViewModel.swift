@@ -142,6 +142,12 @@ final class LogFeedViewModel {
     /// this instead of looking the selection up in `page`.
     private(set) var selectedEvent: EventRecord?
 
+    /// `selectedEvent`'s DATA / CONTEXT as trees. Parsed once per
+    /// selection, off the main actor — parsing inside the pane's `body`
+    /// cost 115 ms per evaluation on a real 25 MB payload.
+    private(set) var selectedData: StorageRecord?
+    private(set) var selectedContext: StorageRecord?
+
     // MARK: - Dependencies
 
     private let store: LogStore
@@ -373,14 +379,22 @@ final class LogFeedViewModel {
         selectionTask?.cancel()
         guard let id = selectedEventId else {
             selectedEvent = nil
+            selectedData = nil
+            selectedContext = nil
             return
         }
         selectionTask = Task { [weak self, store] in
             let full = try? await store.events(ids: [id]).first
+            let (data, context) = await Task.detached(priority: .userInitiated) {
+                (full?.dataJSON.flatMap { StorageRecord.parse($0) },
+                 full?.contextJSON.flatMap { StorageRecord.parse($0) })
+            }.value
             guard let self, !Task.isCancelled else { return }
             await MainActor.run {
                 guard self.selectedEventId == id else { return }
                 self.selectedEvent = full
+                self.selectedData = data
+                self.selectedContext = context
             }
         }
     }

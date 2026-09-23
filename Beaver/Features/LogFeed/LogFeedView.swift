@@ -38,7 +38,9 @@ private struct LogFeedContent: View {
             HSplitView {
                 LogFeedTable(vm: vm)
                     .frame(minWidth: 600, maxWidth: .infinity, maxHeight: .infinity)
-                DetailPaneView(event: selectedEvent)
+                DetailPaneView(event: selectedEvent,
+                               data: vm.selectedData,
+                               context: vm.selectedContext)
                     .frame(minWidth: 280, idealWidth: 360, maxHeight: .infinity)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
