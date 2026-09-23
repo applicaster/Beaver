@@ -96,6 +96,28 @@ struct ProtocolDecoderTests {
         }
     }
 
+    /// Anyone who reaches the port picks the timestamp. Each of these used
+    /// to trap in `UInt64(_:)` or later in the store's `Int(_:)`.
+    @Test(arguments: ["-1", "-2.5", "1e20", "18446744073709551615", "9223372036854775808"])
+    func rejectsTimestampThatCannotBeStored(raw: String) throws {
+        let inner = #"{ "subsystem": "s", "timestamp": \#(raw), "level": "info", "message": "m" }"#
+        let data = try JSONSerialization.data(withJSONObject: [
+            "type": "event", "id": UUID().uuidString, "event": inner,
+        ])
+        guard case .failure(.malformedEvent) = ProtocolDecoder.decode(data) else {
+            Issue.record("expected malformedEvent for timestamp \(raw)")
+            return
+        }
+        // The file importer shares the rule.
+        #expect(try EventJSON.decode(Data("[\(inner)]".utf8)).isEmpty)
+    }
+
+    @Test
+    func acceptsFractionalTimestamp() throws {
+        #expect(ProtocolDecoder.timestampMillis(NSNumber(value: 1715784000000.7)) == 1715784000000)
+        #expect(ProtocolDecoder.timestampMillis(NSNumber(value: Int64.max)) == UInt64(Int64.max))
+    }
+
     // MARK: - Storage frames
 
     @Test

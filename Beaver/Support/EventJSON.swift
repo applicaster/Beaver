@@ -46,11 +46,7 @@ enum EventJSON {
         guard let subsystem = dict["subsystem"] as? String else { return nil }
         guard let message   = dict["message"]   as? String else { return nil }
 
-        let timestamp: UInt64
-        if let v = dict["timestamp"] as? UInt64 { timestamp = v }
-        else if let v = dict["timestamp"] as? Int { timestamp = UInt64(v) }
-        else if let v = dict["timestamp"] as? Double { timestamp = UInt64(v) }
-        else { return nil }
+        guard let timestamp = ProtocolDecoder.timestampMillis(dict["timestamp"]) else { return nil }
 
         let level: LogLevel
         if let s = dict["level"] as? String, let parsed = LogLevel(rawValue: s) {
