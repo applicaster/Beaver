@@ -68,10 +68,14 @@ struct NetworkView: View {
             FilterPillField(systemImage: "magnifyingglass", placeholder: "Search URLs, headers, bodies…",
                             text: $vm.filter.search, regex: $vm.filter.searchIsRegex)
                 .frame(maxWidth: 320)
-            facetMenu("Method", all: vm.allMethods, selected: $vm.filter.methods)
-            facetMenu("Status", all: NetworkEntry.StatusClass.allCases,
-                      selected: $vm.filter.statusClasses, label: \.displayName)
-            facetMenu("Host", all: vm.allHosts, selected: $vm.filter.hosts)
+            let base = vm.base
+            FacetPicker(title: "Method", selection: $vm.filter.method,
+                        options: vm.filter.availableMethods(in: base), tint: MethodBadge.tint)
+            FacetPicker(title: "Status", selection: $vm.filter.status,
+                        options: vm.filter.availableStatuses(in: base),
+                        label: NetworkEntry.statusLabel(for:), tint: \.color)
+            FacetPicker(title: "Host", selection: $vm.filter.host,
+                        options: vm.filter.availableHosts(in: base))
             if !vm.filter.isEmpty || vm.filter.searchIsRegex {
                 Button("Clear filters") { vm.filter = NetworkFilter() }
             }
@@ -89,13 +93,13 @@ struct NetworkView: View {
         let classes = NetworkEntry.StatusClass.allCases
         return ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
-                if !(f.methods.isEmpty && f.statusClasses.isEmpty && f.hosts.isEmpty) {
+                if f.method != nil || f.status != nil || f.host != nil {
                     Text("Including:").font(.caption).foregroundStyle(.secondary)
-                    chips(f.methods.sorted(), excluded: false) { vm.filter.methods.remove($0) }
-                    chips(classes.filter(f.statusClasses.contains), title: \.displayName, excluded: false) {
-                        vm.filter.statusClasses.remove($0)
+                    if let m = f.method { NetworkChip(title: m, excluded: false) { vm.filter.method = nil } }
+                    if let st = f.status {
+                        NetworkChip(title: NetworkEntry.statusLabel(for: st), excluded: false) { vm.filter.status = nil }
                     }
-                    chips(f.hosts.sorted(), excluded: false) { vm.filter.hosts.remove($0) }
+                    if let h = f.host { NetworkChip(title: h, excluded: false) { vm.filter.host = nil } }
                 }
                 if !(f.excludedMethods.isEmpty && f.excludedStatusClasses.isEmpty && f.excludedHosts.isEmpty) {
                     Text("Excluding:").font(.caption).foregroundStyle(.secondary)
@@ -202,23 +206,6 @@ struct NetworkView: View {
         return "beaver_\(formatter.string(from: Date())).har"
     }
 
-    private func facetMenu<T: Hashable>(
-        _ title: String, all: [T], selected: Binding<Set<T>>, label: KeyPath<T, String>? = nil
-    ) -> some View {
-        Menu(selected.wrappedValue.isEmpty ? title : "\(title) (\(selected.wrappedValue.count))") {
-            ForEach(all, id: \.self) { value in
-                Toggle(label.map { value[keyPath: $0] } ?? "\(value)", isOn: Binding(
-                    get: { selected.wrappedValue.contains(value) },
-                    set: { on in
-                        if on { selected.wrappedValue.insert(value) }
-                        else { selected.wrappedValue.remove(value) }
-                    }
-                ))
-            }
-        }
-        .fixedSize()
-    }
-
     // MARK: Table
 
     private func table(_ rows: [NetworkEntry]) -> some View {
@@ -267,12 +254,13 @@ struct NetworkView: View {
             if let id = ids.first, let e = vm.entries.first(where: { $0.id == id }) {
                 Button(vm.isBookmarked(e.id) ? "Remove bookmark" : "Bookmark") { vm.toggleBookmark(e.id) }
                 Divider()
-                Button("Only \(e.host)") { vm.filter.hosts = [e.host] }
+                Button("Only \(e.host)") { vm.filter.host = e.host }
                 Button("Hide \(e.host)") { vm.filter.excludedHosts.insert(e.host) }
-                Button("Only \(e.method)") { vm.filter.methods = [e.method] }
+                Button("Only \(e.method)") { vm.filter.method = e.method }
                 Button("Hide \(e.method)") { vm.filter.excludedMethods.insert(e.method) }
+                let pick = NetworkFilter.StatusPick(e.status)
+                Button("Only \(NetworkEntry.statusLabel(for: pick))") { vm.filter.status = pick }
                 let statusClass = e.statusClass
-                Button("Only \(statusClass.displayName)") { vm.filter.statusClasses = [statusClass] }
                 Button("Hide \(statusClass.displayName)") { vm.filter.excludedStatusClasses.insert(statusClass) }
                 Divider()
                 Button("Copy URL") { toasts.copy(e.url, "Copied URL") }
@@ -322,6 +310,14 @@ extension ToastCenter {
 }
 
 // MARK: - Badges
+
+extension NetworkFilter.StatusPick {
+    /// StatusBadge's colour for this code; "No status" is a failure.
+    var color: Color {
+        guard case .code(let code) = self else { return NetworkEntry.StatusClass.failed.color }
+        return NetworkEntry.StatusClass(status: code).color
+    }
+}
 
 extension NetworkEntry.StatusClass {
     var color: Color {
@@ -385,9 +381,9 @@ private struct NetworkChip: View {
 struct MethodBadge: View {
     let method: String
 
-    var body: some View { Pill(text: method, tint: tint) }
+    var body: some View { Pill(text: method, tint: Self.tint(method)) }
 
-    private var tint: Color {
+    static func tint(_ method: String) -> Color {
         switch method {
         case "GET": .blue
         case "POST": .green
@@ -404,5 +400,102 @@ struct StatusBadge: View {
 
     var body: some View {
         Pill(text: entry.status.map(String.init) ?? "—", tint: entry.statusClass.color)
+    }
+}
+
+/// Single-choice facet dropdown, styled like the Log feed's level pill:
+/// neutral on All, tinted once a value is picked. Options come from
+/// `NetworkFilter.available…`, so they only list values that can match.
+private struct FacetPicker<Value: Hashable & Sendable>: View {
+    let title: String
+    @Binding var selection: Value?
+    let options: [FacetOption<Value>]
+    var label: (Value) -> String = { "\($0)" }
+    var tint: (Value) -> Color = { _ in .accentColor }
+    @State private var isShown = false
+    @State private var isHovered = false
+
+    var body: some View {
+        let color = selection.map(tint) ?? .secondary
+        Button { isShown.toggle() } label: {
+            HStack(spacing: 6) {
+                Text(selection.map(label) ?? title)
+                    .font(.caption.weight(.bold))
+                    .lineLimit(1)
+                Image(systemName: "chevron.down")
+                    .font(.caption2.weight(.semibold))
+            }
+            .foregroundStyle(selection == nil ? Color.primary : color)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(Capsule().fill(isHovered ? color.opacity(0.12) : Color(.controlBackgroundColor)))
+            .overlay(Capsule().strokeBorder(color.opacity(selection == nil ? 0.3 : 0.5), lineWidth: 1))
+            .animation(.easeInOut(duration: 0.12), value: isHovered)
+        }
+        .buttonStyle(.plain)
+        .fixedSize()
+        .onHover { isHovered = $0 }
+        .help("Show one \(title.lowercased()) only")
+        .popover(isPresented: $isShown, arrowEdge: .bottom) {
+            // ponytail: scrolls past 14 rows; a search field if hosts get into the hundreds.
+            if options.count > 14 {
+                ScrollView { rows }.frame(height: 420)
+            } else {
+                rows
+            }
+        }
+    }
+
+    private var rows: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            FacetPickerRow(text: "All", count: options.reduce(0) { $0 + $1.count },
+                           isSelected: selection == nil, tint: .primary) { pick(nil) }
+            Divider().padding(.vertical, 2)
+            ForEach(options, id: \.value) { option in
+                FacetPickerRow(text: label(option.value), count: option.count,
+                               isSelected: option.value == selection, tint: tint(option.value)) { pick(option.value) }
+            }
+        }
+        .padding(.vertical, 4)
+        .frame(minWidth: 180)
+    }
+
+    private func pick(_ value: Value?) {
+        selection = value
+        isShown = false
+    }
+}
+
+/// Same look as the Log feed's LevelPopoverRow, plus a count.
+private struct FacetPickerRow: View {
+    let text: String
+    let count: Int
+    let isSelected: Bool
+    let tint: Color
+    let onTap: () -> Void
+    @State private var isHovered = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "checkmark")
+                .font(.caption.weight(.semibold))
+                .opacity(isSelected ? 1 : 0)
+                .frame(width: 14)
+            Text(text)
+                .font(.caption.weight(.semibold))
+                .lineLimit(1)
+            Spacer(minLength: 12)
+            Text("\(count)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+        }
+        .foregroundStyle(tint)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(isHovered ? tint.opacity(0.12) : Color.clear)
+        .contentShape(Rectangle())
+        .onTapGesture { onTap() }
+        .onHover { isHovered = $0 }
     }
 }

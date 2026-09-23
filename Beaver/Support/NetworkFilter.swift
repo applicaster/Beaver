@@ -5,48 +5,57 @@
 
 import Foundation
 
-/// Filter state of the Network tab. Empty sets mean "no restriction";
-/// facets combine with AND, and an excluded value beats an included one.
+/// Filter state of the Network tab. Method, status and host each pick one
+/// value (nil = All); the excluded sets back the "Hide …" chips. Facets
+/// combine with AND, and an excluded value beats an included one.
 public struct NetworkFilter: Equatable, Sendable {
+    /// One status to show: an exact code (NSURLError codes such as -999
+    /// included) or entries that have no status at all. Not `.none`, which
+    /// would read as `Optional.none` on `status`.
+    public enum StatusPick: Hashable, Sendable {
+        case code(Int), noStatus
+
+        public init(_ status: Int?) { self = status.map(Self.code) ?? .noStatus }
+    }
+
     public var search = ""
     /// `search` is an ICU regex, matched case-insensitively. An invalid
     /// pattern matches nothing. Like the Log feed, the toggle on its own
     /// (empty search) restricts nothing, so it doesn't make the filter
     /// non-empty.
     public var searchIsRegex = false
-    public var methods: Set<String> = []
+    public var method: String?
     public var excludedMethods: Set<String> = []
-    public var statusClasses: Set<NetworkEntry.StatusClass> = []
+    public var status: StatusPick?
     public var excludedStatusClasses: Set<NetworkEntry.StatusClass> = []
-    public var hosts: Set<String> = []
+    public var host: String?
     public var excludedHosts: Set<String> = []
 
     public init() {}
 
     public var isEmpty: Bool { search.isEmpty && !hasFacets }
 
-    /// Any method, status or host chip, included or excluded.
+    /// Any method, status or host pick or exclusion.
     public var hasFacets: Bool {
-        !(methods.isEmpty && excludedMethods.isEmpty && statusClasses.isEmpty
-            && excludedStatusClasses.isEmpty && hosts.isEmpty && excludedHosts.isEmpty)
+        !(method == nil && excludedMethods.isEmpty && status == nil
+            && excludedStatusClasses.isEmpty && host == nil && excludedHosts.isEmpty)
     }
 
-    /// Drops every chip and keeps the search.
+    /// Drops every pick and exclusion and keeps the search.
     public mutating func clearFacets() {
-        methods = []; excludedMethods = []
-        statusClasses = []; excludedStatusClasses = []
-        hosts = []; excludedHosts = []
+        method = nil; excludedMethods = []
+        status = nil; excludedStatusClasses = []
+        host = nil; excludedHosts = []
     }
 
     public func matches(_ e: NetworkEntry) -> Bool {
         if excludedMethods.contains(e.method) { return false }
-        if !methods.isEmpty, !methods.contains(e.method) { return false }
-        let statusClass = e.statusClass
-        if excludedStatusClasses.contains(statusClass) { return false }
-        if !statusClasses.isEmpty, !statusClasses.contains(statusClass) { return false }
+        if let method, method != e.method { return false }
+        if excludedStatusClasses.contains(e.statusClass) { return false }
+        if let status, status != StatusPick(e.status) { return false }
         let host = e.host
         if excludedHosts.contains(host) { return false }
-        if !hosts.isEmpty, !hosts.contains(host) { return false }
+        if let picked = self.host, picked != host { return false }
         guard !search.isEmpty else { return true }
         // Decoded fields, not payloadJSON: JSONSerialization writes `/` as `\/`.
         let haystack: [String?] = [
@@ -62,6 +71,52 @@ public struct NetworkFilter: Equatable, Sendable {
             guard let field else { return false }
             return regex.firstMatch(in: field, range: NSRange(field.startIndex..., in: field)) != nil
         }
+    }
+
+    // MARK: Facets
+
+    /// Each facet counts the entries that match every criterion except its
+    /// own, so picking GET narrows the statuses but still lists POST. The
+    /// current pick is always listed, with 0 when nothing matches it.
+    public func availableMethods(in entries: [NetworkEntry]) -> [FacetOption<String>] {
+        var f = self; f.method = nil
+        return Self.options(entries.filter(f.matches).map(\.method), keeping: method)
+            .sorted { ($0.count, $1.value) > ($1.count, $0.value) }
+    }
+
+    public func availableStatuses(in entries: [NetworkEntry]) -> [FacetOption<StatusPick>] {
+        var f = self; f.status = nil
+        return Self.options(entries.filter(f.matches).map { StatusPick($0.status) }, keeping: status)
+            .sorted { a, b in
+                switch (a.value, b.value) {
+                case let (.code(x), .code(y)): x < y
+                case (.code, .noStatus): true
+                default: false
+                }
+            }
+    }
+
+    public func availableHosts(in entries: [NetworkEntry]) -> [FacetOption<String>] {
+        var f = self; f.host = nil
+        return Self.options(entries.filter(f.matches).map(\.host), keeping: host)
+            .sorted { ($0.count, $1.value) > ($1.count, $0.value) }
+    }
+
+    private static func options<V: Hashable>(_ values: [V], keeping pick: V?) -> [FacetOption<V>] {
+        var counts = Dictionary(values.map { ($0, 1) }, uniquingKeysWith: +)
+        if let pick, counts[pick] == nil { counts[pick] = 0 }
+        return counts.map { FacetOption(value: $0.key, count: $0.value) }
+    }
+}
+
+/// One row of a facet dropdown: a value and how many entries have it.
+public struct FacetOption<Value: Hashable & Sendable>: Hashable, Sendable {
+    public let value: Value
+    public let count: Int
+
+    public init(value: Value, count: Int) {
+        self.value = value
+        self.count = count
     }
 }
 

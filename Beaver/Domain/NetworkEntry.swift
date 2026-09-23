@@ -27,6 +27,19 @@ public struct NetworkEntry: Identifiable, Hashable, Sendable {
             case .other:       "Other"
             }
         }
+
+        public init(status: Int?) {
+            // No status, or a non-HTTP code: iOS sends NSURLError codes here
+            // (-999 cancelled, -1009 offline), so they are transport failures.
+            guard let status, status >= 100 else { self = .failed; return }
+            switch status {
+            case 200..<300: self = .success
+            case 300..<400: self = .redirect
+            case 400..<500: self = .clientError
+            case 500..<600: self = .serverError
+            default:        self = .other
+            }
+        }
     }
 
     public let id: Int64
@@ -59,18 +72,7 @@ public struct NetworkEntry: Identifiable, Hashable, Sendable {
         return c.percentEncodedQuery.map { "\(p)?\($0)" } ?? p
     }
 
-    public var statusClass: StatusClass {
-        // No status, or a non-HTTP code: iOS sends NSURLError codes here
-        // (-999 cancelled, -1009 offline), so they are transport failures.
-        guard let status, status >= 100 else { return .failed }
-        switch status {
-        case 200..<300: return .success
-        case 300..<400: return .redirect
-        case 400..<500: return .clientError
-        case 500..<600: return .serverError
-        default:        return .other
-        }
-    }
+    public var statusClass: StatusClass { StatusClass(status: status) }
 
     /// `fallbackMillis` is used when the payload has neither `timing.startTime`
     /// nor `timestamp`. The decoder passes "now"; the store passes the row's

@@ -154,6 +154,12 @@ extension NetworkEntry {
         return "\(status) \(reason)"
     }
 
+    /// The Status dropdown's label: "404 Not Found", "-999", "No status".
+    public static func statusLabel(for pick: NetworkFilter.StatusPick) -> String {
+        guard case .code(let code) = pick else { return "No status" }
+        return reasonPhrases[code].map { "\(code) \($0)" } ?? "\(code)"
+    }
+
     // MARK: Helpers
 
     /// Fixed English IANA reason phrases, independent of the device locale.

@@ -44,16 +44,28 @@ struct NetworkFilterTests {
     }
 
     @Test
-    func failedClassMatchesErrorWithoutStatus() {
-        var f = NetworkFilter(); f.statusClasses = [.failed]
+    func noStatusPickMatchesEntriesWithoutStatus() {
+        var f = NetworkFilter(); f.status = .noStatus
+        #expect(!f.isEmpty)
         #expect(f.matches(timeout))
         #expect(!f.matches(ok))
     }
 
     @Test
+    func codePickMatchesThatExactCode() {
+        let cancelled = e(#"{"url":"https://api.io/x","status":-999,"error":"cancelled"}"#)
+        var f = NetworkFilter(); f.status = .code(404)
+        #expect(f.matches(notFound))
+        #expect(!f.matches(ok) && !f.matches(timeout))
+        f.status = .code(-999)
+        #expect(f.matches(cancelled))
+        #expect(!f.matches(timeout))
+    }
+
+    @Test
     func facetsCombineWithAnd() {
         var f = NetworkFilter()
-        f.methods = ["GET"]; f.hosts = ["cdn.io"]
+        f.method = "GET"; f.host = "cdn.io"
         #expect(f.matches(notFound))
         #expect(!f.matches(ok))
         #expect(!f.matches(timeout))
@@ -79,7 +91,7 @@ struct NetworkFilterTests {
         #expect(f.matches(ok) && f.matches(timeout))
 
         // Excluding beats including the same value.
-        f = NetworkFilter(); f.methods = ["GET"]; f.excludedMethods = ["GET"]
+        f = NetworkFilter(); f.method = "GET"; f.excludedMethods = ["GET"]
         #expect(!f.matches(ok))
     }
 
@@ -137,5 +149,87 @@ struct NetworkFilterTests {
         #expect(s.httpCount == 1)
         #expect(s.successCount == 1)
         #expect(s.successRate == 1.0)
+    }
+
+    // MARK: Facets
+
+    private func req(_ method: String, _ status: Int?, host: String = "api.io", path: String = "x") -> NetworkEntry {
+        let s = status.map { #","status":\#($0)"# } ?? ""
+        return e(#"{"url":"https://\#(host)/\#(path)","method":"\#(method)"\#(s)}"#)
+    }
+
+    /// GET: 200 x2, 401 on api.io; POST: 400 on auth.io; one GET without status on cdn.io.
+    private var mixed: [NetworkEntry] {
+        [req("GET", 200), req("GET", 200), req("GET", 401), req("POST", 400, host: "auth.io"),
+         req("GET", nil, host: "cdn.io", path: "img")]
+    }
+
+    @Test
+    func selectedMethodNarrowsStatuses() {
+        var f = NetworkFilter(); f.method = "GET"
+        #expect(f.availableStatuses(in: mixed) == [
+            FacetOption(value: .code(200), count: 2), FacetOption(value: .code(401), count: 1),
+            FacetOption(value: .noStatus, count: 1),
+        ])
+    }
+
+    @Test
+    func selectedStatusNarrowsMethods() {
+        var f = NetworkFilter(); f.status = .code(400)
+        #expect(f.availableMethods(in: mixed) == [FacetOption(value: "POST", count: 1)])
+    }
+
+    @Test
+    func ownSelectionDoesNotNarrowItsOwnOptions() {
+        var f = NetworkFilter(); f.method = "GET"
+        #expect(f.availableMethods(in: mixed) == [FacetOption(value: "GET", count: 4),
+                                                   FacetOption(value: "POST", count: 1)])
+        f = NetworkFilter(); f.host = "auth.io"
+        #expect(f.availableHosts(in: mixed).map(\.value) == ["api.io", "auth.io", "cdn.io"])
+    }
+
+    @Test
+    func searchNarrowsFacets() {
+        var f = NetworkFilter(); f.search = "cdn.io"
+        #expect(f.availableMethods(in: mixed) == [FacetOption(value: "GET", count: 1)])
+        #expect(f.availableStatuses(in: mixed) == [FacetOption(value: .noStatus, count: 1)])
+        #expect(f.availableHosts(in: mixed) == [FacetOption(value: "cdn.io", count: 1)])
+    }
+
+    @Test
+    func exclusionsNarrowFacets() {
+        var f = NetworkFilter(); f.excludedHosts = ["api.io"]
+        #expect(f.availableStatuses(in: mixed).map(\.value) == [.code(400), .noStatus])
+        f = NetworkFilter(); f.excludedMethods = ["GET"]
+        #expect(f.availableHosts(in: mixed) == [FacetOption(value: "auth.io", count: 1)])
+    }
+
+    @Test
+    func facetSortOrder() {
+        let entries = [req("PUT", 500, host: "b.io"), req("DELETE", 204, host: "a.io"),
+                       req("GET", -999, host: "c.io"), req("GET", nil, host: "c.io")]
+        let f = NetworkFilter()
+        // Count descending, then name.
+        #expect(f.availableMethods(in: entries).map(\.value) == ["GET", "DELETE", "PUT"])
+        #expect(f.availableHosts(in: entries).map(\.value) == ["c.io", "a.io", "b.io"])
+        // Numeric ascending, no status last.
+        #expect(f.availableStatuses(in: entries).map(\.value) == [.code(-999), .code(204), .code(500), .noStatus])
+    }
+
+    @Test
+    func selectionWithoutMatchesIsStillListedWithZero() {
+        var f = NetworkFilter(); f.method = "PATCH"; f.status = .code(404); f.host = "gone.io"
+        #expect(f.availableMethods(in: mixed).contains(FacetOption(value: "PATCH", count: 0)))
+        #expect(f.availableStatuses(in: mixed).contains(FacetOption(value: .code(404), count: 0)))
+        #expect(f.availableHosts(in: mixed).contains(FacetOption(value: "gone.io", count: 0)))
+    }
+
+    @Test
+    func statusLabels() {
+        #expect(NetworkEntry.statusLabel(for: .code(200)) == "200 OK")
+        #expect(NetworkEntry.statusLabel(for: .code(404)) == "404 Not Found")
+        #expect(NetworkEntry.statusLabel(for: .code(299)) == "299")
+        #expect(NetworkEntry.statusLabel(for: .code(-999)) == "-999")
+        #expect(NetworkEntry.statusLabel(for: .noStatus) == "No status")
     }
 }

@@ -27,13 +27,13 @@ final class NetworkViewModel {
     // ponytail: filters the whole array on every change. Fine for a few
     // thousand requests per session; move to SQL / incremental if a
     // session ever gets much bigger.
-    var filtered: [NetworkEntry] {
-        let rows = filter.isEmpty ? entries : entries.filter(filter.matches)
-        return showOnlyBookmarked ? rows.filter { bookmarkedIds.contains($0.id) } : rows
+    var filtered: [NetworkEntry] { filter.isEmpty ? base : base.filter(filter.matches) }
+    /// After Clear and bookmarks-only, before the filter: what the
+    /// Method / Status / Host dropdowns count.
+    var base: [NetworkEntry] {
+        showOnlyBookmarked ? entries.filter { bookmarkedIds.contains($0.id) } : entries
     }
     var selected: NetworkEntry? { selection.flatMap { id in entries.first { $0.id == id } } }
-    var allMethods: [String] { Array(Set(entries.map(\.method))).sorted() }
-    var allHosts: [String] { Array(Set(entries.map(\.host))).sorted() }
 
     /// See StoragesViewModel.subscription for why this is nonisolated(unsafe).
     private nonisolated(unsafe) var subscription: Task<Void, Never>?
