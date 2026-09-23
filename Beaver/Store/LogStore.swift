@@ -697,36 +697,6 @@ public actor LogStore {
         }
     }
 
-    /// Returns the zero-based offset of `eventId` in the filtered
-    /// ordering. Used by jump-to-match to figure out which page-window
-    /// position to scroll to.
-    public func offset(of eventId: Int64,
-                       sessionId: Int64,
-                       filter: Filter) async throws -> Int? {
-        try await dbQueue.read { db in
-            // 1) Look up the target's timestamp_ms.
-            guard let row = try Row.fetchOne(
-                db,
-                sql: "SELECT timestamp_ms FROM event WHERE id = ? AND session_id = ?",
-                arguments: [eventId, sessionId]
-            ) else { return nil }
-            let ts: Int = row["timestamp_ms"]
-
-            // 2) Count filtered events that sort before it.
-            let (whereClause, args) = Self.where(filter: filter, sessionId: sessionId)
-            let sql = """
-                SELECT COUNT(*) FROM event
-                \(whereClause)
-                AND (timestamp_ms < ? OR (timestamp_ms = ? AND id < ?))
-            """
-            var fullArgs = args
-            fullArgs.append(ts)
-            fullArgs.append(ts)
-            fullArgs.append(eventId)
-            return try Int.fetchOne(db, sql: sql, arguments: StatementArguments(fullArgs)) ?? 0
-        }
-    }
-
     // MARK: - Saved filters
 
     /// All persisted filter presets, alphabetical by name.

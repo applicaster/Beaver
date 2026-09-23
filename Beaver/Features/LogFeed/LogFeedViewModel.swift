@@ -167,12 +167,6 @@ final class LogFeedViewModel {
     /// appear even though `totalCount` updated.
     private let maxEventsPerFetch: Int = 1_000_000
 
-    /// Retained because `jumpTo(...)` still updates it and other code
-    /// reads it for window-aware decisions. With the unbounded fetch
-    /// it effectively always equals `0..<totalCount`.
-    private var visibleRange: Range<Int> = 0..<0
-    private let pageOverscan: Int = 100
-
     /// Marked `nonisolated(unsafe)` so the nonisolated `deinit` can
     /// cancel them. `Task<Void, Never>` is Sendable and the
     /// properties are written only from `@MainActor` methods + read
@@ -227,12 +221,12 @@ final class LogFeedViewModel {
     /// window scroll) into a single SQL pass that runs after the
     /// activity quiets down. Replaces direct `reload()` calls
     /// everywhere except one-shot user actions like jump-to-match.
-    private func requestReload(rangeOnly: Bool = false) {
+    private func requestReload() {
         reloadDebounce?.cancel()
         reloadDebounce = Task { [weak self] in
             try? await Task.sleep(for: self?.reloadDebounceInterval ?? .milliseconds(150))
             guard !Task.isCancelled else { return }
-            await self?.reload(rangeOnly: rangeOnly)
+            await self?.reload()
         }
     }
 
@@ -289,6 +283,22 @@ final class LogFeedViewModel {
     }
 
 
+    /// `displayedRowId(for:)` for every event in the page, in one pass.
+    private func displayedRowIds() -> [EventRecord.ID: EventRecord.ID] {
+        var map: [EventRecord.ID: EventRecord.ID] = [:]
+        map.reserveCapacity(page.count)
+        var representative: EventRecord?
+        for event in page {
+            if let last = representative, isSameKind(last, event) {
+                // Same group: the representative still stands.
+            } else {
+                representative = event
+            }
+            map[event.id] = representative?.id
+        }
+        return map
+    }
+
     private func isSameKind(_ a: EventRecord, _ b: EventRecord) -> Bool {
         a.level == b.level &&
         a.subsystem == b.subsystem &&
@@ -296,21 +306,7 @@ final class LogFeedViewModel {
         a.message == b.message
     }
 
-    // MARK: - Visible range driving
-
-    func didReachEnd() {
-        // Expand window when the table approaches the end of the page.
-        let newEnd = min(totalCount, visibleRange.upperBound + pageOverscan)
-        guard newEnd != visibleRange.upperBound else { return }
-        visibleRange = visibleRange.lowerBound..<newEnd
-        requestReload(rangeOnly: true)
-    }
-
     // MARK: - Reload
-
-    func reload() async {
-        await reload(rangeOnly: false)
-    }
 
     /// A reload materialises the whole filtered result set in one array,
     /// so two things have to hold or memory explodes:
@@ -323,36 +319,35 @@ final class LogFeedViewModel {
     /// 2. **No JSON payloads.** The table renders level / message /
     ///    subsystem / category / time only; payloads are ~97% of the bytes.
     ///    The detail pane refetches the selected row's payloads by id.
-    private func reload(rangeOnly: Bool) async {
+    ///
+    /// Returns once `page` reflects the newest reload requested by then —
+    /// not merely once one has been queued. `jumpTo` resolves its row
+    /// from `page` right after, and used to read a stale or just-emptied
+    /// one, so the jump landed nowhere.
+    private func reload() async {
         loadTask?.cancel()
         let previous = loadTask
         reloadGeneration &+= 1
         let generation = reloadGeneration
         let snapshotFilter = filter
         let limit = maxEventsPerFetch
-        loadTask = Task { [weak self, store, sessionId] in
+        let task = Task { [weak self, store, sessionId] in
             _ = await previous?.value
             guard let self, await self.isCurrentReload(generation) else { return }
             do {
-                if !rangeOnly {
-                    let count = try await store.eventCount(
-                        sessionId: sessionId,
-                        filter: snapshotFilter
-                    )
-                    // Only worth a second COUNT when a filter is
-                    // actually hiding something.
-                    let unfiltered = snapshotFilter.isEmpty
-                        ? count
-                        : try await store.eventCount(sessionId: sessionId, filter: .none)
-                    guard await self.isCurrentReload(generation) else { return }
-                    await MainActor.run {
-                        self.totalCount = count
-                        self.unfilteredCount = unfiltered
-                        // Keep visibleRange in sync for downstream
-                        // code (jumpTo, didReachEnd). Now always
-                        // covers the full filtered result set.
-                        self.visibleRange = 0..<count
-                    }
+                let count = try await store.eventCount(
+                    sessionId: sessionId,
+                    filter: snapshotFilter
+                )
+                // Only worth a second COUNT when a filter is
+                // actually hiding something.
+                let unfiltered = snapshotFilter.isEmpty
+                    ? count
+                    : try await store.eventCount(sessionId: sessionId, filter: .none)
+                guard await self.isCurrentReload(generation) else { return }
+                await MainActor.run {
+                    self.totalCount = count
+                    self.unfilteredCount = unfiltered
                 }
                 let events = try await store.events(
                     sessionId: sessionId,
@@ -367,6 +362,14 @@ final class LogFeedViewModel {
                 // TODO: surface to UI as a banner.
                 print("LogFeedViewModel.reload: \(error)")
             }
+        }
+        loadTask = task
+        // A newer reload supersedes this one without setting `page`, so
+        // wait on whichever is newest until none started meanwhile.
+        var awaited: Task<Void, Never>?
+        while let current = loadTask, current != awaited {
+            await current.value
+            awaited = current
         }
     }
 
@@ -676,11 +679,14 @@ final class LogFeedViewModel {
         let count = matchIds.count
         let currentRow = selectedEventId
         var index = currentMatchIndex ?? (delta > 0 ? -1 : 0)
+        // One pass over the page, not one per candidate: walking a ×1000
+        // group of matches was 1000 full scans per keypress.
+        let rowIds = collapseRepeats ? displayedRowIds() : [:]
 
         for _ in 0..<count {
             index = ((index + delta) % count + count) % count
             let candidate = matchIds[index]
-            guard displayedRowId(for: candidate) != currentRow else { continue }
+            guard (rowIds[candidate] ?? candidate) != currentRow else { continue }
             currentMatchIndex = index
             Task { await jumpTo(eventId: candidate) }
             return
@@ -722,27 +728,21 @@ final class LogFeedViewModel {
         }
     }
 
-    /// Adjust the page window to include `eventId`, reload, and signal
-    /// the table to scroll-and-select.
+    /// Select `eventId` and scroll the table to the row showing it.
+    ///
+    /// `page` already holds the whole filtered session, so there is
+    /// normally nothing to fetch; it reloads only when the event isn't
+    /// there yet (a filter change just emptied the page, or the event
+    /// arrived while paused).
     private func jumpTo(eventId: Int64) async {
-        // Find target's position in the filtered ordering and center
-        // the page window on it.
-        let offset = (try? await store.offset(
-            of: eventId,
-            sessionId: sessionId,
-            filter: filter
-        )) ?? 0
-        let half = pageOverscan
-        let lower = max(0, offset - half)
-        let upper = offset + half + 1
-        visibleRange = lower..<upper
-        await reload(rangeOnly: true)
-        // Auto-pause so incoming events don't scroll us off the
-        // match we just navigated to.
+        // Pause first so incoming events neither scroll us off the match
+        // nor keep superseding the reload below.
         isPaused = true
-        // Trigger scroll + selection — on the row that actually shows
-        // this event. Resolved after the reload, because `page` has to
-        // hold the target before its displaying row can be found.
+        if !page.contains(where: { $0.id == eventId }) {
+            await reload()
+        }
+        // Resolved after the reload, because `page` has to hold the
+        // target before its displaying row can be found.
         let rowId = displayedRowId(for: eventId)
         scrollTarget = (rowId, UUID())
         selectedEventId = rowId
