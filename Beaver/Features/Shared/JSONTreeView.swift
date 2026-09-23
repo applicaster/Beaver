@@ -21,6 +21,9 @@ struct JSONTreeView: View {
     var depth: Int = 0
     /// Position among its siblings, for zebra striping.
     var rowIndex: Int = 0
+    /// Opens this node on first show even when the depth budget or a
+    /// decodable leaf would keep it closed. Not passed down to children.
+    var expandsRoot: Bool = false
 
     /// `nil` until the user touches this node, then their choice.
     /// Containers start open (the structure is the point); a decodable
@@ -60,7 +63,7 @@ struct JSONTreeView: View {
     }
 
     private var isExpanded: Bool {
-        expandedOverride ?? (hasChildren && depth < Self.autoExpandDepth)
+        expandedOverride ?? ((expandsRoot && canOpen) || (hasChildren && depth < Self.autoExpandDepth))
     }
 
     var body: some View {

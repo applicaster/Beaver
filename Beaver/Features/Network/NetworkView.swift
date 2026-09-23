@@ -109,6 +109,7 @@ struct NetworkView: View {
             TableColumn("Size") { e in
                 Text(Self.size(e))
                     .foregroundStyle(.secondary).monospacedDigit()
+                    .help(Self.sizeHelp(e))
             }
             .width(min: 56, ideal: 70, max: 90)
             TableColumn("Time") { Text(Self.time($0.startMillis)).monospacedDigit() }
@@ -138,8 +139,15 @@ struct NetworkView: View {
         return ms < 100 ? .green : ms < 500 ? .orange : .red
     }
 
+    /// `100 KB+` when the SDK cut the body short.
     static func size(_ e: NetworkEntry) -> String {
-        e.responseBytes.map { ByteCountFormatter.string(fromByteCount: Int64($0), countStyle: .file) } ?? "—"
+        guard let bytes = e.responseBytes else { return "—" }
+        return ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
+            + (e.isResponseBodyTruncated ? "+" : "")
+    }
+
+    static func sizeHelp(_ e: NetworkEntry) -> String {
+        e.isResponseBodyTruncated ? "Body truncated by the SDK at 100 000 characters" : ""
     }
 
     static func time(_ ms: UInt64) -> String {
