@@ -907,9 +907,14 @@ private struct BookmarkRow: View {
 
 // MARK: - FileDocument for export
 
+extension UTType {
+    /// HAR is JSON; macOS declares no type for it, so this is a dynamic one.
+    static let har = UTType(filenameExtension: "har", conformingTo: .json) ?? .json
+}
+
 struct JSONExportDocument: FileDocument {
-    static var readableContentTypes: [UTType] { [.json] }
-    static var writableContentTypes: [UTType] { [.json] }
+    static var readableContentTypes: [UTType] { [.json, .har] }
+    static var writableContentTypes: [UTType] { [.json, .har] }
 
     let data: Data
 

@@ -13,12 +13,15 @@ import AppKit
 /// request and the response as two separate panels.
 struct NetworkDetailView: View {
     let entry: NetworkEntry?
+    var isBookmarked = false
+    var onToggleBookmark: ((NetworkEntry) -> Void)?
     /// Opens the entry in the large sheet. `nil` inside the sheet itself.
     var onExpand: ((NetworkEntry) -> Void)?
 
     var body: some View {
         if let entry {
-            NetworkDetailContent(entry: entry, onExpand: onExpand)
+            NetworkDetailContent(entry: entry, isBookmarked: isBookmarked,
+                                 onToggleBookmark: onToggleBookmark, onExpand: onExpand)
         } else {
             ContentUnavailableView("No request selected", systemImage: "network")
         }
@@ -58,6 +61,8 @@ private struct ParsedEntry {
 
 private struct NetworkDetailContent: View {
     let entry: NetworkEntry
+    let isBookmarked: Bool
+    let onToggleBookmark: ((NetworkEntry) -> Void)?
     let onExpand: ((NetworkEntry) -> Void)?
 
     @Environment(ToastCenter.self) private var toasts
@@ -133,6 +138,13 @@ private struct NetworkDetailContent: View {
 
     private var buttons: some View {
         Group {
+            if let onToggleBookmark {
+                Button { onToggleBookmark(entry) } label: {
+                    Image(systemName: isBookmarked ? "bookmark.fill" : "bookmark")
+                        .foregroundStyle(isBookmarked ? .yellow : .primary)
+                }
+                .help(isBookmarked ? "Remove bookmark" : "Bookmark this request")
+            }
             if let onExpand {
                 Button { onExpand(entry) } label: {
                     Image(systemName: "arrow.up.left.and.arrow.down.right")

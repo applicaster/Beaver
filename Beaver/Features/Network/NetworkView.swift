@@ -5,24 +5,30 @@
 
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 
 struct NetworkView: View {
     @Bindable var vm: NetworkViewModel
     @Environment(ToastCenter.self) private var toasts
     /// The entry open in the large detail sheet.
     @State private var expanded: NetworkEntry?
+    @State private var harDocument: JSONExportDocument?
+    @State private var showingHARExporter = false
 
     var body: some View {
         let rows = vm.filtered
         VStack(spacing: 0) {
-            filterBar(rows)
+            filterBar
+            resultsBar(rows)
             Divider()
             // HSplitView sizes to its ideal height unless every pane and the
             // split itself ask for the full height — same as LogFeedView.
             HSplitView {
                 table(rows)
                     .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
-                NetworkDetailView(entry: vm.selected, onExpand: { expanded = $0 })
+                NetworkDetailView(entry: vm.selected, isBookmarked: vm.selection.map(vm.isBookmarked) ?? false,
+                                  onToggleBookmark: { vm.toggleBookmark($0.id) },
+                                  onExpand: { expanded = $0 })
                     .frame(minWidth: 320, idealWidth: 360, maxHeight: .infinity)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -30,7 +36,8 @@ struct NetworkView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .sheet(item: $expanded) { e in
             VStack(spacing: 0) {
-                NetworkDetailView(entry: e)
+                NetworkDetailView(entry: e, isBookmarked: vm.isBookmarked(e.id),
+                                  onToggleBookmark: { vm.toggleBookmark($0.id) })
                 Divider()
                 HStack {
                     Spacer()
@@ -43,11 +50,18 @@ struct NetworkView: View {
             .overlay(alignment: .top) { ToastPresenter() }
             .environment(toasts)
         }
+        .fileExporter(
+            isPresented: $showingHARExporter,
+            document: harDocument,
+            contentType: .har,
+            defaultFilename: Self.harFilename(),
+            onCompletion: { _ in harDocument = nil }
+        )
     }
 
     // MARK: Filter bar
 
-    private func filterBar(_ rows: [NetworkEntry]) -> some View {
+    private var filterBar: some View {
         HStack(spacing: 8) {
             TextField("Search URLs, headers, bodies…", text: $vm.filter.search)
                 .textFieldStyle(.roundedBorder)
@@ -60,17 +74,85 @@ struct NetworkView: View {
                 Button("Clear") { vm.filter = NetworkFilter() }
             }
             Spacer()
-            Text(statsLine(rows)).font(.caption).foregroundStyle(.secondary).monospacedDigit()
         }
         .padding(8)
     }
 
-    private func statsLine(_ rows: [NetworkEntry]) -> String {
+    // MARK: Results bar
+
+    /// `Results (754/754)  Success 96% (720/749)  Avg 413 ms` and the
+    /// Bookmarks / Clear / Pause / Export HAR buttons, as in zapp-support.
+    private func resultsBar(_ rows: [NetworkEntry]) -> some View {
         let s = NetworkStats(rows)
-        var parts = ["\(s.count) of \(vm.entries.count)"]
-        if let r = s.successRate { parts.append("\(Int((r * 100).rounded()))% 2xx") }
-        if let d = s.averageDurationMillis { parts.append("avg \(d) ms") }
-        return parts.joined(separator: " · ")
+        return HStack(spacing: 12) {
+            Text("Results (\(s.count)/\(vm.entries.count))").font(.headline)
+            Group {
+                if let rate = s.successRate {
+                    Text("Success \(Int((rate * 100).rounded()))% (\(s.successCount)/\(s.httpCount))")
+                }
+                if let avg = s.averageDurationMillis { Text("Avg \(avg) ms") }
+            }
+            .foregroundStyle(.secondary)
+            Spacer(minLength: 8)
+            bookmarksButton
+            Button { vm.clear() } label: { Label("Clear", systemImage: "xmark.circle") }
+                .help("Hide the requests on screen and start fresh — nothing is deleted")
+                .disabled(vm.entries.isEmpty)
+            Button { vm.togglePause() } label: {
+                Label(pauseTitle, systemImage: vm.isPaused ? "play.fill" : "pause.fill")
+            }
+            .help(vm.isPaused ? "Show the requests that arrived while paused"
+                              : "Freeze the list; requests are still recorded")
+            Button { exportHAR(rows) } label: { Label("Export HAR", systemImage: "square.and.arrow.up") }
+                .buttonStyle(.borderedProminent)
+                .tint(.green)
+                .help("Save the requests shown as a HAR file")
+                .disabled(rows.isEmpty)
+        }
+        .monospacedDigit()
+        .buttonStyle(.bordered)
+        .controlSize(.regular)
+        .padding(.horizontal, 8)
+        .padding(.bottom, 8)
+    }
+
+    private var pauseTitle: String {
+        guard vm.isPaused else { return "Pause" }
+        return vm.pendingCount > 0 ? "Resume (\(vm.pendingCount) new)" : "Resume"
+    }
+
+    /// Highlighted while it narrows the list; disabled when there is
+    /// nothing to narrow to, unless it is on (so it can be turned off).
+    @ViewBuilder
+    private var bookmarksButton: some View {
+        let count = vm.entries.lazy.filter { vm.isBookmarked($0.id) }.count
+        let button = Button { vm.showOnlyBookmarked.toggle() } label: {
+            Label("Bookmarks (\(count))", systemImage: vm.showOnlyBookmarked ? "bookmark.fill" : "bookmark")
+        }
+        .help(vm.showOnlyBookmarked ? "Show every request" : "Show only bookmarked requests")
+        .disabled(count == 0 && !vm.showOnlyBookmarked)
+        if vm.showOnlyBookmarked {
+            button.buttonStyle(.borderedProminent).tint(.orange)
+        } else {
+            button
+        }
+    }
+
+    private func exportHAR(_ rows: [NetworkEntry]) {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
+        guard let data = try? HARExport.encode(rows, creatorVersion: version) else {
+            toasts.error("Couldn't build the HAR file")
+            return
+        }
+        harDocument = JSONExportDocument(data: data)
+        showingHARExporter = true
+    }
+
+    static func harFilename() -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd_HHmmss"
+        formatter.locale = .init(identifier: "en_US_POSIX")
+        return "beaver_\(formatter.string(from: Date())).har"
     }
 
     private func facetMenu<T: Hashable>(
@@ -94,8 +176,17 @@ struct NetworkView: View {
 
     private func table(_ rows: [NetworkEntry]) -> some View {
         Table(rows, selection: $vm.selection) {
-            TableColumn("Method") { MethodBadge(method: $0.method) }
-                .width(min: 56, ideal: 64, max: 84)
+            TableColumn("Method") { e in
+                HStack(spacing: 4) {
+                    if vm.isBookmarked(e.id) {
+                        Image(systemName: "bookmark.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.yellow)
+                    }
+                    MethodBadge(method: e.method)
+                }
+            }
+            .width(min: 64, ideal: 76, max: 96)
             TableColumn("Status") { StatusBadge(entry: $0) }
                 .width(min: 48, ideal: 56, max: 64)
             TableColumn("Host") { Text($0.host).lineLimit(1) }
@@ -117,6 +208,8 @@ struct NetworkView: View {
         }
         .contextMenu(forSelectionType: NetworkEntry.ID.self) { ids in
             if let id = ids.first, let e = vm.entries.first(where: { $0.id == id }) {
+                Button(vm.isBookmarked(e.id) ? "Remove bookmark" : "Bookmark") { vm.toggleBookmark(e.id) }
+                Divider()
                 Button("Only \(e.host)") { vm.filter.hosts = [e.host] }
                 Button("Hide \(e.host)") { vm.filter.excludedHosts.insert(e.host) }
                 Divider()
