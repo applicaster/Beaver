@@ -21,7 +21,7 @@ struct NetworkCopyTests {
     @Test
     func curlForGetWithoutBody() {
         let entry = e(#"{"url":"https://api.io/v1/feed?a=1","method":"GET"}"#)
-        #expect(entry.curlCommand == "curl -X GET 'https://api.io/v1/feed?a=1'")
+        #expect(entry.curlCommand == "curl -X 'GET' 'https://api.io/v1/feed?a=1'")
     }
 
     @Test
@@ -32,14 +32,21 @@ struct NetworkCopyTests {
          "requestBody":"{\"user\":\"a\"}"}
         """#)
         #expect(entry.curlCommand ==
-            "curl -X POST 'https://api.io/login' -H 'Accept: application/json' -H 'X-Token: [REDACTED]' --data-raw '{\"user\":\"a\"}'")
+            "curl -X 'POST' 'https://api.io/login' -H 'Accept: application/json' -H 'X-Token: [REDACTED]' --data-raw '{\"user\":\"a\"}'")
     }
 
     @Test
     func curlEscapesSingleQuotes() {
         let entry = e(#"{"url":"https://api.io/q?name=o'neil","method":"POST","requestBody":"it's"}"#)
         #expect(entry.curlCommand ==
-            #"curl -X POST 'https://api.io/q?name=o'\''neil' --data-raw 'it'\''s'"#)
+            #"curl -X 'POST' 'https://api.io/q?name=o'\''neil' --data-raw 'it'\''s'"#)
+    }
+
+    @Test
+    func curlQuotesAMethodContainingShellMetacharacters() {
+        let entry = e(#"{"url":"https://api.io/x","method":"GET;rm x"}"#)
+        #expect(entry.curlCommand == "curl -X 'GET;RM X' 'https://api.io/x'")
+        #expect(entry.curlCommand.contains(";"))
     }
 
     // MARK: Request / response JSON
@@ -104,6 +111,7 @@ struct NetworkCopyTests {
     func responseBytesCountsUTF8() {
         #expect(e(#"{"url":"https://api.io/x","responseBody":"é"}"#).responseBytes == 2)
         #expect(e(#"{"url":"https://api.io/x"}"#).responseBytes == nil)
+        #expect(e(#"{"url":"https://api.io/x","responseBody":""}"#).responseBytes == nil)
     }
 
     @Test
@@ -112,6 +120,11 @@ struct NetworkCopyTests {
         // Foundation's own reason for 200 is "no error" too.
         #expect(e(#"{"url":"https://api.io/x","status":200,"statusText":"no error"}"#).statusLine == "200 OK")
         #expect(e(#"{"url":"https://api.io/x","status":201,"statusText":"Made it"}"#).statusLine == "201 Made it")
+    }
+
+    @Test
+    func statusLineForAnUnknownCodeShowsOnlyTheCode() {
+        #expect(e(#"{"url":"https://api.io/x","status":299}"#).statusLine == "299")
     }
 
     @Test

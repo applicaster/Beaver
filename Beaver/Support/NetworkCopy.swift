@@ -12,7 +12,7 @@ extension NetworkEntry {
     /// `curl -X GET 'url' -H 'Name: value' --data-raw 'body'`, headers
     /// sorted by name and kept as sent (including `[REDACTED]`).
     public var curlCommand: String {
-        var parts = ["curl -X \(method) \(Self.shellQuoted(url))"]
+        var parts = ["curl -X \(Self.shellQuoted(method)) \(Self.shellQuoted(url))"]
         parts += requestHeaders.keys.sorted().map { "-H \(Self.shellQuoted("\($0): \(requestHeaders[$0]!)"))" }
         if let requestBody, !requestBody.isEmpty { parts.append("--data-raw \(Self.shellQuoted(requestBody))") }
         return parts.joined(separator: " ")
@@ -41,7 +41,10 @@ extension NetworkEntry {
         return Self.pretty(o)
     }
 
-    public var responseBytes: Int? { responseBody?.utf8.count }
+    public var responseBytes: Int? {
+        guard let responseBody, !responseBody.isEmpty else { return nil }
+        return responseBody.utf8.count
+    }
 
     /// "403 Forbidden", "-999 — cancelled", or the error / "—" with no status.
     public var statusLine: String {
@@ -50,14 +53,28 @@ extension NetworkEntry {
         // iOS sends "no error" as statusText for every response; Foundation's
         // own reason for 200 is "no error" too.
         let text = statusText?.trimmingCharacters(in: .whitespaces) ?? ""
-        var reason = text.isEmpty || text.lowercased() == "no error"
-            ? HTTPURLResponse.localizedString(forStatusCode: status).capitalized
+        let reason = text.isEmpty || text.lowercased() == "no error"
+            ? Self.reasonPhrases[status]
             : text
-        if reason.lowercased() == "no error" { reason = "OK" }
+        guard let reason, reason.lowercased() != "no error" else { return "\(status)" }
         return "\(status) \(reason)"
     }
 
     // MARK: Helpers
+
+    /// Fixed English IANA reason phrases, independent of the device locale.
+    private static let reasonPhrases: [Int: String] = [
+        100: "Continue", 101: "Switching Protocols",
+        200: "OK", 201: "Created", 202: "Accepted", 204: "No Content", 206: "Partial Content",
+        301: "Moved Permanently", 302: "Found", 303: "See Other", 304: "Not Modified",
+        307: "Temporary Redirect", 308: "Permanent Redirect",
+        400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found",
+        405: "Method Not Allowed", 408: "Request Timeout", 409: "Conflict", 410: "Gone",
+        412: "Precondition Failed", 413: "Payload Too Large", 415: "Unsupported Media Type",
+        422: "Unprocessable Entity", 429: "Too Many Requests",
+        500: "Internal Server Error", 501: "Not Implemented", 502: "Bad Gateway",
+        503: "Service Unavailable", 504: "Gateway Timeout",
+    ]
 
     private static func shellQuoted(_ s: String) -> String {
         "'" + s.replacingOccurrences(of: "'", with: #"'\''"#) + "'"
