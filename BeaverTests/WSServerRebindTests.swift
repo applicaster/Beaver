@@ -6,7 +6,10 @@ import Foundation
 /// a second copy of the app holding the port — clears the moment that
 /// process quits. These cover the server noticing and re-binding without
 /// being restarted.
-@Suite("WSServer rebind")
+// Serialized: all three bind the same port, and in parallel they block
+// each other — a rebind or a "stays stopped" assertion can then pass or
+// fail for a reason that has nothing to do with the code under test.
+@Suite("WSServer rebind", .serialized)
 struct WSServerRebindTests {
 
     /// Away from 9080 so a running Beaver doesn't take part in the test.

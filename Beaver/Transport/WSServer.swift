@@ -94,8 +94,9 @@ public actor WSServer {
             Task { await self?.handleNewConnection(connection) }
         }
 
-        listener.stateUpdateHandler = { [weak self] nwState in
-            Task { await self?.handleListenerState(nwState) }
+        listener.stateUpdateHandler = { [weak self, weak listener] nwState in
+            guard let listener else { return }
+            Task { await self?.handleListenerState(nwState, from: listener) }
         }
 
         listener.start(queue: networkQueue)
@@ -116,7 +117,12 @@ public actor WSServer {
 
     // MARK: - Connection handling
 
-    private func handleListenerState(_ nwState: NWListener.State) {
+    private func handleListenerState(_ nwState: NWListener.State, from source: NWListener) {
+        // Each callback hops in on its own Task, so it can arrive after
+        // `stop()` or after a rebind replaced its listener. Acting on it
+        // then would schedule a retry nobody wants (a zombie listener
+        // after stop) or report `.listening` for a listener that's gone.
+        guard source === listener else { return }
         switch nwState {
         case .ready:
             retryAttempt = 0
@@ -165,6 +171,9 @@ public actor WSServer {
     }
 
     private func rebind() async {
+        // `stop()` can land between the retry's cancellation check and
+        // this hop onto the actor; checked here, it can't race.
+        guard !Task.isCancelled else { return }
         retryTask = nil
         do {
             try await start()
@@ -235,6 +244,9 @@ public actor WSServer {
             stateContinuation.yield(.clientConnected)
         case .failed(let error):
             print("[WSServer] -> client failed: \(error)")
+            // A failed connection holds its resources — and this handler,
+            // which holds it — until cancelled.
+            connection.cancel()
             current = nil
             stateContinuation.yield(.clientDisconnected(reason: error.localizedDescription))
         case .cancelled:
@@ -253,21 +265,20 @@ public actor WSServer {
         }
     }
 
-    private func receive(on connection: NWConnection) {
+    /// Yields straight from the callback: a `Task` per frame gives no
+    /// ordering guarantee, and an older storage snapshot overtaking a
+    /// newer one would win as "latest".
+    private nonisolated func receive(on connection: NWConnection) {
         connection.receiveMessage { [weak self] data, _, _, error in
             guard let self else { return }
             if let data, !data.isEmpty {
-                Task { await self.forward(data: data) }
+                self.inboundContinuation.yield(data)
             }
             if error == nil {
                 // Continue reading.
-                Task { await self.receive(on: connection) }
+                self.receive(on: connection)
             }
         }
-    }
-
-    private func forward(data: Data) {
-        inboundContinuation.yield(data)
     }
 
     // MARK: - Outbound
