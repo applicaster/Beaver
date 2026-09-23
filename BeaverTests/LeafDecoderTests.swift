@@ -250,4 +250,15 @@ struct LeafDecoderTests {
 
         #expect(LeafDecoder.nestedJWTStatus(in: record) == nil)
     }
+
+    @Test("A value past the size cap is left raw, however decodable")
+    func hugeValueIsNotDecoded() {
+        let filler = String(repeating: "x", count: LeafDecoder.maxDecodableLength)
+        #expect(LeafDecoder.decode(#"{"a":"\#(filler)"}"#) == nil)
+    }
+
+    @Test("Surrounding whitespace doesn't hide a value")
+    func whitespaceAroundValueStillDecodes() {
+        #expect(LeafDecoder.decode("  {\"a\": 1}\n")?.kinds == [.json])
+    }
 }

@@ -121,14 +121,26 @@ public enum LeafDecoder {
     /// Classify a stored string. Returns `nil` when it is just a plain
     /// value with nothing to decode.
     public static func decode(_ raw: String) -> LeafDecode? {
-        let trimmed = raw.trimmed
-        if let cached = cache.object(forKey: trimmed as NSString) {
+        // `utf16.count` is O(1) on the bridged strings JSONSerialization
+        // hands out; this rejects a 24 MB leaf before touching its bytes.
+        let length = raw.utf16.count
+        guard length <= maxDecodableLength else { return nil }
+        // Keyed by the raw string, not a trimmed copy: a hit costs no
+        // allocation, and the key shares storage with the record.
+        if let cached = cache.object(forKey: raw as NSString) {
             return cached.value
         }
-        let result = makeDecode(trimmed)
-        cache.setObject(Box(result), forKey: trimmed as NSString)
+        let result = makeDecode(raw.trimmed)
+        // Measured: a decoded tree weighs ~3× its source string.
+        cache.setObject(Box(result), forKey: raw as NSString,
+                        cost: result == nil ? length * 2 : length * 6)
         return result
     }
+
+    /// Longest value (UTF-16 units) worth decoding. Past this there is no
+    /// tree anyone would read, and one attempt costs ~0.4 s on a 24 MB
+    /// string (a Metro bundle stored in a real network log).
+    static let maxDecodableLength = 4 * 1_024 * 1_024
 
     /// Worst status among any JWTs found inside an already-parsed value.
     ///
@@ -140,13 +152,14 @@ public enum LeafDecoder {
     ) -> JWTStatus? {
         guard depth <= maxNestedScanDepth else { return nil }
 
+        // Through the cache: this runs from row `body`s, hover included,
+        // and decoding every leaf afresh cost ~35 ms per pass over a real
+        // session layer.
         if case .string(let s) = record.kind {
-            guard let detected = detect(s.trimmed, depth: 0) else { return nil }
-            if detected.kinds.contains(.jwt) {
-                return jwtStatus(of: detected.tree)
-            }
-            guard let tree = detected.tree else { return nil }
-            return nestedJWTStatus(in: buildRecord(from: tree), depth: depth + 1)
+            guard let decoded = decode(s) else { return nil }
+            if decoded.isJWT { return decoded.chip }
+            guard let tree = decoded.tree else { return nil }
+            return nestedJWTStatus(in: tree, depth: depth + 1)
         }
 
         guard let children = record.children else { return nil }
@@ -166,11 +179,15 @@ public enum LeafDecoder {
     ///
     /// Only the top-level result is cached; the ≤2 recursive hops inside
     /// are cheap by comparison.
+    ///
+    /// Bounded by bytes as well as count: a count alone let 2 000 large
+    /// values pin ~3.5 GB (1.8 MB per 632 KB JSON string, measured).
     /// `nonisolated(unsafe)` is accurate rather than a waiver: `NSCache` is
     /// documented as thread-safe, and `Box` is immutable.
     private nonisolated(unsafe) static let cache: NSCache<NSString, Box> = {
         let c = NSCache<NSString, Box>()
         c.countLimit = 2_000
+        c.totalCostLimit = 256 * 1_024 * 1_024
         return c
     }()
 
