@@ -1281,6 +1281,9 @@ space for the actual content.
   a sheet for what the user wants to be a peek-and-poke flow.
   If complaints come in, we can re-add edit on inner rows behind
   a `pencil` icon without un-doing the rest of D31.
+  **Update 2026-09-23:** done — `pencil` on every key row (parity
+  with zapp-support), opening the Add-key sheet in edit mode (key
+  locked, value prefilled), so no new sheet was introduced.
 - **No deep-tree browser.** Anything nested ≥2 levels deep (a
   JSON object inside `applicaster.v2.someKey`) can only be
   inspected via copy-as-JSON. Acceptable for the same reason as

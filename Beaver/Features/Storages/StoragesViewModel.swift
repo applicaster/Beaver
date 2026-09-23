@@ -67,6 +67,45 @@ final class StoragesViewModel {
         "\(ns.wireKey):\(id)"
     }
 
+    // MARK: - Change highlight
+
+    /// Rows whose value appeared or changed in the latest snapshot,
+    /// keyed like `expandedRecordKeys`. Emptied shortly after, so a
+    /// row scrolled into view later doesn't flash for an old change.
+    private(set) var changedRowKeys: Set<String> = []
+
+    /// Bumps on every snapshot that changed something — the flash
+    /// trigger, so the same row can flash on consecutive changes.
+    private(set) var changeGeneration = 0
+
+    func isChanged(record: StorageRecord,
+                   in namespace: StorageSnapshot.Namespace) -> Bool {
+        changedRowKeys.contains(expansionKey(record, namespace))
+    }
+
+    @ObservationIgnored
+    private var changeClearTask: Task<Void, Never>?
+
+    /// Diffs only layers we had before: the first load of a layer is
+    /// not a "change", or everything would flash on open.
+    private func markChanges(from old: [StorageSnapshot.Namespace: [StorageRecord]]) {
+        var keys: Set<String> = []
+        for (ns, before) in old {
+            for id in StorageRecord.changedRowIds(from: before, to: records(in: ns)) {
+                keys.insert(expansionKey(id: id, ns))
+            }
+        }
+        guard !keys.isEmpty else { return }
+        changedRowKeys = keys
+        changeGeneration += 1
+        changeClearTask?.cancel()
+        changeClearTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            self?.changedRowKeys = []
+        }
+    }
+
     /// Rows currently showing the exact stored string instead of the
     /// decoded view. Held here rather than in `@State` so the 2-second
     /// auto-refresh doesn't flip the user back to Formatted mid-read.
@@ -255,8 +294,12 @@ final class StoragesViewModel {
     private var parsedCache: [StorageSnapshot.Namespace: [StorageRecord]] = [:]
 
     func records(in namespace: StorageSnapshot.Namespace) -> [StorageRecord] {
-        if let cached = parsedCache[namespace] { return cached }
+        // Read `snapshots` BEFORE the cache, even on a hit. The cache is
+        // unobserved and is also filled outside `body` (recomputeMatches,
+        // markChanges), so a view whose render only hit the cache would
+        // never subscribe to `snapshots` — and never see a new one.
         guard let snap = snapshots[namespace] else { return [] }
+        if let cached = parsedCache[namespace] { return cached }
         let parsed = StorageRecord.parseTopLevel(snap.dataJSON)
         parsedCache[namespace] = parsed
         return parsed
@@ -461,8 +504,11 @@ final class StoragesViewModel {
         // unchanged (one real session: 6 132 snapshots, 6 distinct).
         // Assigning anyway would re-render every row for nothing.
         guard fresh.mapValues(\.dataJSON) != snapshots.mapValues(\.dataJSON) else { return }
+        var previous: [StorageSnapshot.Namespace: [StorageRecord]] = [:]
+        for ns in snapshots.keys { previous[ns] = records(in: ns) }
         parsedCache.removeAll()
         snapshots = fresh
+        markChanges(from: previous)
         recomputeMatches()
     }
 

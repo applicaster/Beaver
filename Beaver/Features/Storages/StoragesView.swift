@@ -13,9 +13,9 @@ import SwiftUI
 /// and deeper structures can be inspected via copy-as-JSON.
 ///
 /// Per-row affordances (D31):
-///   • Namespace (container) row: [copy-as-JSON] [add-key-inside]
-///   • Top-level scalar row:      [copy-value]   [delete]
-///   • Inner `key: value` row:    [copy-value]   [delete]
+///   • Namespace (container) row: [add-key-inside] [copy-as-JSON]
+///   • Top-level scalar row:      [copy-key] [copy-value] [edit] [delete]
+///   • Inner `key: value` row:    [copy-key] [copy-value] [edit] [delete]
 struct StoragesView: View {
     /// VM is owned by `MainWindow` (keyed by `viewingSessionId`)
     /// so per-tab state — selected layer, expanded namespaces,
@@ -82,15 +82,22 @@ private struct StoragesContent: View {
     /// in "add-inside" mode (the SDK's optional 3rd argument carries
     /// the parent's name as a subscope). When `parentKey` is nil,
     /// the sheet is in "add a top-level namespace" mode.
+    /// `editKey` switches the sheet to edit mode: key locked, value
+    /// prefilled, same `storage.<ns>.set` command on save.
     struct AddKeyContext: Identifiable {
         let namespace: StorageSnapshot.Namespace
         let parentKey: String?
-        var id: String { "\(namespace.rawValue):\(parentKey ?? "<root>")" }
+        var editKey: String? = nil
+        var editValue: String = ""
+        /// Set when editing one field of a stored JSON value.
+        var field: StorageFieldTarget? = nil
+        var id: String { "\(namespace.rawValue):\(parentKey ?? "<root>"):\(editKey ?? ""):\(field?.id ?? "")" }
     }
 
     @State private var pendingDelete: DeleteTarget?
     @State private var pendingInnerDelete: InnerDeleteTarget?
     @State private var pendingAdd: AddKeyContext?
+    @State private var pendingFieldDelete: StorageFieldTarget?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -135,6 +142,29 @@ private struct StoragesContent: View {
                         parentKey: parentKey,
                         childKey: childKey
                     )
+                },
+                onEdit: { namespace, parentKey, key, value in
+                    vm.selectedNamespace = namespace
+                    pendingAdd = AddKeyContext(
+                        namespace: namespace,
+                        parentKey: parentKey,
+                        editKey: key,
+                        editValue: value
+                    )
+                },
+                onField: { target, delete in
+                    vm.selectedNamespace = target.namespace
+                    if delete {
+                        pendingFieldDelete = target
+                    } else {
+                        pendingAdd = AddKeyContext(
+                            namespace: target.namespace,
+                            parentKey: target.parentKey,
+                            editKey: target.key,
+                            editValue: target.field.valueText ?? "",
+                            field: target
+                        )
+                    }
                 }
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -190,6 +220,29 @@ private struct StoragesContent: View {
         } message: { _ in
             Text("Removes one key inside the namespace on the device. The namespace itself stays.")
         }
+        // Field delete: the SDK can't remove part of a value, so this
+        // rewrites the whole stored JSON without the field.
+        .confirmationDialog(
+            "Delete \"\(pendingFieldDelete?.fieldLabel ?? "")\" from \(pendingFieldDelete?.key ?? "")?",
+            isPresented: Binding(
+                get: { pendingFieldDelete != nil },
+                set: { if !$0 { pendingFieldDelete = nil } }
+            ),
+            presenting: pendingFieldDelete
+        ) { target in
+            Button("Delete", role: .destructive) {
+                pendingFieldDelete = nil
+                guard let json = JSONFieldPatch.removing(target.field.id, in: target.storedJSON) else { return }
+                vm.setValue(in: target.namespace, parent: target.parentKey,
+                            key: target.key, value: json, via: env.server)
+            }
+            Button("Cancel", role: .cancel) { pendingFieldDelete = nil }
+        } message: { target in
+            let json = JSONFieldPatch.removing(target.field.id, in: target.storedJSON) ?? ""
+            Text(json.contains(where: \.isWhitespace)
+                 ? "Rewrites \(target.key) on the device without this field. The new value contains spaces, which the device splits on — it may store only part of it."
+                 : "Rewrites \(target.key) on the device without this field.")
+        }
         // Add-key sheet. Identifiable trigger so the same view powers
         // both top-bar "+ Add key" (parentKey = nil → top-level) and
         // per-row "+ inside namespace" (parentKey = the namespace).
@@ -197,6 +250,12 @@ private struct StoragesContent: View {
             AddStorageKeySheet(
                 initialNamespace: ctx.namespace,
                 initialParent: ctx.parentKey,
+                editKey: ctx.editKey,
+                initialValue: ctx.editValue,
+                fieldLabel: ctx.field?.fieldLabel,
+                transform: ctx.field.map { f in
+                    { JSONFieldPatch.setting(f.field.id, to: $0, in: f.storedJSON) }
+                },
                 onSave: { namespace, parent, key, value in
                     vm.setValue(
                         in: namespace,
@@ -278,10 +337,17 @@ private struct StoragesTopBar: View {
             // auto-refresh are no-ops. Hide them entirely rather
             // than presenting them as disabled-tease.
             if isViewingLiveSession {
-                // "+ Add key" — adds a top-level key in the current layer.
+                // Green ➕ tile — adds a top-level key in the current layer.
                 Button(action: onAddKey) {
-                    Label("Add key", systemImage: "plus.circle")
+                    Image(systemName: "plus")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 34, height: 30)
+                        .background(RoundedRectangle(cornerRadius: 8).fill(Color.green))
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Add key")
+                .opacity(isClientConnected ? 1 : 0.4)
                 .disabled(!isClientConnected)
                 .help(isClientConnected
                       ? "Add a top-level key in the current layer"
@@ -514,6 +580,61 @@ private struct MatchNavigatorCompact: View {
 
 // MARK: - Outline (single layer, expandable namespaces)
 
+/// One field inside a stored JSON value, picked in the decoded tree.
+/// `field` is the tree node; the placeholder passed when building the
+/// editor is swapped for the clicked node in `storageFieldEditor`.
+struct StorageFieldTarget: Identifiable {
+    let namespace: StorageSnapshot.Namespace
+    /// The storage subscope (nil = top level), as for a key edit.
+    let parentKey: String?
+    let key: String
+    /// The key's stored text — the document being patched.
+    let storedJSON: String
+    var field: StorageRecord
+
+    var id: String { "\(namespace.rawValue):\(parentKey ?? ""):\(key):\(field.id)" }
+
+    /// `volume`, `list[2].on` — the tree id minus its leading dot.
+    var fieldLabel: String {
+        field.id.hasPrefix(".") ? String(field.id.dropFirst()) : field.id
+    }
+}
+
+/// (field, true = delete / false = edit)
+private typealias StorageFieldAction = (_ target: StorageFieldTarget, _ delete: Bool) -> Void
+
+/// Field edit / delete for a decoded value, or nil when it can't be
+/// written back: only plain JSON text is patched — Base64 would need
+/// re-encoding and a JWT's signature would break. Past sessions get nil.
+@MainActor
+private func storageFieldEditor(
+    decode: LeafDecode?,
+    target: StorageFieldTarget,
+    live: Bool,
+    connected: Bool,
+    onField: @escaping StorageFieldAction
+) -> StorageFieldEditor? {
+    guard live, decode?.kinds == [.json] else { return nil }
+    func at(_ node: StorageRecord) -> StorageFieldTarget {
+        var t = target
+        t.field = node
+        return t
+    }
+    return StorageFieldEditor(
+        canWrite: connected,
+        edit: { onField(at($0), false) },
+        delete: { onField(at($0), true) }
+    )
+}
+
+/// (layer, parent subscope or nil for top level, key, current raw value)
+private typealias StorageEditAction = (
+    _ namespace: StorageSnapshot.Namespace,
+    _ parentKey: String?,
+    _ key: String,
+    _ value: String
+) -> Void
+
 /// Shows the top-level "namespace" rows for the currently-selected
 /// storage layer (Session / Local / Keychain). Each row is
 /// expandable: click the chevron to reveal the namespace's one-level
@@ -534,6 +655,8 @@ private struct StoragesOutline: View {
         _ parentKey: String,
         _ childKey: String
     ) -> Void
+    let onEdit: StorageEditAction
+    let onField: StorageFieldAction
 
     private var records: [StorageRecord] {
         vm.filteredRecords(in: vm.selectedNamespace)
@@ -556,7 +679,9 @@ private struct StoragesOutline: View {
                                 record: record,
                                 onDelete: onDelete,
                                 onAddInside: onAddInside,
-                                onDeleteInside: onDeleteInside
+                                onDeleteInside: onDeleteInside,
+                                onEdit: onEdit,
+                                onField: onField
                             )
                             .id(record.id)
                             Divider().opacity(0.3)
@@ -637,26 +762,36 @@ private struct NamespaceTab: View {
         }
     }
 
+    private var icon: String {
+        switch namespace {
+        case .session:  "clock"
+        case .local:    "cylinder.split.1x2"
+        case .keychain: "lock"
+        }
+    }
+
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 8) {
-                Text(namespace.displayName.uppercased())
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 12, weight: .medium))
+                Text(namespace.displayName)
                     .font(.subheadline.weight(.semibold))
-                if count > 0 {
-                    Text("\(count)")
-                        .font(.caption.monospacedDigit().weight(.semibold))
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 2)
-                        .background(
-                            Capsule().fill(isSelected
-                                           ? Color.white.opacity(0.25)
-                                           : color.opacity(0.15))
-                        )
-                }
+                Text("\(count)")
+                    .font(.caption.monospacedDigit().weight(.semibold))
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 1)
+                    .background(
+                        Capsule().fill(isSelected
+                                       ? Color.white.opacity(0.25)
+                                       : color.opacity(0.15))
+                    )
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 7)
+            .padding(.horizontal, 12)
+            // Same 30pt as the green ＋ tile beside the tabs.
+            .frame(height: 30)
             .foregroundStyle(isSelected ? Color.white : color)
+            .opacity(count == 0 && !isSelected ? 0.6 : 1)
             .background(
                 RoundedRectangle(cornerRadius: 8)
                     .fill(isSelected
@@ -670,6 +805,7 @@ private struct NamespaceTab: View {
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
+        .help("\(count) \(count == 1 ? "namespace" : "namespaces") in \(namespace.displayName) storage")
     }
 }
 
@@ -689,6 +825,8 @@ private struct NamespaceRow: View {
         _ parentKey: String,
         _ childKey: String
     ) -> Void
+    let onEdit: StorageEditAction
+    let onField: StorageFieldAction
 
     @Environment(AppEnvironment.self) private var env
     @Environment(ToastCenter.self) private var toasts
@@ -759,7 +897,11 @@ private struct NamespaceRow: View {
                         onCopy: { copyValue(of: child) },
                         onDelete: {
                             onDeleteInside(namespace, record.key, child.key)
-                        }
+                        },
+                        onEdit: { value in
+                            onEdit(namespace, record.key, child.key, value)
+                        },
+                        onField: onField
                     )
                     .id(child.id)  // Discover scrolls to it
                 }
@@ -788,6 +930,13 @@ private struct NamespaceRow: View {
                     VStack(alignment: .leading, spacing: 2) {
                         JSONTreeList(children: children)
                     }
+                    .environment(\.storageFieldEditor, storageFieldEditor(
+                        decode: decode,
+                        target: StorageFieldTarget(namespace: namespace, parentKey: nil,
+                                                   key: record.key, storedJSON: record.valueText ?? "",
+                                                   field: tree),
+                        live: isViewingLiveSession, connected: isClientConnected, onField: onField
+                    ))
                 } else if let text = decode.text {
                     RawValueBlock(text: text)
                 }
@@ -820,6 +969,12 @@ private struct NamespaceRow: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
         .background(rowBackground)
+        // An expanded namespace flashes its changed keys instead.
+        .modifier(ChangeFlash(
+            isChanged: vm.isChanged(record: record, in: namespace)
+                && !(isExpanded && record.isContainer),
+            generation: vm.changeGeneration
+        ))
         .overlay(currentMatchOutline)
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }
@@ -925,63 +1080,50 @@ private struct NamespaceRow: View {
 
     @ViewBuilder
     private var actions: some View {
+        // Editing affordances hidden for past sessions — the device
+        // that recorded the session is gone, so writes would silently
+        // fail. Copy always works, device or not.
+        let canWrite = isViewingLiveSession
         HStack(spacing: 4) {
-            // Copy is always available — works without a device.
-            // Container rows copy the full subtree as JSON; scalar
-            // rows copy the raw value.
-            Button(action: { copyNamespaceContents() }) {
-                Image(systemName: "doc.on.doc")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 22, height: 22)
-            }
-            .buttonStyle(.plain)
-            .help(record.isContainer
-                  ? "Copy all keys inside as JSON"
-                  : "Copy this value")
-
-            // Editing affordances (add / delete) hidden for past
-            // sessions — the device that recorded the session is
-            // gone, so writes would silently fail.
-            if isViewingLiveSession {
-                if record.isContainer {
-                    // Containers (namespaces) — only [add]. No delete
-                    // because the SDK has no command to remove an
-                    // entire namespace; the user has to delete its
-                    // inner keys one by one via the InnerKeyRow trash.
-                    Button {
-                        onAddInside(record, namespace)
-                    } label: {
-                        Image(systemName: "plus.circle")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 22, height: 22)
-                    }
-                    .buttonStyle(.plain)
+            if record.isContainer {
+                // Namespace: [+] [copy as JSON]. No delete — the SDK
+                // has no command to remove a whole namespace.
+                if canWrite {
+                    RowIconButton(
+                        systemImage: "plus",
+                        help: isClientConnected
+                            ? "Add a key inside \(record.key)"
+                            : "Reconnect the device to add a key"
+                    ) { onAddInside(record, namespace) }
                     .disabled(!isClientConnected)
-                    .help(isClientConnected
-                          ? "Add a key inside \(record.key)"
-                          : "Reconnect the device to add a key")
-                } else {
-                    // Scalar top-level key — straight delete, no
-                    // subscope. SDK: `storage.<ns>.delete <key>`.
-                    Button(role: .destructive) {
-                        onDelete(record, namespace)
-                    } label: {
-                        Image(systemName: "trash")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.red)
-                            .frame(width: 22, height: 22)
-                    }
-                    .buttonStyle(.plain)
+                }
+                RowIconButton(systemImage: "doc.on.doc",
+                              help: "Copy all keys inside as JSON",
+                              action: copyNamespaceContents)
+            } else {
+                // Scalar top-level key: [key] [copy] [edit] [delete],
+                // no subscope. SDK: `storage.<ns>.set|delete <key>`.
+                RowIconButton(systemImage: "key",
+                              help: "Copy key name",
+                              action: copyKeyName)
+                RowIconButton(systemImage: "doc.on.doc",
+                              help: "Copy this value",
+                              action: copyNamespaceContents)
+                if canWrite {
+                    RowIconButton(
+                        systemImage: "pencil",
+                        help: isClientConnected ? "Edit this value" : "Reconnect the device to edit"
+                    ) { onEdit(namespace, nil, record.key, record.valueText ?? "") }
                     .disabled(!isClientConnected)
-                    .help(isClientConnected
-                          ? "Delete this top-level key"
-                          : "Reconnect the device to delete")
+                    RowIconButton(
+                        systemImage: "trash",
+                        help: isClientConnected ? "Delete this top-level key" : "Reconnect the device to delete"
+                    ) { onDelete(record, namespace) }
+                    .disabled(!isClientConnected)
                 }
             }
         }
-        .opacity(isHovered ? 1 : 0.55)
+        .opacity(isHovered ? 1 : 0)
     }
 
     @ViewBuilder
@@ -1062,6 +1204,9 @@ private struct InnerKeyRow: View {
     let rowIndex: Int
     let onCopy: () -> Void
     let onDelete: () -> Void
+    /// Receives the raw stored string to prefill the edit sheet.
+    let onEdit: (String) -> Void
+    let onField: StorageFieldAction
 
     @State private var isHovered = false
     @State private var showingFullValue = false
@@ -1181,47 +1326,47 @@ private struct InnerKeyRow: View {
             // edge it was unclear which row the buttons acted on.
             HStack(spacing: 4) {
                 if canOpenPopover {
-                    Button {
-                        showingFullValue = true
-                    } label: {
-                        Image(systemName: "rectangle.expand.vertical")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 22, height: 22)
-                    }
-                    .buttonStyle(.plain)
-                    .help(canExpandInline
-                          ? "View formatted / raw"
-                          : "Show full value")
+                    RowIconButton(
+                        systemImage: "rectangle.expand.vertical",
+                        help: canExpandInline ? "View formatted / raw" : "Show full value"
+                    ) { showingFullValue = true }
                     .popover(isPresented: $showingFullValue,
                              arrowEdge: .leading) {
-                        StorageValuePopover(record: child)
+                        StorageValuePopover(
+                            record: child,
+                            onCopyKey: copyKeyName,
+                            onEdit: isLiveSession && !child.isContainer
+                                ? { showingFullValue = false; onEdit(rawText) } : nil,
+                            onDelete: isLiveSession
+                                ? { showingFullValue = false; onDelete() } : nil,
+                            canWrite: isClientConnected
+                        )
                     }
                 }
 
-                Button(action: onCopy) {
-                    Image(systemName: "doc.on.doc")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 22, height: 22)
-                }
-                .buttonStyle(.plain)
-                .help("Copy this value")
+                RowIconButton(systemImage: "key", help: "Copy key name", action: copyKeyName)
+                RowIconButton(systemImage: "doc.on.doc", help: "Copy this value", action: onCopy)
 
                 // Hidden entirely for past sessions — see comments
                 // above on isLiveSession.
                 if isLiveSession {
-                    Button(role: .destructive, action: onDelete) {
-                        Image(systemName: "trash")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.red)
-                            .frame(width: 22, height: 22)
+                    // Native objects/arrays have no single stored string
+                    // to edit; edit their leaves instead.
+                    if !child.isContainer {
+                        RowIconButton(
+                            systemImage: "pencil",
+                            help: isClientConnected ? "Edit this value" : "Reconnect the device to edit"
+                        ) { onEdit(rawText) }
+                        .disabled(!isClientConnected)
                     }
-                    .buttonStyle(.plain)
+                    RowIconButton(
+                        systemImage: "trash",
+                        help: isClientConnected
+                            ? "Delete this key inside \(parent.key)"
+                            : "Reconnect the device to delete",
+                        action: onDelete
+                    )
                     .disabled(!isClientConnected)
-                    .help(isClientConnected
-                          ? "Delete this key inside \(parent.key)"
-                          : "Reconnect the device to delete")
                 }
             }
             .opacity(isHovered ? 1 : 0)
@@ -1234,6 +1379,10 @@ private struct InnerKeyRow: View {
         // (50+ keys) read as a comfortable list instead of a wall.
         .padding(.vertical, 6)
         .background(rowBackground)
+        .modifier(ChangeFlash(
+            isChanged: vm.isChanged(record: child, in: namespace),
+            generation: vm.changeGeneration
+        ))
         .overlay {
             if vm.currentMatchId == child.id {
                 RoundedRectangle(cornerRadius: 4)
@@ -1249,11 +1398,7 @@ private struct InnerKeyRow: View {
         // Right-click → copy options. Mirrors NamespaceRow's
         // pattern so the muscle memory is the same on both levels.
         .contextMenu {
-            Button {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(child.key, forType: .string)
-                toasts.success("Copied key name")
-            } label: {
+            Button(action: copyKeyName) {
                 Label("Copy key name", systemImage: "textformat")
             }
             Button(action: onCopy) {
@@ -1298,6 +1443,13 @@ private struct InnerKeyRow: View {
                 }
                 if let tree = decode.tree {
                     subtree(of: tree)
+                        .environment(\.storageFieldEditor, storageFieldEditor(
+                            decode: decode,
+                            target: StorageFieldTarget(namespace: namespace, parentKey: parent.key,
+                                                       key: child.key, storedJSON: rawText,
+                                                       field: tree),
+                            live: isLiveSession, connected: isClientConnected, onField: onField
+                        ))
                 } else if let text = decode.text {
                     RawValueBlock(text: text)
                 }
@@ -1314,6 +1466,12 @@ private struct InnerKeyRow: View {
                 JSONTreeList(children: children)
             }
         }
+    }
+
+    private func copyKeyName() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(child.key, forType: .string)
+        toasts.success("Copied key name")
     }
 
     /// Pastes a single line ready to drop into JSON or a config:
@@ -1376,6 +1534,79 @@ private struct InnerKeyRow: View {
 }
 
 
+// MARK: - Space warning
+
+private extension View {
+    /// Red outline + a one-line note under a field when `isOn`.
+    func spaceWarning(_ isOn: Bool, _ message: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            overlay(
+                RoundedRectangle(cornerRadius: 5)
+                    .strokeBorder(Color.red, lineWidth: 1)
+                    .opacity(isOn ? 1 : 0)
+            )
+            if isOn {
+                Label(message, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+        }
+    }
+}
+
+// MARK: - Change flash
+
+/// Briefly tints a row whose value just appeared or changed on the
+/// device, then fades out.
+private struct ChangeFlash: ViewModifier {
+    let isChanged: Bool
+    let generation: Int
+
+    @State private var intensity = 0.0
+
+    func body(content: Content) -> some View {
+        content
+            .background(Color.yellow.opacity(0.3 * intensity))
+            // Runs on appear too, so a freshly added row flashes.
+            .task(id: generation) {
+                guard isChanged else { return }
+                intensity = 1
+                // Let the full tint render before fading it.
+                try? await Task.sleep(for: .milliseconds(300))
+                withAnimation(.easeOut(duration: 1.2)) { intensity = 0 }
+            }
+    }
+}
+
+// MARK: - Row icon button
+
+/// Small bordered square icon — the copy / edit / delete / add tail on
+/// storage rows.
+private struct RowIconButton: View {
+    let systemImage: String
+    let help: String
+    let action: () -> Void
+
+    @Environment(\.isEnabled) private var isEnabled
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .frame(width: 24, height: 20)
+                .background(
+                    RoundedRectangle(cornerRadius: 5)
+                        .strokeBorder(Color.secondary.opacity(0.4), lineWidth: 1)
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .opacity(isEnabled ? 1 : 0.4)
+        .help(help)
+    }
+}
+
 // MARK: - Full-value popover
 
 /// Shown when the user clicks the expand affordance on a long
@@ -1385,6 +1616,11 @@ private struct InnerKeyRow: View {
 /// arrays) the body is pretty-printed JSON.
 private struct StorageValuePopover: View {
     let record: StorageRecord
+    let onCopyKey: () -> Void
+    /// nil hides the button (past session, or nothing to edit).
+    let onEdit: (() -> Void)?
+    let onDelete: (() -> Void)?
+    let canWrite: Bool
 
     @Environment(ToastCenter.self) private var toasts
     @State private var showingRaw = false
@@ -1415,6 +1651,20 @@ private struct StorageValuePopover: View {
     }
 
     private var charCount: Int { bodyText.count }
+
+    /// The Formatted view as text — only when it differs from the stored
+    /// string (a JSON string, Base64 or a token).
+    private var decodedPretty: String? {
+        guard let decode else { return nil }
+        if let tree = decode.tree { return StorageRecord.serializeJSON(tree) }
+        return decode.text
+    }
+
+    private func copy(_ text: String, _ toast: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        toasts.success(toast)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -1449,19 +1699,29 @@ private struct StorageValuePopover: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(bodyText, forType: .string)
-                    toasts.success(record.kind.isContainer
-                                   ? "Copied JSON"
-                                   : "Copied value")
-                } label: {
-                    Image(systemName: "doc.on.doc")
+                // Same tail as the row, plus the decoded value pretty-printed.
+                RowIconButton(systemImage: "key", help: "Copy key name", action: onCopyKey)
+                RowIconButton(systemImage: "doc.on.doc",
+                              help: record.kind.isContainer ? "Copy pretty-printed JSON" : "Copy value") {
+                    copy(bodyText, record.kind.isContainer ? "Copied JSON" : "Copied value")
                 }
-                .buttonStyle(.borderless)
-                .help(record.kind.isContainer
-                      ? "Copy pretty-printed JSON"
-                      : "Copy value")
+                if let pretty = decodedPretty {
+                    RowIconButton(systemImage: "curlybraces", help: "Copy decoded value, pretty-printed") {
+                        copy(pretty, "Copied decoded value")
+                    }
+                }
+                if let onEdit {
+                    RowIconButton(systemImage: "pencil",
+                                  help: canWrite ? "Edit this value" : "Reconnect the device to edit",
+                                  action: onEdit)
+                    .disabled(!canWrite)
+                }
+                if let onDelete {
+                    RowIconButton(systemImage: "trash",
+                                  help: canWrite ? "Delete this key" : "Reconnect the device to delete",
+                                  action: onDelete)
+                    .disabled(!canWrite)
+                }
             }
 
             Divider()
@@ -1556,17 +1816,60 @@ private struct StorageValuePopover: View {
 private struct AddStorageKeySheet: View {
     let initialNamespace: StorageSnapshot.Namespace
     let initialParent: String?
+    /// Non-nil = edit mode: this key is fixed, only the value changes.
+    let editKey: String?
+    /// Field mode: the value typed is one field's; `transform` turns it
+    /// into the whole stored value (nil = can't).
+    let fieldLabel: String?
+    let transform: ((String) -> String?)?
+
+    /// What actually gets sent as the key's value.
+    private var outgoingValue: String? {
+        guard let transform else { return value }
+        return transform(value)
+    }
     let onSave: (StorageSnapshot.Namespace, String?, String, String) -> Void
     let onCancel: () -> Void
 
-    @State private var key: String = ""
-    @State private var value: String = ""
+    @State private var key: String
+    @State private var value: String
+
+    init(initialNamespace: StorageSnapshot.Namespace,
+         initialParent: String?,
+         editKey: String? = nil,
+         initialValue: String = "",
+         fieldLabel: String? = nil,
+         transform: ((String) -> String?)? = nil,
+         onSave: @escaping (StorageSnapshot.Namespace, String?, String, String) -> Void,
+         onCancel: @escaping () -> Void) {
+        self.initialNamespace = initialNamespace
+        self.initialParent = initialParent
+        self.editKey = editKey
+        self.fieldLabel = fieldLabel
+        self.transform = transform
+        self.onSave = onSave
+        self.onCancel = onCancel
+        _key = State(initialValue: editKey ?? "")
+        _value = State(initialValue: initialValue)
+    }
     /// User-typed subscope for top-level mode. Trimmed and folded
     /// to `nil` on save when empty.
     @State private var manualParent: String = ""
 
+    // The SDK splits commands on spaces with no quoting. A space in the
+    // key or namespace shifts every argument and writes the wrong key,
+    // so it blocks Save; a space in the value only truncates it, so
+    // that one just warns.
+    private static func hasInnerSpace(_ s: String) -> Bool {
+        s.trimmingCharacters(in: .whitespaces).contains(where: \.isWhitespace)
+    }
+    private var keyHasSpaces: Bool { Self.hasInnerSpace(key) }
+    private var parentHasSpaces: Bool { Self.hasInnerSpace(manualParent) }
+    private var valueHasSpaces: Bool { (outgoingValue ?? value).contains(where: \.isWhitespace) }
+
     private var canSave: Bool {
         !key.trimmingCharacters(in: .whitespaces).isEmpty
+            && !keyHasSpaces && !parentHasSpaces && outgoingValue != nil
     }
 
     private var isInside: Bool { initialParent != nil }
@@ -1581,7 +1884,7 @@ private struct AddStorageKeySheet: View {
     }
 
     private var commandPreview: String {
-        var cmd = "storage.\(initialNamespace.wireKey).set \(key) \(value)"
+        var cmd = "storage.\(initialNamespace.wireKey).set \(key) \(outgoingValue ?? "…")"
         if let parent = resolvedParent {
             cmd += " \(parent)"
         }
@@ -1605,7 +1908,8 @@ private struct AddStorageKeySheet: View {
             // Removes the segmented picker since the user already
             // chose a layer by clicking its tab on the main screen.
             HStack(spacing: 10) {
-                Text(isInside ? "Add key inside \(initialParent!)" : "Add key")
+                Text(editKey.map { key in fieldLabel.map { "Edit \(key) › \($0)" } ?? "Edit \(key)" }
+                     ?? (isInside ? "Add key inside \(initialParent!)" : "Add key"))
                     .font(.headline)
                 Spacer()
                 Text(initialNamespace.displayName.uppercased())
@@ -1634,25 +1938,30 @@ private struct AddStorageKeySheet: View {
                 }
             }
 
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Key").font(.caption).foregroundStyle(.secondary)
-                TextField(
-                    isInside ? "e.g. premium" : "e.g. featureFlag.premium",
-                    text: $key
-                )
-                .textFieldStyle(.roundedBorder)
+            if editKey == nil {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Key").font(.caption).foregroundStyle(.secondary)
+                    TextField(
+                        isInside ? "e.g. premium" : "e.g. featureFlag.premium",
+                        text: $key
+                    )
+                    .textFieldStyle(.roundedBorder)
+                    .spaceWarning(keyHasSpaces, "Key can't contain spaces.")
+                }
             }
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("Value").font(.caption).foregroundStyle(.secondary)
                 TextField("e.g. true", text: $value)
                     .textFieldStyle(.roundedBorder)
+                    .spaceWarning(valueHasSpaces,
+                                  "The device splits on spaces — only the first word may be stored.")
             }
 
             // Optional subscope — only shown in top-level mode.
             // Leave blank to write at the layer's root; type a
             // name to put the pair inside that subscope.
-            if !isInside {
+            if !isInside && editKey == nil {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 4) {
                         Text("Namespace")
@@ -1665,6 +1974,7 @@ private struct AddStorageKeySheet: View {
                     TextField("e.g. applicaster.v2 — leave empty for root",
                               text: $manualParent)
                         .textFieldStyle(.roundedBorder)
+                        .spaceWarning(parentHasSpaces, "Namespace can't contain spaces.")
                 }
             }
 
@@ -1685,7 +1995,7 @@ private struct AddStorageKeySheet: View {
                         initialNamespace,
                         resolvedParent,
                         key.trimmingCharacters(in: .whitespaces),
-                        value
+                        outgoingValue ?? value
                     )
                 }
                 .keyboardShortcut(.defaultAction)
