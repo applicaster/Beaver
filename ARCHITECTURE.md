@@ -194,6 +194,20 @@ CREATE TABLE command_history (
   command     TEXT NOT NULL,
   issued_at   INTEGER NOT NULL
 );
+
+-- Added in migration v5 (see D39). One row per `network` frame
+-- (PROTOCOL.md §4.3). payload_json is the frame's payload verbatim;
+-- NetworkEntry.parse re-derives every field from it on read, so a new
+-- optional wire field needs no migration. timestamp_ms is a column
+-- only for ordering.
+CREATE TABLE network_entry (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id   INTEGER NOT NULL REFERENCES session(id) ON DELETE CASCADE,
+  timestamp_ms INTEGER NOT NULL,
+  payload_json TEXT    NOT NULL
+);
+
+CREATE INDEX idx_network_session_ts ON network_entry(session_id, timestamp_ms);
 ```
 
 **Operations.**
@@ -217,6 +231,13 @@ CREATE TABLE command_history (
 
 - `endSession(_ id: Int64) async`
   Marks `ended_at = now()`.
+
+- `recordNetworkEntry(_ entry: NetworkEntry, sessionId: Int64) async throws`
+  / `networkEntries(sessionId: Int64, afterId: Int64 = 0) async throws -> [NetworkEntry]`
+  Insert and re-read `network_entry` rows. Unlike `append`, not batched —
+  one frame is one insert — since `network` frames arrive far less often
+  than `event` frames. `clearEvents` deletes `network_entry` rows along
+  with `event`; see D39.
 
 **Why GRDB over SwiftData.** Predictable performance under high-throughput
 append load; mature FTS5 integration; explicit migrations; explicit
