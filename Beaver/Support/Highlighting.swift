@@ -30,8 +30,7 @@ public enum Highlighting {
             ? regexRanges(in: text, pattern: term)
             : substringRanges(in: text, term: term)
 
-        for range in ranges {
-            guard let attrRange = result.range(from: range, in: text) else { continue }
+        for attrRange in result.ranges(from: ranges, in: text) {
             result[attrRange].backgroundColor = Color.yellow.opacity(0.3)
             result[attrRange].foregroundColor = .primary
         }
@@ -54,29 +53,26 @@ public enum Highlighting {
             ? regexRanges(in: plain, pattern: term)
             : substringRanges(in: plain, term: term)
 
-        for range in ranges {
-            guard let attrRange = attributed.range(from: range, in: plain) else { continue }
+        for attrRange in attributed.ranges(from: ranges, in: plain) {
             attributed[attrRange].backgroundColor = Color.yellow.opacity(0.3)
         }
     }
 
-    private static func substringRanges(
+    /// Searches the original string directly, so no index has to be
+    /// translated back from a lowercased copy. Each search resumes where
+    /// the last one ended — one pass over the text, however many hits.
+    /// (Re-measuring every hit from the start made a 40 KB value with a
+    /// one-letter term take 0.4 s, and a 157 KB one minutes.)
+    static func substringRanges(
         in text: String,
         term: String
     ) -> [Range<String.Index>] {
-        let lower = text.lowercased()
-        let needle = term.lowercased()
         var ranges: [Range<String.Index>] = []
-        var searchStart = lower.startIndex
-        while let range = lower.range(of: needle, range: searchStart..<lower.endIndex) {
-            // Translate the case-folded range back onto the original string.
-            let originalStart = text.index(text.startIndex,
-                                           offsetBy: lower.distance(from: lower.startIndex,
-                                                                    to: range.lowerBound))
-            let originalEnd = text.index(text.startIndex,
-                                         offsetBy: lower.distance(from: lower.startIndex,
-                                                                  to: range.upperBound))
-            ranges.append(originalStart..<originalEnd)
+        var searchStart = text.startIndex
+        while let range = text.range(of: term,
+                                     options: .caseInsensitive,
+                                     range: searchStart..<text.endIndex) {
+            ranges.append(range)
             searchStart = range.upperBound
         }
         return ranges
@@ -92,18 +88,24 @@ public enum Highlighting {
 }
 
 private extension AttributedString {
-    /// Translate a `Range<String.Index>` on the original String to a
-    /// range on `self` by character offset.
-    func range(
-        from stringRange: Range<String.Index>,
+    /// Translate ranges on the original String to ranges on `self` by
+    /// character offset. Ranges come in document order, so both cursors
+    /// only ever move forward and the whole walk is linear.
+    func ranges(
+        from stringRanges: [Range<String.Index>],
         in source: String
-    ) -> Range<AttributedString.Index>? {
-        let startOffset = source.distance(from: source.startIndex,
-                                          to: stringRange.lowerBound)
-        let endOffset   = source.distance(from: source.startIndex,
-                                          to: stringRange.upperBound)
-        let start = index(startIndex, offsetByCharacters: startOffset)
-        let end   = index(startIndex, offsetByCharacters: endOffset)
-        return start..<end
+    ) -> [Range<AttributedString.Index>] {
+        var sourceCursor = source.startIndex
+        var cursor = startIndex
+        var result: [Range<AttributedString.Index>] = []
+        result.reserveCapacity(stringRanges.count)
+        for range in stringRanges where range.lowerBound >= sourceCursor {
+            let start = index(cursor, offsetByCharacters: source.distance(from: sourceCursor, to: range.lowerBound))
+            let end   = index(start, offsetByCharacters: source.distance(from: range.lowerBound, to: range.upperBound))
+            result.append(start..<end)
+            sourceCursor = range.lowerBound
+            cursor = start
+        }
+        return result
     }
 }
