@@ -132,7 +132,7 @@ struct MainWindow: View {
         }
         .fileImporter(
             isPresented: $showingImporter,
-            allowedContentTypes: [.json],
+            allowedContentTypes: [.json, .har],
             allowsMultipleSelection: false,
             onCompletion: handleImport
         )
@@ -237,7 +237,7 @@ struct MainWindow: View {
                                    title: "Import")
             }
             .buttonStyle(.plain)
-            .help("Load events from a JSON file")
+            .help("Load a session from a JSON export or a HAR file")
         }
         ToolbarItem(placement: .primaryAction) {
             // Two explicit choices rather than a single button whose
@@ -257,7 +257,8 @@ struct MainWindow: View {
             }
             .buttonStyle(.plain)
             .help("Save the session to a JSON file — events, network requests and the device storage")
-            .disabled(!hasEvents)
+            // A session can hold only network requests (an imported HAR).
+            .disabled(!hasEvents && env.viewingNetworkCount == 0)
             .popover(isPresented: $showingExportChoice, arrowEdge: .bottom) {
                 VStack(alignment: .leading, spacing: 2) {
                     Button("Export filtered") {
@@ -469,7 +470,11 @@ struct MainWindow: View {
             defer { if didStart { url.stopAccessingSecurityScopedResource() } }
 
             guard let data = try? Data(contentsOf: url) else { return }
-            let imported = (try? EventJSON.decodeExport(data)) ?? .init()
+            var imported = (try? EventJSON.decodeExport(data)) ?? .init()
+            // Not a Beaver export: maybe a HAR (Beaver's, Chrome's, Charles'…).
+            if imported.events.isEmpty && imported.storage.isEmpty && imported.network.isEmpty {
+                imported.network = HARExport.decode(data)
+            }
             // A storage-only or network-only file is still worth opening.
             guard !imported.events.isEmpty || !imported.storage.isEmpty
                     || !imported.network.isEmpty else { return }

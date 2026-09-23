@@ -32,6 +32,10 @@ public final class AppEnvironment {
     /// actions only make sense when there's something to act on.
     public var viewingEventCount: Int = 0
 
+    /// Number of network requests in the viewing session. Export also
+    /// works for a session that has requests and no events.
+    public var viewingNetworkCount: Int = 0
+
     /// Commands the connected SDK exposes (from its `cmdlist` reply).
     /// Refreshed automatically on connect; cleared on disconnect.
     /// Merged with `CommandRegistry` for syntax help in the
@@ -87,9 +91,11 @@ public final class AppEnvironment {
     public func refreshViewingEventCount() async {
         guard let sid = viewingSessionId else {
             viewingEventCount = 0
+            viewingNetworkCount = 0
             return
         }
         let count = (try? await store.eventCount(sessionId: sid, filter: .none)) ?? 0
         viewingEventCount = count
+        viewingNetworkCount = (try? await store.networkEntryCount(sessionId: sid)) ?? 0
     }
 }

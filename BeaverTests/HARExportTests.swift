@@ -119,4 +119,66 @@ struct HARExportTests {
         #expect(headers.map { $0["name"] } == ["Accept", "X-Trace", "b-header"])
         #expect(headers.first?["value"] == "*/*")
     }
+
+    // MARK: Decode
+
+    @Test
+    func encodeThenDecodeRoundTrips() throws {
+        let post = e(#"{"url":"https://api.io/login?x=1","method":"POST","status":201,"statusText":"Created","timing":{"startTime":1700000000456,"duration":87},"requestHeaders":{"Content-Type":"application/json"},"requestBody":"{\"u\":\"a\"}","responseHeaders":{"Content-Type":"text/plain"},"responseBody":"hello"}"#)
+        let failed = e(#"{"url":"https://api.io/x","method":"GET","timing":{"startTime":1700000001000,"duration":5},"error":"offline"}"#)
+        let data = try HARExport.encode([get, post, failed], creatorVersion: "1")
+
+        let back = HARExport.decode(data)
+
+        #expect(back.map(\.url) == [get.url, post.url, failed.url])
+        #expect(back.map(\.method) == ["GET", "POST", "GET"])
+        #expect(back.map(\.status) == [200, 201, nil])
+        #expect(back.map(\.startMillis) == [1700000000123, 1700000000456, 1700000001000])
+        #expect(back.map(\.durationMillis) == [42, 87, 5])
+        #expect(back[1].requestBody == #"{"u":"a"}"#)
+        #expect(back[1].responseBody == "hello")
+        #expect(back[1].statusText == "Created")
+        #expect(back[1].requestHeaders == ["Content-Type": "application/json"])
+        #expect(back[0].responseBody == #"{"ok":true}"#)
+        #expect(back[0].requestBody == nil)
+        #expect(back[2].error == "offline")
+    }
+
+    @Test
+    func decodesMinimalChromeHAR() {
+        let har = #"""
+        {"log":{"version":"1.2","creator":{"name":"WebInspector","version":"537.36"},"pages":[],
+         "entries":[{"startedDateTime":"2024-03-01T10:20:30.5Z","time":123.456,
+          "request":{"method":"GET","url":"https://cdn.io/a.js","httpVersion":"http/2.0",
+                     "headers":[{"name":":authority","value":"cdn.io"},{"name":"accept","value":"*/*"}],
+                     "queryString":[],"cookies":[],"headersSize":-1,"bodySize":0},
+          "response":{"status":304,"statusText":"","httpVersion":"http/2.0",
+                      "headers":[{"name":"etag","value":"abc"}],"cookies":[],
+                      "content":{"size":0,"mimeType":"x-unknown"},"redirectURL":"","headersSize":-1,"bodySize":0},
+          "cache":{},"timings":{"send":0.1,"wait":120,"receive":3.3}},
+          {"startedDateTime":"not a date","request":{"method":"GET"},"response":{}}]}}
+        """#
+        let entries = HARExport.decode(Data(har.utf8))
+        #expect(entries.count == 1)
+        let entry = entries[0]
+        #expect(entry.url == "https://cdn.io/a.js")
+        #expect(entry.status == 304)
+        #expect(entry.statusText == nil)
+        #expect(entry.durationMillis == 123)
+        #expect(entry.startMillis == 1709288430500)
+        #expect(entry.requestHeaders["accept"] == "*/*")
+        #expect(entry.responseHeaders == ["etag": "abc"])
+        #expect(entry.responseBody == nil)
+    }
+
+    @Test
+    func decodeRejectsNonHAR() {
+        #expect(HARExport.decode(Data(#"{"events":[]}"#.utf8)).isEmpty)
+        #expect(HARExport.decode(Data("nope".utf8)).isEmpty)
+        // Out-of-range values don't trap; the entry keeps its URL.
+        let odd = #"{"log":{"entries":[{"startedDateTime":"1900-01-01T00:00:00Z","time":1e300,"request":{"url":"https://a.io/"}}]}}"#
+        let entries = HARExport.decode(Data(odd.utf8))
+        #expect(entries.map(\.url) == ["https://a.io/"])
+        #expect(entries.first?.durationMillis == nil)
+    }
 }
