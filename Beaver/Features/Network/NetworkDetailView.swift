@@ -68,6 +68,8 @@ private struct NetworkDetailContent: View {
     @Environment(ToastCenter.self) private var toasts
     /// Never parse in `body`: rebuilt only when the selected entry changes.
     @State private var parsed: ParsedEntry?
+    /// The full URL under the short one; collapsed again for every entry.
+    @State private var showsFullURL = false
 
     var body: some View {
         ScrollView {
@@ -85,7 +87,10 @@ private struct NetworkDetailContent: View {
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .onChange(of: entry.id, initial: true) { parsed = ParsedEntry(entry) }
+        .onChange(of: entry.id, initial: true) {
+            parsed = ParsedEntry(entry)
+            showsFullURL = false
+        }
     }
 
     // MARK: Header
@@ -101,13 +106,7 @@ private struct NetworkDetailContent: View {
                 HStack(spacing: 8) { summary; Spacer(minLength: 8); buttons }
                 VStack(alignment: .leading, spacing: 6) { summary; HStack(spacing: 6) { buttons } }
             }
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(entry.url)
-                    .font(.title3)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-                copyIcon(help: "Copy URL") { toasts.copy(entry.url, "Copied URL") }
-            }
+            urlLine
             Text(entry.statusLine)
                 .font(.title2.weight(.semibold))
                 .foregroundStyle(entry.statusClass.color)
@@ -119,6 +118,45 @@ private struct NetworkDetailContent: View {
                     .foregroundStyle(.red)
                     .textSelection(.enabled)
             }
+        }
+    }
+
+    /// `https://host/path...` — a query can hold kilobytes of token. The
+    /// chevron (or a click on the text) shows the whole URL as a block;
+    /// the copy icon always copies all of it.
+    @ViewBuilder
+    private var urlLine: some View {
+        let short = entry.shortURL
+        let isCut = short != entry.url
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text(short)
+                .font(.title3)
+                .textSelection(.enabled)
+                .lineLimit(2)
+                .truncationMode(.middle)
+                .fixedSize(horizontal: false, vertical: true)
+                .onTapGesture { if isCut { showsFullURL.toggle() } }
+                .help(isCut ? "Show full URL" : "")
+            copyIcon(help: "Copy URL") { toasts.copy(entry.url, "Copied URL") }
+            if isCut {
+                Button { showsFullURL.toggle() } label: {
+                    Image(systemName: showsFullURL ? "chevron.up" : "chevron.down")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help(showsFullURL ? "Hide full URL" : "Show full URL")
+            }
+        }
+        if isCut && showsFullURL {
+            // No tap gesture here, so the text stays selectable.
+            Text(entry.url)
+                .font(.callout.monospaced())
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
         }
     }
 

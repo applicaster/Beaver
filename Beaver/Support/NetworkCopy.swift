@@ -33,6 +33,16 @@ extension NetworkEntry {
         return lines.joined(separator: "\n")
     }
 
+    /// Scheme, host, port and path, with `...` when a query or fragment was
+    /// cut: `https://host/beacon/user-data/favorites...`. The URL itself
+    /// when there is nothing to cut or it doesn't parse.
+    public var shortURL: String {
+        guard let c = URLComponents(string: url), let scheme = c.scheme, let host = c.percentEncodedHost,
+              c.percentEncodedQuery != nil || c.percentEncodedFragment != nil
+        else { return url }
+        return "\(scheme)://\(host)\(c.port.map { ":\($0)" } ?? "")\(c.percentEncodedPath)..."
+    }
+
     /// Percent-decoded, in URL order.
     public var queryItems: [URLQueryItem] { URLComponents(string: url)?.queryItems ?? [] }
 

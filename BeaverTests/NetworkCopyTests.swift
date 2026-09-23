@@ -244,4 +244,38 @@ struct NetworkCopyTests {
         #expect(!e(#"{"url":"https://api.io/x","responseBody":"{\"a\":1}"}"#).isResponseBodyTruncated)
         #expect(!e(#"{"url":"https://api.io/x"}"#).isResponseBodyTruncated)
     }
+
+    // MARK: Short URL
+
+    /// Synthetic stand-in for a long token.
+    private static let ctx = String(repeating: "QUJDREVGR0g", count: 200)
+
+    private func url(_ u: String) -> NetworkEntry { e(#"{"url":"\#(u)"}"#) }
+
+    @Test
+    func shortURLDropsTheQuery() {
+        let entry = url("https://zapp-1.web.app/beacon/user-data/favorites?ctx=\(Self.ctx)&x=1")
+        #expect(entry.shortURL == "https://zapp-1.web.app/beacon/user-data/favorites...")
+    }
+
+    @Test
+    func shortURLWithoutQueryIsUnchanged() {
+        let entry = url("https://api.io/v1/a%20b/feed")
+        #expect(entry.shortURL == "https://api.io/v1/a%20b/feed")
+    }
+
+    @Test
+    func shortURLKeepsThePort() {
+        #expect(url("http://localhost:8080/api/items?page=2").shortURL == "http://localhost:8080/api/items...")
+    }
+
+    @Test
+    func shortURLDropsAFragment() {
+        #expect(url("https://docs.io/guide#section-2").shortURL == "https://docs.io/guide...")
+    }
+
+    @Test
+    func shortURLOfUnparsableStringIsTheString() {
+        #expect(url("http://[::1?q=1").shortURL == "http://[::1?q=1")
+    }
 }
