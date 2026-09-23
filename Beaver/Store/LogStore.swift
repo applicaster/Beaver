@@ -406,25 +406,40 @@ public actor LogStore {
 
     // MARK: - Events: query
 
-    /// Every distinct subsystem (or category) seen in a session, for the
-    /// chip menus. Empty strings are dropped — an event without a
-    /// category isn't a value worth offering.
-    public func distinctValues(
+    /// Subsystem (or category) values with their event counts, for the chip
+    /// menus. Every filter applies except this facet's own chips, so picking
+    /// subsystems narrows the category menu and vice versa without a pick
+    /// hiding its siblings. Empty strings are dropped. Values the filter
+    /// includes or excludes but that no longer match come back last with
+    /// count 0, so a selection can always be seen and removed.
+    public func facetCounts(
         sessionId: Int64,
-        facet: Filter.Facet
-    ) async throws -> [String] {
+        facet: Filter.Facet,
+        filter: Filter
+    ) async throws -> [FacetCount] {
         let column = facet == .subsystem ? "subsystem" : "category"
-        return try await dbQueue.read { db in
-            try String.fetchAll(
+        var others = filter
+        others.clearChips(in: facet)
+        let found = try await dbQueue.read { [others] db in
+            // `where` always returns a clause starting with WHERE.
+            let (whereClause, args) = Self.where(filter: others, sessionId: sessionId)
+            return try Row.fetchAll(
                 db,
                 sql: """
-                    SELECT DISTINCT \(column) FROM event
-                    WHERE session_id = ? AND \(column) <> ''
-                    ORDER BY \(column) COLLATE NOCASE
+                    SELECT \(column) AS value, COUNT(*) AS n FROM event
+                    \(whereClause) AND \(column) <> ''
+                    GROUP BY \(column)
+                    ORDER BY n DESC, \(column) COLLATE NOCASE
                 """,
-                arguments: [sessionId]
-            )
+                arguments: StatementArguments(args)
+            ).map { FacetCount(value: $0["value"], count: $0["n"]) }
         }
+        let seen = Set(found.map(\.value))
+        let stale = filter.included(facet).union(filter.excluded(facet))
+            .subtracting(seen)
+            .sorted { $0.lowercased() < $1.lowercased() }
+            .map { FacetCount(value: $0, count: 0) }
+        return found + stale
     }
 
     /// Highest event id in a session, or `nil` when it has none.
