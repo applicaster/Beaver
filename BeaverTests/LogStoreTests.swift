@@ -80,6 +80,26 @@ struct LogStoreTests {
         #expect(full.first?.payloadBytes == expected)
     }
 
+    @Test
+    func regexMatchNavigationUsesEachPatternAndSurvivesABrokenOne() async throws {
+        let store = try LogStore(source: .inMemory)
+        let session = try await store.createSession(source: .live)
+        try await store.appendBulk(["alpha 1", "beta 22", "gamma 333"].enumerated().map { i, m in
+            DecodedEvent(timestampMillis: UInt64(i), level: .info, subsystem: "s", category: "",
+                         message: m, dataJSON: nil, contextJSON: nil)
+        }, to: session.id)
+
+        func hits(_ pattern: String) async throws -> Int {
+            try await store.matchingIds(sessionId: session.id, filter: .none,
+                                        highlight: pattern, isRegex: true).count
+        }
+        #expect(try await hits(#"\d{2,}"#) == 2)
+        #expect(try await hits("^alpha") == 1)       // a new pattern, not the cached one
+        #expect(try await hits("(unclosed") == 0)    // invalid → no match, no throw
+        #expect(try await hits("(unclosed") == 0)    // cached failure behaves the same
+        #expect(try await hits(#"\d{2,}"#) == 2)
+    }
+
     // MARK: - Payload-free feed query
 
     /// The log feed renders level / message / subsystem / category / time
