@@ -8,6 +8,9 @@ import AppKit
 
 struct NetworkView: View {
     @Bindable var vm: NetworkViewModel
+    @Environment(ToastCenter.self) private var toasts
+    /// The entry open in the large detail sheet.
+    @State private var expanded: NetworkEntry?
 
     var body: some View {
         let rows = vm.filtered
@@ -19,12 +22,27 @@ struct NetworkView: View {
             HSplitView {
                 table(rows)
                     .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
-                NetworkDetailView(entry: vm.selected)
+                NetworkDetailView(entry: vm.selected, onExpand: { expanded = $0 })
                     .frame(minWidth: 320, idealWidth: 360, maxHeight: .infinity)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .sheet(item: $expanded) { e in
+            VStack(spacing: 0) {
+                NetworkDetailView(entry: e)
+                Divider()
+                HStack {
+                    Spacer()
+                    Button("Done") { expanded = nil }.keyboardShortcut(.defaultAction)
+                }
+                .padding(12)
+            }
+            .frame(minWidth: 800, minHeight: 600)
+            // The window's toast chip sits behind the sheet.
+            .overlay(alignment: .top) { ToastPresenter() }
+            .environment(toasts)
+        }
     }
 
     // MARK: Filter bar
@@ -76,21 +94,23 @@ struct NetworkView: View {
 
     private func table(_ rows: [NetworkEntry]) -> some View {
         Table(rows, selection: $vm.selection) {
-            TableColumn("Method") { Text($0.method).font(.caption.monospaced().bold()) }
-                .width(min: 50, ideal: 60, max: 80)
-            TableColumn("Status") { e in
-                Text(e.status.map(String.init) ?? "—")
-                    .foregroundStyle(color(e.statusClass)).monospacedDigit()
-            }
-            .width(min: 44, ideal: 50, max: 60)
+            TableColumn("Method") { MethodBadge(method: $0.method) }
+                .width(min: 56, ideal: 64, max: 84)
+            TableColumn("Status") { StatusBadge(entry: $0) }
+                .width(min: 48, ideal: 56, max: 64)
             TableColumn("Host") { Text($0.host).lineLimit(1) }
                 .width(min: 80, ideal: 140)
             TableColumn("Path") { Text($0.path).lineLimit(1).truncationMode(.middle) }
             TableColumn("Duration") { e in
                 Text(e.durationMillis.map { "\($0) ms" } ?? "—")
-                    .foregroundStyle(durationColor(e.durationMillis)).monospacedDigit()
+                    .foregroundStyle(Self.durationColor(e.durationMillis)).monospacedDigit()
             }
             .width(min: 60, ideal: 70, max: 90)
+            TableColumn("Size") { e in
+                Text(Self.size(e))
+                    .foregroundStyle(.secondary).monospacedDigit()
+            }
+            .width(min: 56, ideal: 70, max: 90)
             TableColumn("Time") { Text(Self.time($0.startMillis)).monospacedDigit() }
                 .width(min: 90, ideal: 100, max: 110)
         }
@@ -99,7 +119,8 @@ struct NetworkView: View {
                 Button("Only \(e.host)") { vm.filter.hosts = [e.host] }
                 Button("Hide \(e.host)") { vm.filter.excludedHosts.insert(e.host) }
                 Divider()
-                Button("Copy URL") { copy(e.url) }
+                Button("Copy URL") { toasts.copy(e.url, "Copied URL") }
+                Button("Copy as cURL") { toasts.copy(e.curlCommand, "Copied cURL") }
             }
         }
         .overlay {
@@ -112,19 +133,13 @@ struct NetworkView: View {
         }
     }
 
-    private func color(_ c: NetworkEntry.StatusClass) -> Color {
-        switch c {
-        case .success: .green
-        case .redirect: .blue
-        case .clientError: .orange
-        case .serverError, .failed: .red
-        case .other: .secondary
-        }
-    }
-
-    private func durationColor(_ ms: Int?) -> Color {
+    static func durationColor(_ ms: Int?) -> Color {
         guard let ms else { return .secondary }
         return ms < 100 ? .green : ms < 500 ? .orange : .red
+    }
+
+    static func size(_ e: NetworkEntry) -> String {
+        e.responseBytes.map { ByteCountFormatter.string(fromByteCount: Int64($0), countStyle: .file) } ?? "—"
     }
 
     static func time(_ ms: UInt64) -> String {
@@ -133,84 +148,67 @@ struct NetworkView: View {
     }
 }
 
-func copy(_ text: String) {
-    NSPasteboard.general.clearContents()
-    NSPasteboard.general.setString(text, forType: .string)
+extension ToastCenter {
+    /// Pasteboard write plus the usual green "Copied …" chip.
+    func copy(_ text: String, _ message: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        success(message)
+    }
 }
 
-// MARK: - Detail
+// MARK: - Badges
 
-struct NetworkDetailView: View {
-    let entry: NetworkEntry?
+extension NetworkEntry.StatusClass {
+    var color: Color {
+        switch self {
+        case .success: .green
+        case .redirect: .blue
+        case .clientError: .orange
+        case .serverError, .failed: .red
+        case .other: .gray
+        }
+    }
+}
+
+/// Rounded tinted label, the zapp-support badge look.
+struct Pill: View {
+    let text: String
+    let tint: Color
 
     var body: some View {
-        if let e = entry {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    section("Request") {
-                        row("URL", e.url, copyable: true)
-                        row("Method", e.method)
-                        headers(e.requestHeaders)
-                        bodyView(e.requestBody)
-                    }
-                    section("Response") {
-                        row("Status", [e.status.map(String.init), e.statusText].compactMap { $0 }.joined(separator: " "))
-                        if let err = e.error {
-                            Text(err).foregroundStyle(.red).textSelection(.enabled)
-                        }
-                        headers(e.responseHeaders)
-                        bodyView(e.responseBody)
-                    }
-                    section("Timing") {
-                        row("Started", NetworkView.time(e.startMillis))
-                        row("Duration", e.durationMillis.map { "\($0) ms" } ?? "—")
-                    }
-                }
-                .padding(16)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        } else {
-            ContentUnavailableView("No request selected", systemImage: "network")
+        Text(text)
+            .font(.caption.monospaced().weight(.semibold))
+            .foregroundStyle(tint)
+            .lineLimit(1)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 1)
+            .background(tint.opacity(0.15), in: RoundedRectangle(cornerRadius: 4))
+    }
+}
+
+/// The one place method colours live.
+struct MethodBadge: View {
+    let method: String
+
+    var body: some View { Pill(text: method, tint: tint) }
+
+    private var tint: Color {
+        switch method {
+        case "GET": .blue
+        case "POST": .green
+        case "PUT": .orange
+        case "PATCH": .purple
+        case "DELETE": .red
+        default: .gray
         }
     }
+}
 
-    private func section<C: View>(_ title: String, @ViewBuilder _ content: () -> C) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.headline)
-            content()
-        }
-    }
+struct StatusBadge: View {
+    let entry: NetworkEntry
 
-    private func row(_ k: String, _ v: String, copyable: Bool = false) -> some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text(k).foregroundStyle(.secondary).frame(width: 70, alignment: .leading)
-            Text(v).textSelection(.enabled).font(.body.monospaced())
-            if copyable { Button { copy(v) } label: { Image(systemName: "doc.on.doc") }.buttonStyle(.borderless) }
-        }
-    }
-
-    @ViewBuilder
-    private func headers(_ h: [String: String]) -> some View {
-        if !h.isEmpty {
-            DisclosureGroup("Headers (\(h.count))") {
-                ForEach(h.keys.sorted(), id: \.self) { k in row(k, h[k] ?? "") }
-            }
-        }
-    }
-
-    /// JSON bodies render as a tree (same component as the Log feed detail);
-    /// anything else as selectable monospaced text.
-    @ViewBuilder
-    private func bodyView(_ text: String?) -> some View {
-        if let text, !text.isEmpty {
-            DisclosureGroup("Body") {
-                HStack { Spacer(); Button("Copy") { copy(text) } }
-                if let tree = StorageRecord.parse(text, rootKey: "body"), tree.children != nil {
-                    JSONTreeView(record: tree)
-                } else {
-                    Text(text).font(.body.monospaced()).textSelection(.enabled)
-                }
-            }
-        }
+    var body: some View {
+        Pill(text: entry.status.map(String.init) ?? "—", tint: entry.statusClass.color)
     }
 }
