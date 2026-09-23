@@ -14,6 +14,33 @@ When releasing:
 
 ## [Unreleased]
 
+### Added
+- **Storages: edit and copy-key on every key row.** Hover a key for
+  **copy key / copy value / edit / delete**; edit reuses the Add-key
+  sheet with the key locked. Namespace rows show **＋ / copy** right
+  next to the name, and Add key is now a green **＋** tile beside the
+  Session / Local / Keychain tabs.
+- **Storages: changed values flash.** After a Reload or auto-refresh,
+  keys that appeared or changed get a brief yellow highlight (a
+  collapsed namespace flashes on their behalf).
+- **Storages: spaces are caught before sending.** The device splits
+  commands on spaces, so a space in the key or namespace now blocks
+  Save and a space in the value shows a warning.
+- **Storages: the full-value popover has the row's buttons** — copy key,
+  copy value, edit, delete — plus **copy decoded value** (pretty-printed
+  JSON / decoded text) for JSON-string, Base64 and JWT values.
+- **Storages: layer tabs show an icon** (clock / database / lock), the
+  name in sentence case and a namespace count with a tooltip; empty
+  layers are dimmed.
+
+### Fixed
+- **Storages: the list could stop updating.** After a new snapshot
+  arrived the key list could keep showing old values until the tab was
+  reopened. It now refreshes as soon as the device reports new storage.
+- **Storages: keys stored without a namespace** (the SDK reports them
+  as `{"player-storage": {"undefined": …}}`) now show as a plain key,
+  and edit / delete target the key itself instead of `undefined`.
+
 ### Changed
 - **Storages tab restructured (D30 + D31).** Session / Local /
   Keychain are back as **tabs at the top** (one layer visible at a

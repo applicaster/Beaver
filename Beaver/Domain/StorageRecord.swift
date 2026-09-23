@@ -63,8 +63,39 @@ public struct StorageRecord: Identifiable, Hashable, Sendable {
               let parsed = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any]
         else { return [] }
         return parsed.keys.sorted().map { key in
-            build(key: key, value: parsed[key]!, path: key)
+            build(key: key, value: unwrapUndefined(parsed[key]!), path: key)
         }
+    }
+
+    /// The SDK groups keys by splitting on the namespace separator; a
+    /// key with no separator comes out as `{"player-storage": {"undefined": v}}`.
+    /// It is really a plain top-level key, so show it as one — that also
+    /// makes edit / delete target `player-storage` itself instead of a
+    /// bogus `undefined` key inside it.
+    private static func unwrapUndefined(_ value: Any) -> Any {
+        guard let dict = value as? [String: Any], dict.count == 1,
+              let inner = dict["undefined"] else { return value }
+        return inner
+    }
+
+    /// Ids of the rows the Storages screen shows (top-level records and
+    /// their direct children) that are new or hold a different value in
+    /// `new` than in `old`. A top-level row counts as changed when
+    /// anything inside it did, so a collapsed namespace still signals.
+    public static func changedRowIds(from old: [StorageRecord],
+                                     to new: [StorageRecord]) -> Set<String> {
+        func rows(_ records: [StorageRecord]) -> [String: StorageRecord] {
+            var out: [String: StorageRecord] = [:]
+            for r in records {
+                out[r.id] = r
+                for c in r.children ?? [] { out[c.id] = c }
+            }
+            return out
+        }
+        let before = rows(old)
+        return Set(rows(new).compactMap { id, record in
+            before[id] == record ? nil : id
+        })
     }
 
     /// Build a record from an already-parsed `JSONSerialization` value.

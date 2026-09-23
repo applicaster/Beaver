@@ -127,3 +127,26 @@ struct FilterChipTests {
         #expect(filter.isEmpty == false)
     }
 }
+
+@Suite("StorageRecord — storage screen")
+struct StorageScreenRecordTests {
+
+    @Test("A key with no namespace arrives wrapped in `undefined` and is shown as a plain key")
+    func undefinedWrapperIsUnwrapped() throws {
+        let rows = StorageRecord.parseTopLevel(#"{"player-storage":{"undefined":"{\"a\":1}"},"ns":{"undefined":1,"b":2}}"#)
+        let player = try #require(rows.first { $0.key == "player-storage" })
+        #expect(player.children == nil)
+        #expect(player.valueText == #"{"a":1}"#)
+        // A real namespace that happens to hold an `undefined` key stays a namespace.
+        let ns = try #require(rows.first { $0.key == "ns" })
+        #expect(ns.children?.count == 2)
+    }
+
+    @Test("Only new or changed rows are reported, and their namespace with them")
+    func changedRowIds() {
+        let old = StorageRecord.parseTopLevel(#"{"ns":{"a":"1","b":"2"},"top":"x","same":{"c":"3"}}"#)
+        let new = StorageRecord.parseTopLevel(#"{"ns":{"a":"1","b":"9","d":"4"},"top":"x","same":{"c":"3"},"fresh":"y"}"#)
+        #expect(StorageRecord.changedRowIds(from: old, to: new) == ["ns", "ns.b", "ns.d", "fresh"])
+        #expect(StorageRecord.changedRowIds(from: new, to: new).isEmpty)
+    }
+}
