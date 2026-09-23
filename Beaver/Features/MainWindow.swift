@@ -33,10 +33,12 @@ struct MainWindow: View {
     /// (see `.task(id:)` below).
     @State private var logFeedVM: LogFeedViewModel?
     @State private var storagesVM: StoragesViewModel?
+    @State private var networkVM: NetworkViewModel?
 
     enum Tab: Hashable {
         case logFeed
         case storages
+        case network
         case sessions
     }
 
@@ -99,6 +101,7 @@ struct MainWindow: View {
             guard let sid = env.viewingSessionId else {
                 logFeedVM = nil
                 storagesVM = nil
+                networkVM = nil
                 return
             }
             if logFeedVM?.sessionId != sid {
@@ -118,6 +121,11 @@ struct MainWindow: View {
                 // viewing — the snapshot lands in the store and
                 // both this VM and any future visit pick it up.
                 fresh.requestRefresh(via: env.server)
+            }
+            if networkVM?.sessionId != sid {
+                let fresh = NetworkViewModel(store: env.store, sessionId: sid)
+                await fresh.bootstrap()
+                networkVM = fresh
             }
         }
         .fileImporter(
@@ -144,6 +152,8 @@ struct MainWindow: View {
                 .tag(Tab.logFeed)
             Label("Storages",  systemImage: "externaldrive")
                 .tag(Tab.storages)
+            Label("Network",   systemImage: "network")
+                .tag(Tab.network)
             Label("Sessions",  systemImage: "clock.arrow.circlepath")
                 .tag(Tab.sessions)
         }
@@ -176,6 +186,12 @@ struct MainWindow: View {
                 // session arrives.
                 if let vm = storagesVM {
                     StoragesView(vm: vm)
+                } else {
+                    ConnectionPlaceholder(state: env.serverState)
+                }
+            case .network:
+                if let vm = networkVM {
+                    NetworkView(vm: vm)
                 } else {
                     ConnectionPlaceholder(state: env.serverState)
                 }
@@ -402,6 +418,7 @@ struct MainWindow: View {
         switch selectedTab {
         case .logFeed:  "Log feed"
         case .storages: "Storages"
+        case .network:  "Network"
         case .sessions: "Sessions"
         }
     }
