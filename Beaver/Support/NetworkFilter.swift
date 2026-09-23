@@ -6,24 +6,44 @@
 import Foundation
 
 /// Filter state of the Network tab. Empty sets mean "no restriction";
-/// facets combine with AND.
+/// facets combine with AND, and an excluded value beats an included one.
 public struct NetworkFilter: Equatable, Sendable {
     public var search = ""
+    /// `search` is an ICU regex, matched case-insensitively. An invalid
+    /// pattern matches nothing. Like the Log feed, the toggle on its own
+    /// (empty search) restricts nothing, so it doesn't make the filter
+    /// non-empty.
+    public var searchIsRegex = false
     public var methods: Set<String> = []
+    public var excludedMethods: Set<String> = []
     public var statusClasses: Set<NetworkEntry.StatusClass> = []
+    public var excludedStatusClasses: Set<NetworkEntry.StatusClass> = []
     public var hosts: Set<String> = []
     public var excludedHosts: Set<String> = []
 
     public init() {}
 
-    public var isEmpty: Bool {
-        search.isEmpty && methods.isEmpty && statusClasses.isEmpty
-            && hosts.isEmpty && excludedHosts.isEmpty
+    public var isEmpty: Bool { search.isEmpty && !hasFacets }
+
+    /// Any method, status or host chip, included or excluded.
+    public var hasFacets: Bool {
+        !(methods.isEmpty && excludedMethods.isEmpty && statusClasses.isEmpty
+            && excludedStatusClasses.isEmpty && hosts.isEmpty && excludedHosts.isEmpty)
+    }
+
+    /// Drops every chip and keeps the search.
+    public mutating func clearFacets() {
+        methods = []; excludedMethods = []
+        statusClasses = []; excludedStatusClasses = []
+        hosts = []; excludedHosts = []
     }
 
     public func matches(_ e: NetworkEntry) -> Bool {
+        if excludedMethods.contains(e.method) { return false }
         if !methods.isEmpty, !methods.contains(e.method) { return false }
-        if !statusClasses.isEmpty, !statusClasses.contains(e.statusClass) { return false }
+        let statusClass = e.statusClass
+        if excludedStatusClasses.contains(statusClass) { return false }
+        if !statusClasses.isEmpty, !statusClasses.contains(statusClass) { return false }
         let host = e.host
         if excludedHosts.contains(host) { return false }
         if !hosts.isEmpty, !hosts.contains(host) { return false }
@@ -34,7 +54,14 @@ public struct NetworkFilter: Equatable, Sendable {
             e.requestBody, e.responseBody,
         ] + e.requestHeaders.flatMap { [$0.key, $0.value] }
           + e.responseHeaders.flatMap { [$0.key, $0.value] }
-        return haystack.contains { $0?.localizedCaseInsensitiveContains(search) == true }
+        guard searchIsRegex else {
+            return haystack.contains { $0?.localizedCaseInsensitiveContains(search) == true }
+        }
+        guard let regex = LogStore.compiledRegex("(?i)" + search) else { return false }
+        return haystack.contains { field in
+            guard let field else { return false }
+            return regex.firstMatch(in: field, range: NSRange(field.startIndex..., in: field)) != nil
+        }
     }
 }
 

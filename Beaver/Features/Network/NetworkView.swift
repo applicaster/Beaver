@@ -19,6 +19,7 @@ struct NetworkView: View {
         let rows = vm.filtered
         VStack(spacing: 0) {
             filterBar
+            if vm.filter.hasFacets { chipsBar }
             resultsBar(rows)
             Divider()
             // HSplitView sizes to its ideal height unless every pane and the
@@ -63,19 +64,63 @@ struct NetworkView: View {
 
     private var filterBar: some View {
         HStack(spacing: 8) {
-            TextField("Search URLs, headers, bodies…", text: $vm.filter.search)
-                .textFieldStyle(.roundedBorder)
-                .frame(maxWidth: 280)
+            FilterPillField(systemImage: "magnifyingglass", placeholder: "Search URLs, headers, bodies…",
+                            text: $vm.filter.search, regex: $vm.filter.searchIsRegex)
+                .frame(maxWidth: 320)
             facetMenu("Method", all: vm.allMethods, selected: $vm.filter.methods)
             facetMenu("Status", all: NetworkEntry.StatusClass.allCases,
                       selected: $vm.filter.statusClasses, label: \.displayName)
             facetMenu("Host", all: vm.allHosts, selected: $vm.filter.hosts)
-            if !vm.filter.isEmpty {
-                Button("Clear") { vm.filter = NetworkFilter() }
+            if !vm.filter.isEmpty || vm.filter.searchIsRegex {
+                Button("Clear filters") { vm.filter = NetworkFilter() }
             }
             Spacer()
         }
         .padding(8)
+    }
+
+    // MARK: Chips
+
+    /// What the facets narrow to, each removable on its own. Same look as
+    /// the Log feed's ActiveChipsBar.
+    private var chipsBar: some View {
+        let f = vm.filter
+        let classes = NetworkEntry.StatusClass.allCases
+        return ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                if !(f.methods.isEmpty && f.statusClasses.isEmpty && f.hosts.isEmpty) {
+                    Text("Including:").font(.caption).foregroundStyle(.secondary)
+                    chips(f.methods.sorted(), excluded: false) { vm.filter.methods.remove($0) }
+                    chips(classes.filter(f.statusClasses.contains), title: \.displayName, excluded: false) {
+                        vm.filter.statusClasses.remove($0)
+                    }
+                    chips(f.hosts.sorted(), excluded: false) { vm.filter.hosts.remove($0) }
+                }
+                if !(f.excludedMethods.isEmpty && f.excludedStatusClasses.isEmpty && f.excludedHosts.isEmpty) {
+                    Text("Excluding:").font(.caption).foregroundStyle(.secondary)
+                    chips(f.excludedMethods.sorted(), excluded: true) { vm.filter.excludedMethods.remove($0) }
+                    chips(classes.filter(f.excludedStatusClasses.contains), title: \.displayName, excluded: true) {
+                        vm.filter.excludedStatusClasses.remove($0)
+                    }
+                    chips(f.excludedHosts.sorted(), excluded: true) { vm.filter.excludedHosts.remove($0) }
+                }
+                Button { vm.filter.clearFacets() } label: {
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Clear every chip")
+            }
+            .padding(.horizontal, 12)
+            .padding(.bottom, 6)
+        }
+    }
+
+    private func chips<T: Hashable>(
+        _ values: [T], title: KeyPath<T, String>? = nil, excluded: Bool, remove: @escaping (T) -> Void
+    ) -> some View {
+        ForEach(values, id: \.self) { value in
+            NetworkChip(title: title.map { value[keyPath: $0] } ?? "\(value)", excluded: excluded) { remove(value) }
+        }
     }
 
     // MARK: Results bar
@@ -198,9 +243,12 @@ struct NetworkView: View {
             }
             .width(min: 60, ideal: 70, max: 90)
             TableColumn("Size") { e in
-                Text(Self.size(e))
-                    .foregroundStyle(.secondary).monospacedDigit()
-                    .help(Self.sizeHelp(e))
+                if let bytes = e.responseBytes {
+                    Pill(text: Self.size(e), tint: bytes < 50_000 ? .green : .orange)
+                        .help(Self.sizeHelp(e))
+                } else {
+                    Text("—").foregroundStyle(.secondary)
+                }
             }
             .width(min: 56, ideal: 70, max: 90)
             TableColumn("Time") { Text(Self.time($0.startMillis)).monospacedDigit() }
@@ -212,6 +260,11 @@ struct NetworkView: View {
                 Divider()
                 Button("Only \(e.host)") { vm.filter.hosts = [e.host] }
                 Button("Hide \(e.host)") { vm.filter.excludedHosts.insert(e.host) }
+                Button("Only \(e.method)") { vm.filter.methods = [e.method] }
+                Button("Hide \(e.method)") { vm.filter.excludedMethods.insert(e.method) }
+                let statusClass = e.statusClass
+                Button("Only \(statusClass.displayName)") { vm.filter.statusClasses = [statusClass] }
+                Button("Hide \(statusClass.displayName)") { vm.filter.excludedStatusClasses.insert(statusClass) }
                 Divider()
                 Button("Copy URL") { toasts.copy(e.url, "Copied URL") }
                 Button("Copy as cURL") { toasts.copy(e.curlCommand, "Copied cURL") }
@@ -285,6 +338,36 @@ struct Pill: View {
             .padding(.horizontal, 6)
             .padding(.vertical, 1)
             .background(tint.opacity(0.15), in: RoundedRectangle(cornerRadius: 4))
+    }
+}
+
+/// An active facet value with its own ×. Included values are green;
+/// excluded ones red and struck through.
+private struct NetworkChip: View {
+    let title: String
+    let excluded: Bool
+    let onRemove: () -> Void
+
+    private var tint: Color { excluded ? .red : .green }
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: excluded ? "minus" : "checkmark")
+                .font(.caption2.weight(.bold))
+            Text(title)
+                .strikethrough(excluded)
+                .lineLimit(1)
+            Button(action: onRemove) {
+                Image(systemName: "xmark").font(.caption2.weight(.bold))
+            }
+            .buttonStyle(.plain)
+            .help("Remove \"\(title)\"")
+        }
+        .font(.caption)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
+        .background(Capsule().fill(tint.opacity(0.18)))
+        .foregroundStyle(tint)
     }
 }
 

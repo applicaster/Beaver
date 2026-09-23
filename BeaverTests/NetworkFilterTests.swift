@@ -67,6 +67,57 @@ struct NetworkFilterTests {
     }
 
     @Test
+    func excludedMethodsAndStatusClassesWin() {
+        var f = NetworkFilter(); f.excludedMethods = ["POST"]
+        #expect(!f.isEmpty)
+        #expect(!f.matches(timeout))
+        #expect(f.matches(ok))
+
+        f = NetworkFilter(); f.excludedStatusClasses = [.clientError]
+        #expect(!f.isEmpty)
+        #expect(!f.matches(notFound))
+        #expect(f.matches(ok) && f.matches(timeout))
+
+        // Excluding beats including the same value.
+        f = NetworkFilter(); f.methods = ["GET"]; f.excludedMethods = ["GET"]
+        #expect(!f.matches(ok))
+    }
+
+    @Test
+    func regexSearchMatchesFields() {
+        var f = NetworkFilter(); f.searchIsRegex = true
+        f.search = #"v\d/feed$"#
+        #expect(f.matches(ok))
+        #expect(!f.matches(notFound))
+        f.search = "^x-trace$"        // a header name, any case
+        #expect(f.matches(ok))
+        f.search = "TIMED\\s+OUT"
+        #expect(f.matches(timeout))
+    }
+
+    @Test
+    func regexSearchIsCaseInsensitive() {
+        var f = NetworkFilter(); f.searchIsRegex = true; f.search = "API\\.IO/V1"
+        #expect(f.matches(ok))
+    }
+
+    @Test
+    func invalidRegexMatchesNothing() {
+        var f = NetworkFilter(); f.searchIsRegex = true; f.search = "feed("
+        #expect(![ok, notFound, timeout].contains(where: f.matches))
+        // The same text as a plain search is fine.
+        f.searchIsRegex = false
+        #expect(!f.matches(ok))
+    }
+
+    @Test
+    func regexToggleAloneIsNoRestriction() {
+        var f = NetworkFilter(); f.searchIsRegex = true
+        #expect(f.isEmpty)
+        #expect(f.matches(ok))
+    }
+
+    @Test
     func statsCountSuccessRateAndAverage() {
         let s = NetworkStats([ok, notFound, timeout])
         #expect(s.count == 3)

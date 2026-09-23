@@ -117,7 +117,8 @@ public actor LogStore {
         init(_ regex: NSRegularExpression?) { self.regex = regex }
     }
 
-    private nonisolated static func compiledRegex(_ pattern: String) -> NSRegularExpression? {
+    /// Also used by `NetworkFilter`, which asks for `(?i)` patterns.
+    nonisolated static func compiledRegex(_ pattern: String) -> NSRegularExpression? {
         if let hit = regexCache.object(forKey: pattern as NSString) { return hit.regex }
         let regex = try? NSRegularExpression(pattern: pattern)
         regexCache.setObject(RegexBox(regex), forKey: pattern as NSString)

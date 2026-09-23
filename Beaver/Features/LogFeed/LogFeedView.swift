@@ -245,7 +245,8 @@ private struct LogFeedFilterBar: View {
     }
 }
 
-private struct FilterPillField: View {
+/// Search pill with a `.*` regex toggle. Also used by the Network tab.
+struct FilterPillField: View {
     let systemImage: String
     let placeholder: String
     @Binding var text: String
