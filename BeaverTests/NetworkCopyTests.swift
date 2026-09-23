@@ -252,6 +252,22 @@ struct NetworkCopyTests {
         #expect(!e(#"{"url":"https://api.io/x","responseBody":"x... [TRUNCATED]"}"#).isRequestBodyTruncated)
     }
 
+    // MARK: Compact size
+
+    @Test
+    func compactSize() {
+        #expect(NetworkEntry.compactSize(0) == "0 B")
+        #expect(NetworkEntry.compactSize(237) == "237 B")
+        #expect(NetworkEntry.compactSize(999) == "999 B")
+        #expect(NetworkEntry.compactSize(4_200) == "4.2 KB")
+        #expect(NetworkEntry.compactSize(9_960) == "10 KB")
+        #expect(NetworkEntry.compactSize(42_400) == "42 KB")
+        #expect(NetworkEntry.compactSize(100_015) == "100 KB")
+        #expect(NetworkEntry.compactSize(999_700) == "1.0 MB")
+        #expect(NetworkEntry.compactSize(1_500_000) == "1.5 MB")
+        #expect(NetworkEntry.compactSize(25_000_000) == "25 MB")
+    }
+
     // MARK: Short URL
 
     /// Synthetic stand-in for a long token.

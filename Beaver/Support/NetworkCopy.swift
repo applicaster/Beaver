@@ -61,6 +61,16 @@ extension NetworkEntry {
     public var isResponseBodyTruncated: Bool { responseBody?.hasSuffix(TruncatedJSON.marker) ?? false }
     public var isRequestBodyTruncated: Bool { requestBody?.hasSuffix(TruncatedJSON.marker) ?? false }
 
+    /// `237 B`, `4.2 KB`, `42 KB`, `1.5 MB` — decimal units like
+    /// `ByteCountFormatter`'s `.file` style, so a 100 000-character body
+    /// reads `100 KB`; short enough for the table's Size column.
+    public static func compactSize(_ bytes: Int) -> String {
+        guard bytes >= 1000 else { return "\(bytes) B" }
+        var value = Double(bytes) / 1000, unit = "KB"
+        if value >= 999.5 { value /= 1000; unit = "MB" }
+        return value < 9.95 ? String(format: "%.1f ", value) + unit : "\(Int(value.rounded())) \(unit)"
+    }
+
     public var requestJSON: String {
         var o: [String: Any] = ["method": method, "url": url]
         if !requestHeaders.isEmpty { o["headers"] = requestHeaders }

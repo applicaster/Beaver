@@ -292,7 +292,7 @@ private struct NetworkDetailContent: View {
         if let text, !text.isEmpty {
             // A truncated JSON body that won't repair is still JSON.
             let isJSON = tree != nil || text.first == "{" || text.first == "["
-            let size = ByteCountFormatter.string(fromByteCount: Int64(text.utf8.count), countStyle: .file)
+            let size = NetworkEntry.compactSize(text.utf8.count)
             Subsection(title: "Body · \(isJSON ? "JSON" : "Text") · \(size)", name: name,
                        tree: tree, raw: text, truncated: truncated)
         }
