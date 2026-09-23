@@ -29,6 +29,11 @@ public actor WSServer {
     private var listener: NWListener?
     private var current: NWConnection?
 
+    /// Pending re-bind after the listener failed. `nil` when the server
+    /// is either healthy or deliberately stopped.
+    private var retryTask: Task<Void, Never>?
+    private var retryAttempt = 0
+
     private nonisolated let inboundContinuation: AsyncStream<Data>.Continuation
     private nonisolated let stateContinuation: AsyncStream<State>.Continuation
 
@@ -97,6 +102,11 @@ public actor WSServer {
     }
 
     public func stop() async {
+        // Cancel first: a pending retry would otherwise resurrect the
+        // listener moments after the user asked for it to stop.
+        retryTask?.cancel()
+        retryTask = nil
+        retryAttempt = 0
         current?.cancel()
         current = nil
         listener?.cancel()
@@ -109,14 +119,74 @@ public actor WSServer {
     private func handleListenerState(_ nwState: NWListener.State) {
         switch nwState {
         case .ready:
+            retryAttempt = 0
+            retryTask?.cancel()
+            retryTask = nil
             stateContinuation.yield(.listening)
         case .failed(let error):
-            stateContinuation.yield(.failed(reason: error.localizedDescription))
+            scheduleRebind(reason: Self.describe(error))
         case .cancelled:
             stateContinuation.yield(.stopped)
         default:
             break
         }
+    }
+
+    // MARK: - Recovering a lost listener
+
+    /// A failed `NWListener` never recovers on its own, and the most
+    /// common cause is another Beaver already holding the port — which
+    /// clears the moment that process quits. Without this the app sits
+    /// there alive and silently deaf until someone restarts it.
+    private func scheduleRebind(reason: String) {
+        // Detach before cancelling: the dead listener's `.cancelled`
+        // callback would otherwise overwrite the message below with
+        // a plain "stopped".
+        listener?.stateUpdateHandler = nil
+        listener?.cancel()
+        listener = nil
+
+        // A listener can report `.failed` more than once; one pending
+        // retry is enough.
+        guard retryTask == nil else { return }
+
+        retryAttempt += 1
+        let delay = Self.rebindDelay(attempt: retryAttempt)
+        let seconds = Int(delay.components.seconds)
+        stateContinuation.yield(
+            .failed(reason: "\(reason) — retrying in \(seconds)s")
+        )
+
+        retryTask = Task { [weak self] in
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled else { return }
+            await self?.rebind()
+        }
+    }
+
+    private func rebind() async {
+        retryTask = nil
+        do {
+            try await start()
+        } catch {
+            scheduleRebind(reason: Self.describe(error))
+        }
+    }
+
+    /// 1, 2, 4, 8 then every 15 seconds. A stale socket clears in
+    /// seconds; a second copy of the app may run for hours, and polling
+    /// it every second for that long is pointless.
+    private static func rebindDelay(attempt: Int) -> Duration {
+        .seconds(min(15, 1 << min(max(attempt - 1, 0), 4)))
+    }
+
+    /// `POSIXErrorCode.EADDRINUSE` reads as "Address already in use",
+    /// which doesn't tell a user what to do about it.
+    private static func describe(_ error: Error) -> String {
+        if case .posix(let code)? = error as? NWError, code == .EADDRINUSE {
+            return "Port in use — another Beaver is probably running"
+        }
+        return error.localizedDescription
     }
 
     private func handleNewConnection(_ connection: NWConnection) {
