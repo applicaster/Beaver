@@ -128,13 +128,14 @@ public enum ProtocolDecoder {
     // MARK: - Helpers
 
     private static func reencodeJSON(_ value: Any) -> String? {
-        guard JSONSerialization.isValidJSONObject(value)
-                || value is String || value is NSNumber || value is NSNull
+        // `isValidJSONObject` walks the whole object graph, so it is
+        // asked once and the answer reused — this runs per event, and
+        // the payload is the largest part of one.
+        let isContainer = JSONSerialization.isValidJSONObject(value)
+        guard isContainer || value is String || value is NSNumber || value is NSNull
         else { return nil }
         // Wrap scalars so JSONSerialization accepts them.
-        let wrapped: Any = JSONSerialization.isValidJSONObject(value)
-            ? value
-            : ["v": value]
+        let wrapped: Any = isContainer ? value : ["v": value]
         guard let data = try? JSONSerialization.data(withJSONObject: wrapped) else {
             return nil
         }
