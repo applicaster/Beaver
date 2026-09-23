@@ -1742,7 +1742,15 @@ Network tab, with these choices:
    point-in-time snapshot the user may still want after clearing the
    noisy log feed — network rows are a stream like `event`, so they
    clear with it.
-4. **The Log feed keeps the SDK's duplicate `event`, on purpose.**
+4. **Rows are kept in arrival order, not start time.**
+   `LogStore.networkEntries` reads back `ORDER BY id`, matching the
+   order `NetworkViewModel` builds live by appending each new row as
+   it arrives. Arrival order is completion order, since the SDK sends
+   a `network` frame only once a request finishes (PROTOCOL.md §4.3,
+   "no pairing") — so a live session and a reopened one show requests
+   in the same order, even though two requests can finish out of the
+   order they started in.
+5. **The Log feed keeps the SDK's duplicate `event`, on purpose.**
    quick-brick-xray sends each finished request as both a `network`
    frame and a regular `event` frame (subsystem
    `native_application/network_requests`). Beaver doesn't suppress the

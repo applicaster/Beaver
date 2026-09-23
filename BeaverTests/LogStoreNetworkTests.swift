@@ -16,15 +16,17 @@ struct LogStoreNetworkTests {
     }
 
     @Test
-    func roundTripPreservesEntryAndOrder() async throws {
+    func roundTripPreservesInsertionOrder() async throws {
         let store = try LogStore(source: .inMemory)
         let session = try await store.createSession(source: .live)
 
+        // b is inserted first even though its start time (t=20) is later
+        // than a's (t=10) — rows are kept in arrival order, not start time.
         try await store.recordNetworkEntry(entry("https://b.io", at: 20), sessionId: session.id)
         try await store.recordNetworkEntry(entry("https://a.io", at: 10), sessionId: session.id)
 
         let all = try await store.networkEntries(sessionId: session.id)
-        #expect(all.map(\.url) == ["https://a.io", "https://b.io"])
+        #expect(all.map(\.url) == ["https://b.io", "https://a.io"])
         #expect(all.allSatisfy { $0.id > 0 })
         #expect(all[0].durationMillis == 3)
         #expect(all[0].status == 200)

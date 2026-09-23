@@ -10,11 +10,12 @@ struct NetworkView: View {
     @Bindable var vm: NetworkViewModel
 
     var body: some View {
+        let rows = vm.filtered
         VStack(spacing: 0) {
-            filterBar
+            filterBar(rows)
             Divider()
             HSplitView {
-                table.frame(minWidth: 420)
+                table(rows).frame(minWidth: 420)
                 NetworkDetailView(entry: vm.selected).frame(minWidth: 320)
             }
         }
@@ -23,7 +24,7 @@ struct NetworkView: View {
 
     // MARK: Filter bar
 
-    private var filterBar: some View {
+    private func filterBar(_ rows: [NetworkEntry]) -> some View {
         HStack(spacing: 8) {
             TextField("Search URLs, headers, bodies…", text: $vm.filter.search)
                 .textFieldStyle(.roundedBorder)
@@ -36,13 +37,13 @@ struct NetworkView: View {
                 Button("Clear") { vm.filter = NetworkFilter() }
             }
             Spacer()
-            Text(statsLine).font(.caption).foregroundStyle(.secondary).monospacedDigit()
+            Text(statsLine(rows)).font(.caption).foregroundStyle(.secondary).monospacedDigit()
         }
         .padding(8)
     }
 
-    private var statsLine: String {
-        let s = vm.stats
+    private func statsLine(_ rows: [NetworkEntry]) -> String {
+        let s = NetworkStats(rows)
         var parts = ["\(s.count) of \(vm.entries.count)"]
         if let r = s.successRate { parts.append("\(Int((r * 100).rounded()))% 2xx") }
         if let d = s.averageDurationMillis { parts.append("avg \(d) ms") }
@@ -68,8 +69,8 @@ struct NetworkView: View {
 
     // MARK: Table
 
-    private var table: some View {
-        Table(vm.filtered, selection: $vm.selection) {
+    private func table(_ rows: [NetworkEntry]) -> some View {
+        Table(rows, selection: $vm.selection) {
             TableColumn("Method") { Text($0.method).font(.caption.monospaced().bold()) }
                 .width(min: 50, ideal: 60, max: 80)
             TableColumn("Status") { e in
@@ -97,7 +98,7 @@ struct NetworkView: View {
             }
         }
         .overlay {
-            if vm.filtered.isEmpty {
+            if rows.isEmpty {
                 ContentUnavailableView("No network requests", systemImage: "network",
                                        description: Text(vm.entries.isEmpty
                                            ? "Requests appear here as the app makes them (iOS X-Ray SDK)."

@@ -935,7 +935,7 @@ public actor LogStore {
                     SELECT id, timestamp_ms, payload_json
                     FROM network_entry
                     WHERE session_id = ? AND id > ?
-                    ORDER BY timestamp_ms, id
+                    ORDER BY id
                 """,
                 arguments: [sessionId, afterId]
             ).compactMap { row in

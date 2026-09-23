@@ -20,7 +20,6 @@ final class NetworkViewModel {
     // thousand requests per session; move to SQL / incremental if a
     // session ever gets much bigger.
     var filtered: [NetworkEntry] { filter.isEmpty ? entries : entries.filter(filter.matches) }
-    var stats: NetworkStats { NetworkStats(filtered) }
     var selected: NetworkEntry? { selection.flatMap { id in entries.first { $0.id == id } } }
     var allMethods: [String] { Array(Set(entries.map(\.method))).sorted() }
     var allHosts: [String] { Array(Set(entries.map(\.host))).sorted() }
@@ -28,11 +27,11 @@ final class NetworkViewModel {
     /// See StoragesViewModel.subscription for why this is nonisolated(unsafe).
     private nonisolated(unsafe) var subscription: Task<Void, Never>?
 
-    /// Highest `id` loaded so far. NOT `entries.last?.id`: batches from
-    /// `networkEntries` are ordered by timestamp, not id, so the last
-    /// element of a batch isn't necessarily the max id in it — and the
-    /// very first `loadNew()` from bootstrap can race the subscription's
-    /// own `loadNew()` call. Tracking the max explicitly avoids both.
+    /// Highest `id` loaded so far. NOT `entries.last?.id`: the very
+    /// first `loadNew()` from bootstrap can race the subscription's
+    /// own `loadNew()` call, so the last element appended isn't
+    /// necessarily the max id loaded. Tracking the max explicitly
+    /// avoids that.
     @ObservationIgnored
     private var maxLoadedId: Int64 = 0
 

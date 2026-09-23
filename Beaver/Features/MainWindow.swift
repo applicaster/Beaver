@@ -113,6 +113,7 @@ struct MainWindow: View {
                 // `.storageUpdated` broadcast isn't dropped. See
                 // StoragesViewModel.bootstrap() docstring.
                 await fresh.bootstrap()
+                guard !Task.isCancelled else { return }
                 storagesVM = fresh
                 // Auto-fetch the first storage snapshot so the user
                 // doesn't have to click Reload to see anything.
@@ -125,6 +126,7 @@ struct MainWindow: View {
             if networkVM?.sessionId != sid {
                 let fresh = NetworkViewModel(store: env.store, sessionId: sid)
                 await fresh.bootstrap()
+                guard !Task.isCancelled else { return }
                 networkVM = fresh
             }
         }

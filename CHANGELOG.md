@@ -62,7 +62,7 @@ When releasing:
 ### Added
 - **Network tab.** A new tab lists every HTTP(S) request the SDK
   reports (`network` wire frames, PROTOCOL.md §4.3): method, host +
-  path, status (colour-coded: green 2xx, orange 4xx/5xx, red
+  path, status (colour-coded: green 2xx, orange 4xx, red 5xx/
   failed), and duration. Select a row to see request/response
   headers and the body rendered as a JSON tree. Filter by search
   text, method, status class, or host (include/exclude); the filter
