@@ -202,7 +202,7 @@ private struct JSONTreeRow: View {
         } else if rowIndex.isMultiple(of: 2) {
             Color.clear
         } else {
-            Color.secondary.opacity(0.04)
+            Color.secondary.opacity(0.07)
         }
     }
 
