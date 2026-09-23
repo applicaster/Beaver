@@ -221,16 +221,25 @@ struct MainWindow: View {
             .help("Load events from a JSON file")
         }
         ToolbarItem(placement: .primaryAction) {
-            Button {
-                Task { await prepareExport() }
+            // Two explicit choices rather than a single button whose
+            // meaning depends on a filter set on another screen — you
+            // should be able to tell what a file will hold before
+            // writing it. Storage always goes in either way, so an
+            // exported session is self-contained.
+            Menu {
+                Button("Export filtered") {
+                    Task { await prepareExport(scope: .filtered(env.activeFilter)) }
+                }
+                .disabled(!hasFilter)
+                Button("Export all") {
+                    Task { await prepareExport(scope: .everything) }
+                }
             } label: {
                 ToolbarButtonLabel(systemImage: "square.and.arrow.up",
-                                   title: hasFilter ? "Export (filtered)" : "Export")
+                                   title: "Export")
             }
-            .buttonStyle(.plain)
-            .help(hasFilter
-                  ? "Save only the events matching the current filter to a JSON file. Clear the filter to export everything."
-                  : "Save every event in the current session to a JSON file. Set a filter first to narrow the export.")
+            .menuStyle(.borderlessButton)
+            .help("Save the session to a JSON file — events plus the device storage")
             .disabled(!hasEvents)
         }
         ToolbarItem(placement: .primaryAction) {
@@ -404,24 +413,17 @@ struct MainWindow: View {
         toasts.success("Copied \(url)")
     }
 
-    private func prepareExport() async {
+    private func prepareExport(scope: SessionExport.Scope) async {
         guard let sid = env.viewingSessionId else { return }
-        // Filter-aware export (D26). `env.activeFilter` mirrors the
-        // Log-feed view model's current filter. Passing it through
-        // means clicking Export ships exactly the rows the user is
-        // looking at — narrow the view down with the filter pills
-        // first, then Export emits just those events. Clear the
-        // filter to export the whole session.
-        //
-        // Cap the limit at 1M as defensive bound; sessions beyond
-        // that need a streaming export path anyway.
-        let events = (try? await env.store.events(
+        // "Export filtered" (D26) ships exactly the rows on screen;
+        // "Export all" ignores the filter. Either way `SessionExport`
+        // appends every storage namespace, so both buttons on both
+        // screens write the same shape of file.
+        guard let data = await SessionExport.make(
+            store: env.store,
             sessionId: sid,
-            filter: env.activeFilter,
-            offset: 0,
-            limit: 1_000_000
-        )) ?? []
-        let data = (try? EventJSON.encode(events)) ?? Data()
+            scope: scope
+        ) else { return }
         exportDocument = JSONExportDocument(data: data)
         showingExporter = true
     }
@@ -434,8 +436,9 @@ struct MainWindow: View {
             defer { if didStart { url.stopAccessingSecurityScopedResource() } }
 
             guard let data = try? Data(contentsOf: url) else { return }
-            let events = (try? EventJSON.decode(data)) ?? []
-            guard !events.isEmpty else { return }
+            let imported = (try? EventJSON.decodeExport(data)) ?? .init()
+            // A storage-only file is still worth opening.
+            guard !imported.events.isEmpty || !imported.storage.isEmpty else { return }
 
             // Create a new "imported" session per D7 — don't destroy the
             // current live session.
@@ -443,7 +446,14 @@ struct MainWindow: View {
                 source: .imported,
                 clientLabel: url.deletingPathExtension().lastPathComponent
             ) else { return }
-            try? await env.store.appendBulk(events, to: session.id)
+            try? await env.store.appendBulk(imported.events, to: session.id)
+            for (namespace, json) in imported.storage {
+                try? await env.store.recordStorageSnapshot(
+                    sessionId: session.id,
+                    namespace: namespace,
+                    dataJSON: json
+                )
+            }
             // Switch the LogFeed to the newly imported session.
             env.viewingSessionId = session.id
         }

@@ -441,24 +441,6 @@ final class StoragesViewModel {
         recomputeMatches()
     }
 
-    /// Produce the file payload for the Export button. Includes all
-    /// three namespaces in one JSON document, matching the wire
-    /// format the SDK sends in a `storage` message — so the file is
-    /// re-ingestible later if we add storage import.
-    func exportAllAsJSON(pretty: Bool = true) -> Data? {
-        var combined: [String: Any] = [:]
-        for ns in StorageSnapshot.Namespace.allCases {
-            if let snap = snapshots[ns],
-               let data = snap.dataJSON.data(using: .utf8),
-               let parsed = try? JSONSerialization.jsonObject(with: data, options: []) {
-                combined[ns.wireKey] = parsed
-            }
-        }
-        guard !combined.isEmpty else { return nil }
-        let options: JSONSerialization.WritingOptions = pretty ? [.prettyPrinted, .sortedKeys] : [.sortedKeys]
-        return try? JSONSerialization.data(withJSONObject: combined, options: options)
-    }
-
     // MARK: - Loading
 
     private func reloadFromStore() async {

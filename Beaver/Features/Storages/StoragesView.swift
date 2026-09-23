@@ -100,7 +100,7 @@ private struct StoragesContent: View {
 
             StoragesTopBar(
                 vm: vm,
-                onExport: { Task { await prepareExport() } },
+                onExport: { scope in Task { await prepareExport(scope: scope) } },
                 onAddKey: {
                     pendingAdd = AddKeyContext(
                         namespace: vm.selectedNamespace,
@@ -235,8 +235,12 @@ private struct StoragesContent: View {
         return "loggernext_storages_\(formatter.string(from: Date()))"
     }
 
-    private func prepareExport() async {
-        guard let data = vm.exportAllAsJSON() else { return }
+    private func prepareExport(scope: SessionExport.Scope) async {
+        guard let data = await SessionExport.make(
+            store: env.store,
+            sessionId: vm.sessionId,
+            scope: scope
+        ) else { return }
         exportDocument = JSONExportDocument(data: data)
         showingExporter = true
     }
@@ -247,7 +251,7 @@ private struct StoragesContent: View {
 private struct StoragesTopBar: View {
     @Bindable var vm: StoragesViewModel
     @Environment(AppEnvironment.self) private var env
-    let onExport: () -> Void
+    let onExport: (SessionExport.Scope) -> Void
     let onAddKey: () -> Void
 
     var body: some View {
@@ -310,13 +314,25 @@ private struct StoragesTopBar: View {
                       : "Reconnect the device to refresh")
             }
 
-            Button {
-                onExport()
+            // Same two choices as the Log feed's Export, writing the
+            // same file. "Filtered" refers to the log filter — storage
+            // is never partial, since there is nothing on this screen
+            // for a partial snapshot to correspond to.
+            Menu {
+                Button("Export filtered") {
+                    onExport(.filtered(env.activeFilter))
+                }
+                .disabled(env.activeFilter.isEmpty)
+                Button("Export all") {
+                    onExport(.everything)
+                }
             } label: {
                 Label("Export", systemImage: "square.and.arrow.up")
             }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
             .disabled(!vm.hasAnyData)
-            .help("Save all three namespaces to a JSON file")
+            .help("Save the session to a JSON file — the device storage plus its events")
 
             Button(role: .destructive) {
                 vm.clearLocalCache()
