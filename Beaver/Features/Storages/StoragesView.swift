@@ -89,12 +89,15 @@ private struct StoragesContent: View {
         let parentKey: String?
         var editKey: String? = nil
         var editValue: String = ""
-        var id: String { "\(namespace.rawValue):\(parentKey ?? "<root>"):\(editKey ?? "")" }
+        /// Set when editing one field of a stored JSON value.
+        var field: StorageFieldTarget? = nil
+        var id: String { "\(namespace.rawValue):\(parentKey ?? "<root>"):\(editKey ?? ""):\(field?.id ?? "")" }
     }
 
     @State private var pendingDelete: DeleteTarget?
     @State private var pendingInnerDelete: InnerDeleteTarget?
     @State private var pendingAdd: AddKeyContext?
+    @State private var pendingFieldDelete: StorageFieldTarget?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -148,6 +151,20 @@ private struct StoragesContent: View {
                         editKey: key,
                         editValue: value
                     )
+                },
+                onField: { target, delete in
+                    vm.selectedNamespace = target.namespace
+                    if delete {
+                        pendingFieldDelete = target
+                    } else {
+                        pendingAdd = AddKeyContext(
+                            namespace: target.namespace,
+                            parentKey: target.parentKey,
+                            editKey: target.key,
+                            editValue: target.field.valueText ?? "",
+                            field: target
+                        )
+                    }
                 }
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -203,6 +220,29 @@ private struct StoragesContent: View {
         } message: { _ in
             Text("Removes one key inside the namespace on the device. The namespace itself stays.")
         }
+        // Field delete: the SDK can't remove part of a value, so this
+        // rewrites the whole stored JSON without the field.
+        .confirmationDialog(
+            "Delete \"\(pendingFieldDelete?.fieldLabel ?? "")\" from \(pendingFieldDelete?.key ?? "")?",
+            isPresented: Binding(
+                get: { pendingFieldDelete != nil },
+                set: { if !$0 { pendingFieldDelete = nil } }
+            ),
+            presenting: pendingFieldDelete
+        ) { target in
+            Button("Delete", role: .destructive) {
+                pendingFieldDelete = nil
+                guard let json = JSONFieldPatch.removing(target.field.id, in: target.storedJSON) else { return }
+                vm.setValue(in: target.namespace, parent: target.parentKey,
+                            key: target.key, value: json, via: env.server)
+            }
+            Button("Cancel", role: .cancel) { pendingFieldDelete = nil }
+        } message: { target in
+            let json = JSONFieldPatch.removing(target.field.id, in: target.storedJSON) ?? ""
+            Text(json.contains(where: \.isWhitespace)
+                 ? "Rewrites \(target.key) on the device without this field. The new value contains spaces, which the device splits on — it may store only part of it."
+                 : "Rewrites \(target.key) on the device without this field.")
+        }
         // Add-key sheet. Identifiable trigger so the same view powers
         // both top-bar "+ Add key" (parentKey = nil → top-level) and
         // per-row "+ inside namespace" (parentKey = the namespace).
@@ -212,6 +252,10 @@ private struct StoragesContent: View {
                 initialParent: ctx.parentKey,
                 editKey: ctx.editKey,
                 initialValue: ctx.editValue,
+                fieldLabel: ctx.field?.fieldLabel,
+                transform: ctx.field.map { f in
+                    { JSONFieldPatch.setting(f.field.id, to: $0, in: f.storedJSON) }
+                },
                 onSave: { namespace, parent, key, value in
                     vm.setValue(
                         in: namespace,
@@ -536,6 +580,53 @@ private struct MatchNavigatorCompact: View {
 
 // MARK: - Outline (single layer, expandable namespaces)
 
+/// One field inside a stored JSON value, picked in the decoded tree.
+/// `field` is the tree node; the placeholder passed when building the
+/// editor is swapped for the clicked node in `storageFieldEditor`.
+struct StorageFieldTarget: Identifiable {
+    let namespace: StorageSnapshot.Namespace
+    /// The storage subscope (nil = top level), as for a key edit.
+    let parentKey: String?
+    let key: String
+    /// The key's stored text — the document being patched.
+    let storedJSON: String
+    var field: StorageRecord
+
+    var id: String { "\(namespace.rawValue):\(parentKey ?? ""):\(key):\(field.id)" }
+
+    /// `volume`, `list[2].on` — the tree id minus its leading dot.
+    var fieldLabel: String {
+        field.id.hasPrefix(".") ? String(field.id.dropFirst()) : field.id
+    }
+}
+
+/// (field, true = delete / false = edit)
+private typealias StorageFieldAction = (_ target: StorageFieldTarget, _ delete: Bool) -> Void
+
+/// Field edit / delete for a decoded value, or nil when it can't be
+/// written back: only plain JSON text is patched — Base64 would need
+/// re-encoding and a JWT's signature would break. Past sessions get nil.
+@MainActor
+private func storageFieldEditor(
+    decode: LeafDecode?,
+    target: StorageFieldTarget,
+    live: Bool,
+    connected: Bool,
+    onField: @escaping StorageFieldAction
+) -> StorageFieldEditor? {
+    guard live, decode?.kinds == [.json] else { return nil }
+    func at(_ node: StorageRecord) -> StorageFieldTarget {
+        var t = target
+        t.field = node
+        return t
+    }
+    return StorageFieldEditor(
+        canWrite: connected,
+        edit: { onField(at($0), false) },
+        delete: { onField(at($0), true) }
+    )
+}
+
 /// (layer, parent subscope or nil for top level, key, current raw value)
 private typealias StorageEditAction = (
     _ namespace: StorageSnapshot.Namespace,
@@ -565,6 +656,7 @@ private struct StoragesOutline: View {
         _ childKey: String
     ) -> Void
     let onEdit: StorageEditAction
+    let onField: StorageFieldAction
 
     private var records: [StorageRecord] {
         vm.filteredRecords(in: vm.selectedNamespace)
@@ -588,7 +680,8 @@ private struct StoragesOutline: View {
                                 onDelete: onDelete,
                                 onAddInside: onAddInside,
                                 onDeleteInside: onDeleteInside,
-                                onEdit: onEdit
+                                onEdit: onEdit,
+                                onField: onField
                             )
                             .id(record.id)
                             Divider().opacity(0.3)
@@ -733,6 +826,7 @@ private struct NamespaceRow: View {
         _ childKey: String
     ) -> Void
     let onEdit: StorageEditAction
+    let onField: StorageFieldAction
 
     @Environment(AppEnvironment.self) private var env
     @Environment(ToastCenter.self) private var toasts
@@ -806,7 +900,8 @@ private struct NamespaceRow: View {
                         },
                         onEdit: { value in
                             onEdit(namespace, record.key, child.key, value)
-                        }
+                        },
+                        onField: onField
                     )
                     .id(child.id)  // Discover scrolls to it
                 }
@@ -835,6 +930,13 @@ private struct NamespaceRow: View {
                     VStack(alignment: .leading, spacing: 2) {
                         JSONTreeList(children: children)
                     }
+                    .environment(\.storageFieldEditor, storageFieldEditor(
+                        decode: decode,
+                        target: StorageFieldTarget(namespace: namespace, parentKey: nil,
+                                                   key: record.key, storedJSON: record.valueText ?? "",
+                                                   field: tree),
+                        live: isViewingLiveSession, connected: isClientConnected, onField: onField
+                    ))
                 } else if let text = decode.text {
                     RawValueBlock(text: text)
                 }
@@ -1019,7 +1121,7 @@ private struct NamespaceRow: View {
                 }
             }
         }
-        .opacity(isHovered ? 1 : 0.55)
+        .opacity(isHovered ? 1 : 0)
     }
 
     @ViewBuilder
@@ -1102,6 +1204,7 @@ private struct InnerKeyRow: View {
     let onDelete: () -> Void
     /// Receives the raw stored string to prefill the edit sheet.
     let onEdit: (String) -> Void
+    let onField: StorageFieldAction
 
     @State private var isHovered = false
     @State private var showingFullValue = false
@@ -1337,6 +1440,13 @@ private struct InnerKeyRow: View {
                 }
                 if let tree = decode.tree {
                     subtree(of: tree)
+                        .environment(\.storageFieldEditor, storageFieldEditor(
+                            decode: decode,
+                            target: StorageFieldTarget(namespace: namespace, parentKey: parent.key,
+                                                       key: child.key, storedJSON: rawText,
+                                                       field: tree),
+                            live: isLiveSession, connected: isClientConnected, onField: onField
+                        ))
                 } else if let text = decode.text {
                     RawValueBlock(text: text)
                 }
@@ -1705,6 +1815,16 @@ private struct AddStorageKeySheet: View {
     let initialParent: String?
     /// Non-nil = edit mode: this key is fixed, only the value changes.
     let editKey: String?
+    /// Field mode: the value typed is one field's; `transform` turns it
+    /// into the whole stored value (nil = can't).
+    let fieldLabel: String?
+    let transform: ((String) -> String?)?
+
+    /// What actually gets sent as the key's value.
+    private var outgoingValue: String? {
+        guard let transform else { return value }
+        return transform(value)
+    }
     let onSave: (StorageSnapshot.Namespace, String?, String, String) -> Void
     let onCancel: () -> Void
 
@@ -1715,11 +1835,15 @@ private struct AddStorageKeySheet: View {
          initialParent: String?,
          editKey: String? = nil,
          initialValue: String = "",
+         fieldLabel: String? = nil,
+         transform: ((String) -> String?)? = nil,
          onSave: @escaping (StorageSnapshot.Namespace, String?, String, String) -> Void,
          onCancel: @escaping () -> Void) {
         self.initialNamespace = initialNamespace
         self.initialParent = initialParent
         self.editKey = editKey
+        self.fieldLabel = fieldLabel
+        self.transform = transform
         self.onSave = onSave
         self.onCancel = onCancel
         _key = State(initialValue: editKey ?? "")
@@ -1738,11 +1862,11 @@ private struct AddStorageKeySheet: View {
     }
     private var keyHasSpaces: Bool { Self.hasInnerSpace(key) }
     private var parentHasSpaces: Bool { Self.hasInnerSpace(manualParent) }
-    private var valueHasSpaces: Bool { value.contains(where: \.isWhitespace) }
+    private var valueHasSpaces: Bool { (outgoingValue ?? value).contains(where: \.isWhitespace) }
 
     private var canSave: Bool {
         !key.trimmingCharacters(in: .whitespaces).isEmpty
-            && !keyHasSpaces && !parentHasSpaces
+            && !keyHasSpaces && !parentHasSpaces && outgoingValue != nil
     }
 
     private var isInside: Bool { initialParent != nil }
@@ -1757,7 +1881,7 @@ private struct AddStorageKeySheet: View {
     }
 
     private var commandPreview: String {
-        var cmd = "storage.\(initialNamespace.wireKey).set \(key) \(value)"
+        var cmd = "storage.\(initialNamespace.wireKey).set \(key) \(outgoingValue ?? "…")"
         if let parent = resolvedParent {
             cmd += " \(parent)"
         }
@@ -1781,7 +1905,7 @@ private struct AddStorageKeySheet: View {
             // Removes the segmented picker since the user already
             // chose a layer by clicking its tab on the main screen.
             HStack(spacing: 10) {
-                Text(editKey.map { "Edit \($0)" }
+                Text(editKey.map { key in fieldLabel.map { "Edit \(key) › \($0)" } ?? "Edit \(key)" }
                      ?? (isInside ? "Add key inside \(initialParent!)" : "Add key"))
                     .font(.headline)
                 Spacer()
@@ -1868,7 +1992,7 @@ private struct AddStorageKeySheet: View {
                         initialNamespace,
                         resolvedParent,
                         key.trimmingCharacters(in: .whitespaces),
-                        value
+                        outgoingValue ?? value
                     )
                 }
                 .keyboardShortcut(.defaultAction)

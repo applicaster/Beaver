@@ -142,6 +142,14 @@ struct StorageScreenRecordTests {
         #expect(ns.children?.count == 2)
     }
 
+    @Test("JSON 0 and 1 stay numbers; only true/false are booleans")
+    func numbersAreNotBooleans() throws {
+        let rows = StorageRecord.parseTopLevel(#"{"one":1,"zero":0,"yes":true}"#)
+        #expect(rows.first { $0.key == "one" }?.kind == .number("1"))
+        #expect(rows.first { $0.key == "zero" }?.kind == .number("0"))
+        #expect(rows.first { $0.key == "yes" }?.kind == .bool(true))
+    }
+
     @Test("Only new or changed rows are reported, and their namespace with them")
     func changedRowIds() {
         let old = StorageRecord.parseTopLevel(#"{"ns":{"a":"1","b":"2"},"top":"x","same":{"c":"3"}}"#)

@@ -29,6 +29,14 @@ When releasing:
 - **Storages: the full-value popover has the row's buttons** — copy key,
   copy value, edit, delete — plus **copy decoded value** (pretty-printed
   JSON / decoded text) for JSON-string, Base64 and JWT values.
+- **Storages: edit and delete fields inside a JSON value.** Expand a
+  value stored as JSON text (e.g. `player-storage` →
+  `{"volume":0.8}`) and hover a field for **edit / delete**. The SDK
+  can only replace a whole key, so Beaver rewrites the JSON with that
+  one change and sends it back; the sheet previews the full command.
+  Base64 and JWT values stay read-only (re-encoding / a broken
+  signature). Row buttons on top-level keys now appear on hover, like
+  inner rows.
 - **Storages: layer tabs show an icon** (clock / database / lock), the
   name in sentence case and a namespace count with a tooltip; empty
   layers are dimmed.
@@ -37,6 +45,8 @@ When releasing:
 - **Storages: the list could stop updating.** After a new snapshot
   arrived the key list could keep showing old values until the tab was
   reopened. It now refreshes as soon as the device reports new storage.
+- **JSON `0` and `1` showed as `false` / `true`** in every tree (storage,
+  log detail). They are numbers again; only real booleans read as such.
 - **Storages: keys stored without a namespace** (the SDK reports them
   as `{"player-storage": {"undefined": …}}`) now show as a plain key,
   and edit / delete target the key itself instead of `undefined`.

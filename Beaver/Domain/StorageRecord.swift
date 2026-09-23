@@ -133,7 +133,10 @@ public struct StorageRecord: Identifiable, Hashable, Sendable {
             )
         case is NSNull:
             return StorageRecord(id: path, key: key, valueText: "null", kind: .null)
-        case let b as Bool:
+        // Checked by CF type, not `as Bool`: that cast also succeeds for
+        // an NSNumber 0 or 1, which turned a JSON `1` into `true`.
+        case let n as NSNumber where CFGetTypeID(n) == CFBooleanGetTypeID():
+            let b = n.boolValue
             return StorageRecord(
                 id: path,
                 key: key,
@@ -141,8 +144,6 @@ public struct StorageRecord: Identifiable, Hashable, Sendable {
                 kind: .bool(b)
             )
         case let n as NSNumber:
-            // NSNumber bridges from Bool too, but Bool was matched
-            // above so anything here is a real number.
             return StorageRecord(
                 id: path,
                 key: key,
