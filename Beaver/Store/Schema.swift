@@ -209,6 +209,23 @@ enum Schema {
             """)
         }
 
+        migrator.registerMigration("v6_network_bookmark") { db in
+            // Bookmarked network requests. Unlike event_bookmark, entry_id
+            // is a real FK, so clearing or deleting a session's requests
+            // takes their bookmarks with them.
+            try db.execute(sql: """
+                CREATE TABLE network_bookmark (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id  INTEGER NOT NULL REFERENCES session(id) ON DELETE CASCADE,
+                    entry_id    INTEGER NOT NULL UNIQUE REFERENCES network_entry(id) ON DELETE CASCADE,
+                    created_at  INTEGER NOT NULL
+                );
+            """)
+            try db.execute(sql: """
+                CREATE INDEX idx_network_bookmark_session ON network_bookmark(session_id);
+            """)
+        }
+
         return migrator
     }
 }

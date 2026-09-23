@@ -30,6 +30,7 @@ public actor LogStore {
         case bookmarksChanged(sessionId: Int64)
         case savedFiltersChanged
         case networkAppended(sessionId: Int64)
+        case networkBookmarksChanged(sessionId: Int64)
     }
 
     public enum Source {
@@ -945,6 +946,48 @@ public actor LogStore {
                     fallbackMillis: UInt64(row["timestamp_ms"] as Int)
                 )
             }
+        }
+    }
+
+    /// Cheap existence check for the toolbar: a session can hold
+    /// requests and no events (an imported HAR).
+    public func networkEntryCount(sessionId: Int64) async throws -> Int {
+        try await dbQueue.read { db in
+            try Int.fetchOne(
+                db,
+                sql: "SELECT COUNT(*) FROM network_entry WHERE session_id = ?",
+                arguments: [sessionId]
+            ) ?? 0
+        }
+    }
+
+    // MARK: - Network bookmarks
+
+    /// Bookmarks `entryId`, or removes its bookmark. Returns `true` when
+    /// the entry is bookmarked afterwards.
+    @discardableResult
+    public func toggleNetworkBookmark(entryId: Int64, sessionId: Int64) async throws -> Bool {
+        let now = Int(Date().timeIntervalSince1970 * 1000)
+        let isOn = try await dbQueue.write { db -> Bool in
+            try db.execute(sql: "DELETE FROM network_bookmark WHERE entry_id = ?", arguments: [entryId])
+            guard db.changesCount == 0 else { return false }
+            try db.execute(
+                sql: "INSERT INTO network_bookmark (session_id, entry_id, created_at) VALUES (?, ?, ?)",
+                arguments: [sessionId, entryId, now]
+            )
+            return true
+        }
+        broadcast(.networkBookmarksChanged(sessionId: sessionId))
+        return isOn
+    }
+
+    public func networkBookmarkIds(sessionId: Int64) async throws -> Set<Int64> {
+        try await dbQueue.read { db in
+            Set(try Int64.fetchAll(
+                db,
+                sql: "SELECT entry_id FROM network_bookmark WHERE session_id = ?",
+                arguments: [sessionId]
+            ))
         }
     }
 

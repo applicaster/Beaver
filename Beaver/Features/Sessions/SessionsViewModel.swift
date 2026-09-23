@@ -77,7 +77,8 @@ final class SessionsViewModel {
                     // For now, do nothing — counts are recomputed on
                     // next `reload()`.
                     break
-                case .storageUpdated, .bookmarksChanged, .savedFiltersChanged, .networkAppended:
+                case .storageUpdated, .bookmarksChanged, .savedFiltersChanged, .networkAppended,
+                     .networkBookmarksChanged:
                     break
                 }
             }
