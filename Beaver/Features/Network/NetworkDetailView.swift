@@ -41,9 +41,9 @@ private struct ParsedEntry {
         id = e.id
         query = e.queryJSON.flatMap { StorageRecord.parse($0, rootKey: "query") }
         requestHeaders = Self.headers(e.requestHeaders)
-        requestBody = Self.body(e.requestBody)
+        requestBody = Self.body(e.requestBody, truncated: e.isRequestBodyTruncated)
         responseHeaders = Self.headers(e.responseHeaders)
-        responseBody = Self.body(e.responseBody)
+        responseBody = Self.body(e.responseBody, truncated: e.isResponseBodyTruncated)
     }
 
     private static func headers(_ h: [String: String]) -> StorageRecord? {
@@ -51,9 +51,11 @@ private struct ParsedEntry {
     }
 
     /// A tree only for a non-empty object or array; anything else shows as
-    /// text. A truncated JSON body fails to parse and lands here too.
-    private static func body(_ text: String?) -> StorageRecord? {
-        guard let text, !text.isEmpty, let tree = StorageRecord.parse(text, rootKey: "body"),
+    /// text. A truncated JSON body gets a tree of its complete values.
+    private static func body(_ text: String?, truncated: Bool) -> StorageRecord? {
+        guard let text, !text.isEmpty,
+              let tree = StorageRecord.parse(text, rootKey: "body")
+                ?? (truncated ? TruncatedJSON.repair(text).flatMap { StorageRecord.parse($0, rootKey: "body") } : nil),
               tree.children != nil else { return nil }
         return tree
     }
@@ -252,7 +254,8 @@ private struct NetworkDetailContent: View {
                                tree: trees.query, raw: entry.rawQuery ?? "")
                 }
                 headers(entry.requestHeaders, tree: trees.requestHeaders, name: "request headers")
-                bodySection(entry.requestBody, tree: trees.requestBody, truncated: false, name: "request body")
+                bodySection(entry.requestBody, tree: trees.requestBody,
+                            truncated: entry.isRequestBodyTruncated, name: "request body")
             }
             group("Response", copy: { toasts.copy(entry.responseJSON, "Copied response") }) {
                 headers(entry.responseHeaders, tree: trees.responseHeaders, name: "response headers")
@@ -287,7 +290,7 @@ private struct NetworkDetailContent: View {
     @ViewBuilder
     private func bodySection(_ text: String?, tree: StorageRecord?, truncated: Bool, name: String) -> some View {
         if let text, !text.isEmpty {
-            // A truncated JSON body doesn't parse, but it is still JSON.
+            // A truncated JSON body that won't repair is still JSON.
             let isJSON = tree != nil || text.first == "{" || text.first == "["
             let size = ByteCountFormatter.string(fromByteCount: Int64(text.utf8.count), countStyle: .file)
             Subsection(title: "Body · \(isJSON ? "JSON" : "Text") · \(size)", name: name,
@@ -307,7 +310,8 @@ private struct NetworkDetailContent: View {
 
 /// One part of a request or response: a caption header with a hover copy
 /// icon and a Parsed / Raw toggle, then the tree or the raw text. Without
-/// a tree (text or truncated body, no headers) only the raw form shows.
+/// a tree (text, an unrepairable truncated body, no headers) only the raw
+/// form shows.
 private struct Subsection: View {
     let title: String
     /// For the tooltip and toast, e.g. "request headers".
@@ -348,6 +352,11 @@ private struct Subsection: View {
             }
             if let tree, showsTree {
                 JSONTreeView(record: tree, expandsRoot: true)
+                if truncated {
+                    Text("Partial — the SDK cut this body at 100 000 characters")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             } else if raw.isEmpty {
                 Text("None").font(.caption).foregroundStyle(.secondary)
             } else {

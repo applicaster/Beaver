@@ -58,7 +58,8 @@ extension NetworkEntry {
     }
 
     /// The SDK caps bodies at 100 000 characters and marks the cut.
-    public var isResponseBodyTruncated: Bool { responseBody?.hasSuffix("... [TRUNCATED]") ?? false }
+    public var isResponseBodyTruncated: Bool { responseBody?.hasSuffix(TruncatedJSON.marker) ?? false }
+    public var isRequestBodyTruncated: Bool { requestBody?.hasSuffix(TruncatedJSON.marker) ?? false }
 
     public var requestJSON: String {
         var o: [String: Any] = ["method": method, "url": url]

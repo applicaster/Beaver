@@ -245,6 +245,13 @@ struct NetworkCopyTests {
         #expect(!e(#"{"url":"https://api.io/x"}"#).isResponseBodyTruncated)
     }
 
+    @Test
+    func truncatedRequestBodyIsDetected() {
+        #expect(e(#"{"url":"https://api.io/x","requestBody":"{\"a\":1... [TRUNCATED]"}"#).isRequestBodyTruncated)
+        #expect(!e(#"{"url":"https://api.io/x","requestBody":"{\"a\":1}"}"#).isRequestBodyTruncated)
+        #expect(!e(#"{"url":"https://api.io/x","responseBody":"x... [TRUNCATED]"}"#).isRequestBodyTruncated)
+    }
+
     // MARK: Short URL
 
     /// Synthetic stand-in for a long token.
