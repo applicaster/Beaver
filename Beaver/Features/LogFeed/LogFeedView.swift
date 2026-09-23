@@ -747,22 +747,24 @@ private struct FacetMenuButton: View {
         .help("Show only, or hide, events by \(title.lowercased())")
         .popover(isPresented: $isPopoverShown, arrowEdge: .bottom) {
             let values = vm.values(for: facet)
-            Group {
-                // ponytail: scrolls past 14 rows; a search field if values get into the hundreds.
-                if values.count > 14 {
-                    ScrollView { rows(values) }.frame(height: 420)
-                } else {
-                    rows(values)
+            // Always a ScrollView (capped at 420pt) rather than switching
+            // to a plain stack under 14 rows: an open popover's view
+            // identity would otherwise flip as live counts cross that
+            // threshold, and it visibly jumps.
+            ScrollView { rows(values) }
+                .frame(maxHeight: 420)
+                .onAppear {
+                    vm.facetPopoverOpen += 1
+                    vm.refreshFacets()
                 }
-            }
-            .onAppear { vm.refreshFacets() }
+                .onDisappear { vm.facetPopoverOpen -= 1 }
         }
     }
 
     private func rows(_ values: [FacetCount]) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             if values.isEmpty {
-                Text("No values yet")
+                Text(vm.unfilteredCount == 0 ? "No values yet" : "No matching values")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 10)
@@ -806,24 +808,26 @@ private struct FacetMenuRow: View {
     @State private var isHovered = false
 
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: icon)
-                .font(.caption)
-                .foregroundStyle(tint)
-                .frame(width: 14)
-            Text(text)
-                .font(.caption.weight(.semibold))
-                .lineLimit(1)
-            Spacer(minLength: 12)
-            Text("\(count)")
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
+        Button(action: onTap) {
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                    .font(.caption)
+                    .foregroundStyle(tint)
+                    .frame(width: 14)
+                Text(text)
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+                Spacer(minLength: 12)
+                Text("\(count)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(isHovered ? Color.accentColor.opacity(0.12) : Color.clear)
+            .contentShape(Rectangle())
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(isHovered ? Color.accentColor.opacity(0.12) : Color.clear)
-        .contentShape(Rectangle())
-        .onTapGesture { onTap() }
+        .buttonStyle(.plain)
         .onHover { isHovered = $0 }
         .help(value)
     }

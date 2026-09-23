@@ -105,6 +105,20 @@ final class LogFeedViewModel {
 
     private(set) var availableCategories: [FacetCount] = []
 
+    /// Number of facet popovers (subsystem/category) currently visible.
+    /// `reloadFacetValues` runs a full `GROUP BY` scan per facet on the
+    /// store's single serial `DatabaseQueue`, competing with page reloads
+    /// and ingestion writes — worth paying only while a popover is
+    /// actually showing the result. Set from the popover's
+    /// `onAppear`/`onDisappear` in `LogFeedView`.
+    var facetPopoverOpen: Int = 0 {
+        didSet {
+            guard facetPopoverOpen == 0, oldValue != 0 else { return }
+            facetTask?.cancel()
+            facetTask = nil
+        }
+    }
+
     /// Visual-only highlight term. Doesn't filter rows — just paints
     /// matches in the visible page. Matches the old Logger's "Search &
     /// highlight" field, separate from the include/exclude filters.
@@ -194,6 +208,13 @@ final class LogFeedViewModel {
     /// call to completion once the actor gets to it (D16).
     private var reloadGeneration: UInt64 = 0
 
+    /// Bumped by every `scheduleFacetRefresh`. Mirrors `reloadGeneration`:
+    /// `Task.cancel()` alone doesn't stop a facet task already past its
+    /// debounce sleep from running its SQL to completion, so
+    /// `reloadFacetValues` checks this before issuing the queries, not
+    /// just after.
+    private var facetGeneration: UInt64 = 0
+
     private let reloadDebounceInterval: Duration = .milliseconds(150)
 
     // MARK: - Init
@@ -205,7 +226,9 @@ final class LogFeedViewModel {
         Task { await self.subscribeToChanges() }
         Task { await self.reloadBookmarks() }
         Task { await self.reloadSavedFilters() }
-        Task { await self.reloadFacetValues() }
+        // Facet counts are loaded lazily, on first popover open —
+        // see `facetPopoverOpen`. No point computing them here when
+        // nothing may ever show them.
     }
 
     deinit {
@@ -421,7 +444,7 @@ final class LogFeedViewModel {
                 case .cleared(let sid) where sid == self.sessionId:
                     self.unseenCount = 0
                     self.requestReload()
-                    await self.reloadFacetValues()
+                    if self.facetPopoverOpen > 0 { await self.reloadFacetValues() }
                 case .bookmarksChanged(let sid) where sid == self.sessionId:
                     await self.reloadBookmarks()
                 case .savedFiltersChanged:
@@ -610,27 +633,42 @@ final class LogFeedViewModel {
     }
 
     /// Debounced: typing and fast streams coalesce into one GROUP BY pass
-    /// per facet, run off the main actor by the store.
+    /// per facet, run off the main actor by the store. No-op while no
+    /// popover is open to show the result — see `facetPopoverOpen`.
     private func scheduleFacetRefresh(after delay: Duration) {
+        guard facetPopoverOpen > 0 else { return }
         facetTask?.cancel()
+        facetGeneration &+= 1
+        let generation = facetGeneration
         facetTask = Task { [weak self] in
             try? await Task.sleep(for: delay)
             guard !Task.isCancelled, let self else { return }
             self.facetTask = nil
-            await self.reloadFacetValues()
+            await self.reloadFacetValues(generation: generation)
         }
     }
 
-    private func reloadFacetValues() async {
+    /// `generation` is `nil` for the one direct, unthrottled caller
+    /// (`.cleared`) — that always runs. A generation from
+    /// `scheduleFacetRefresh` is checked *before* the queries are issued,
+    /// not just after: a cancelled `Task` still runs its SQL to
+    /// completion once GRDB's queue gets to it (same reasoning as
+    /// `isCurrentReload`).
+    private func reloadFacetValues(generation: UInt64? = nil) async {
+        if let generation, generation != facetGeneration { return }
         let filter = self.filter
         do {
             async let subsystems = store.facetCounts(sessionId: sessionId, facet: .subsystem, filter: filter)
             async let categories = store.facetCounts(sessionId: sessionId, facet: .category, filter: filter)
             let (newSubsystems, newCategories) = try await (subsystems, categories)
-            // A newer filter has its own refresh queued; don't flash stale counts.
+            // A newer filter or a newer scheduled refresh has its own
+            // pass queued; don't flash stale counts.
+            if let generation, generation != facetGeneration { return }
             guard filter == self.filter else { return }
             availableSubsystems = newSubsystems
             availableCategories = newCategories
+        } catch is CancellationError {
+            // Expected when a newer refresh supersedes this one.
         } catch {
             print("reloadFacetValues: \(error)")
         }

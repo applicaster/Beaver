@@ -108,6 +108,32 @@ struct LogStoreFacetTests {
         #expect(counts(categories) == ["y": 1, "z": 1])
     }
 
+    @Test("Regex search narrows both facets")
+    func regexSearchNarrowsBoth() async throws {
+        let (store, sid) = try await seeded()
+        let filter = Filter(search: "^need", searchIsRegex: true)
+        let subsystems = try await store.facetCounts(sessionId: sid, facet: .subsystem, filter: filter)
+        let categories = try await store.facetCounts(sessionId: sid, facet: .category, filter: filter)
+        #expect(counts(subsystems) == ["A": 1, "B": 1])
+        #expect(counts(categories) == ["y": 1, "z": 1])
+    }
+
+    @Test("Clear watermark (hiddenThroughEventId) narrows counts")
+    func hiddenThroughEventIdNarrowsCounts() async throws {
+        let (store, sid) = try await seeded()
+        // Rows are appended in order, so `events` (ordered by timestamp,
+        // then id) lands in the same order as `seeded()`'s array.
+        let all = try await store.events(sessionId: sid, filter: .none, offset: 0, limit: 100)
+        // Hide through row 3 ("A","y",.info,"hello"); rows 4-6 remain:
+        // ("A","y",.info,"needle"), ("B","z",.info,"needle"), ("B","",.info,"hello").
+        let watermark = all[3].id
+        let filter = Filter(hiddenThroughEventId: watermark)
+        let subsystems = try await store.facetCounts(sessionId: sid, facet: .subsystem, filter: filter)
+        let categories = try await store.facetCounts(sessionId: sid, facet: .category, filter: filter)
+        #expect(counts(subsystems) == ["A": 1, "B": 2])
+        #expect(counts(categories) == ["y": 1, "z": 1])
+    }
+
     @Test("A stale selection shows with count 0, sorted last")
     func staleSelectionKeptAtZero() async throws {
         let (store, sid) = try await seeded()

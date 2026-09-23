@@ -441,12 +441,12 @@ private struct FacetPicker<Value: Hashable & Sendable>: View {
         .help("Show one \(title.lowercased()) only")
         .popover(isPresented: $isShown, arrowEdge: .bottom) {
             let opts = options()
-            // ponytail: scrolls past 14 rows; a search field if hosts get into the hundreds.
-            if opts.count > 14 {
-                ScrollView { rows(opts) }.frame(height: 420)
-            } else {
-                rows(opts)
-            }
+            // Always a ScrollView (capped at 420pt) rather than switching
+            // to a plain stack under 14 rows: an open popover's view
+            // identity would otherwise flip as live counts cross that
+            // threshold, and it visibly jumps.
+            ScrollView { rows(opts) }
+                .frame(maxHeight: 420)
         }
     }
 
@@ -480,26 +480,28 @@ private struct FacetPickerRow: View {
     @State private var isHovered = false
 
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "checkmark")
-                .font(.caption.weight(.semibold))
-                .opacity(isSelected ? 1 : 0)
-                .frame(width: 14)
-            Text(text)
-                .font(.caption.weight(.semibold))
-                .lineLimit(1)
-            Spacer(minLength: 12)
-            Text("\(count)")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
+        Button(action: onTap) {
+            HStack(spacing: 8) {
+                Image(systemName: "checkmark")
+                    .font(.caption.weight(.semibold))
+                    .opacity(isSelected ? 1 : 0)
+                    .frame(width: 14)
+                Text(text)
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+                Spacer(minLength: 12)
+                Text("\(count)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+            .foregroundStyle(tint)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(isHovered ? tint.opacity(0.12) : Color.clear)
+            .contentShape(Rectangle())
         }
-        .foregroundStyle(tint)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(isHovered ? tint.opacity(0.12) : Color.clear)
-        .contentShape(Rectangle())
-        .onTapGesture { onTap() }
+        .buttonStyle(.plain)
         .onHover { isHovered = $0 }
     }
 }
