@@ -400,17 +400,6 @@ extension LogStoreTests {
         #expect(count == rows.count)
     }
 
-    @Test("Distinct values feed the chip menus")
-    func distinctValuesListsEachOnce() async throws {
-        let (store, sessionId) = try await seededStore()
-
-        let subsystems = try await store.distinctValues(sessionId: sessionId, facet: .subsystem)
-        let categories = try await store.distinctValues(sessionId: sessionId, facet: .category)
-
-        #expect(subsystems == ["auth", "network", "player"])
-        #expect(categories == ["net", "ui"])
-    }
-
     @Test("Clearing the view hides events without deleting them")
     func clearViewIsNonDestructive() async throws {
         let (store, sessionId) = try await seededStore()

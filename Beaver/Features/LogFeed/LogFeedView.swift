@@ -702,45 +702,28 @@ private struct LevelChip: View {
 
 // MARK: - Subsystem / category chips
 
-/// Browse every value a session has produced and set its state. The
-/// badge counts how many constraints this facet currently carries.
+/// Browse the values that can still match the rest of the filter, with
+/// counts, and set their state. Picking subsystems narrows the category
+/// list and vice versa. A popover rather than a `Menu` so counts can sit
+/// right-aligned and several values can be cycled without it closing.
+/// The badge counts how many constraints this facet currently carries.
 private struct FacetMenuButton: View {
     @Bindable var vm: LogFeedViewModel
     let facet: Filter.Facet
     let title: String
+    @State private var isPopoverShown = false
+    @State private var isHovered = false
 
-    /// Ordered by what the menu shows — the store sorts full values,
-    /// which with the bundle id dropped would read out of order.
-    private var values: [String] {
-        vm.values(for: facet).sorted {
-            facet.displayName($0).localizedCaseInsensitiveCompare(facet.displayName($1)) == .orderedAscending
-        }
-    }
     private var activeCount: Int { vm.filter.chipCount(for: facet) }
 
     var body: some View {
-        Menu {
-            if values.isEmpty {
-                Text("No values yet")
-            } else {
-                ForEach(values, id: \.self) { value in
-                    Button {
-                        vm.cycleChip(value, in: facet)
-                    } label: {
-                        Label(facet.displayName(value),
-                              systemImage: icon(for: vm.filter.state(of: value, in: facet)))
-                    }
-                }
-            }
-            if activeCount > 0 {
-                Divider()
-                Button("Clear \(title) filters") {
-                    vm.filter.clearChips(in: facet)
-                }
-            }
+        let color = activeCount > 0 ? Color.accentColor : .secondary
+        Button {
+            isPopoverShown.toggle()
         } label: {
-            HStack(spacing: 4) {
+            HStack(spacing: 6) {
                 Text(title)
+                    .font(.caption.weight(.bold))
                 if activeCount > 0 {
                     Text("\(activeCount)")
                         .font(.caption2.weight(.bold).monospacedDigit())
@@ -749,19 +732,116 @@ private struct FacetMenuButton: View {
                         .background(Capsule().fill(Color.accentColor))
                         .foregroundStyle(.white)
                 }
+                Image(systemName: "chevron.down")
+                    .font(.caption2.weight(.semibold))
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(Capsule().fill(isHovered ? color.opacity(0.12) : Color(.controlBackgroundColor)))
+            .overlay(Capsule().strokeBorder(color.opacity(activeCount > 0 ? 0.5 : 0.3), lineWidth: 1))
+            .animation(.easeInOut(duration: 0.12), value: isHovered)
+        }
+        .buttonStyle(.plain)
+        .fixedSize()
+        .onHover { isHovered = $0 }
+        .help("Show only, or hide, events by \(title.lowercased())")
+        .popover(isPresented: $isPopoverShown, arrowEdge: .bottom) {
+            let values = vm.values(for: facet)
+            Group {
+                // ponytail: scrolls past 14 rows; a search field if values get into the hundreds.
+                if values.count > 14 {
+                    ScrollView { rows(values) }.frame(height: 420)
+                } else {
+                    rows(values)
+                }
+            }
+            .onAppear { vm.refreshFacets() }
+        }
+    }
+
+    private func rows(_ values: [FacetCount]) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if values.isEmpty {
+                Text("No values yet")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+            }
+            ForEach(values, id: \.value) { option in
+                FacetMenuRow(
+                    value: option.value,
+                    text: facet.displayName(option.value),
+                    count: option.count,
+                    state: vm.filter.state(of: option.value, in: facet)
+                ) {
+                    vm.cycleChip(option.value, in: facet)
+                }
+            }
+            if activeCount > 0 {
+                Divider().padding(.vertical, 2)
+                Button("Clear \(title) filters") {
+                    vm.filter.clearChips(in: facet)
+                }
+                .buttonStyle(.plain)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
             }
         }
-        .menuStyle(.button)
-        .fixedSize()
-        .help("Show only, or hide, events by \(title.lowercased())")
+        .padding(.vertical, 4)
+        .frame(minWidth: 220)
+    }
+}
+
+/// One value in a facet popover: tri-state icon, name, right-aligned count.
+/// Clicking cycles include → exclude → off and leaves the popover open.
+private struct FacetMenuRow: View {
+    let value: String
+    let text: String
+    let count: Int
+    let state: Filter.ChipState
+    let onTap: () -> Void
+    @State private var isHovered = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.caption)
+                .foregroundStyle(tint)
+                .frame(width: 14)
+            Text(text)
+                .font(.caption.weight(.semibold))
+                .lineLimit(1)
+            Spacer(minLength: 12)
+            Text("\(count)")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(isHovered ? Color.accentColor.opacity(0.12) : Color.clear)
+        .contentShape(Rectangle())
+        .onTapGesture { onTap() }
+        .onHover { isHovered = $0 }
+        .help(value)
     }
 
     /// Mirrors the web's ✅ / ⛔ / nothing.
-    private func icon(for state: Filter.ChipState) -> String {
+    private var icon: String {
         switch state {
         case .off:     "circle"
         case .include: "checkmark.circle.fill"
         case .exclude: "minus.circle.fill"
+        }
+    }
+
+    private var tint: Color {
+        switch state {
+        case .off:     .secondary
+        case .include: .green
+        case .exclude: .red
         }
     }
 }

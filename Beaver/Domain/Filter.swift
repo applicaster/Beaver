@@ -159,6 +159,17 @@ public struct Filter: Equatable, Hashable, Sendable {
     }
 }
 
+/// One chip-menu entry: a subsystem or category and how many events match.
+public struct FacetCount: Hashable, Sendable {
+    public let value: String
+    public let count: Int
+
+    public init(value: String, count: Int) {
+        self.value = value
+        self.count = count
+    }
+}
+
 private extension String {
     var nonEmpty: String? { isEmpty ? nil : self }
 }
