@@ -232,9 +232,27 @@ final class StoragesViewModel {
 
     /// Top-level records in a given namespace, sorted alphabetically
     /// by key (NOCASE).
+    /// Parsed snapshots, rebuilt only when a snapshot actually changes.
+    ///
+    /// `records(in:)` runs several times per SwiftUI body evaluation —
+    /// from `groupNames`, `filteredRecords` and `recordCount` for each
+    /// tab — and used to re-parse the entire JSON every single time.
+    /// Besides the wasted work, that handed SwiftUI a brand-new value
+    /// graph on every render, so nothing could be diffed and the
+    /// attribute graph was rebuilt from scratch each pass.
+    ///
+    /// `@ObservationIgnored` matters: filling this from inside a getter
+    /// that runs during `body` would otherwise notify observers and
+    /// re-enter the render it was called from.
+    @ObservationIgnored
+    private var parsedCache: [StorageSnapshot.Namespace: [StorageRecord]] = [:]
+
     func records(in namespace: StorageSnapshot.Namespace) -> [StorageRecord] {
+        if let cached = parsedCache[namespace] { return cached }
         guard let snap = snapshots[namespace] else { return [] }
-        return StorageRecord.parseTopLevel(snap.dataJSON)
+        let parsed = StorageRecord.parseTopLevel(snap.dataJSON)
+        parsedCache[namespace] = parsed
+        return parsed
     }
 
     /// Records in a namespace narrowed by `searchTerm`. A top-level
@@ -416,6 +434,7 @@ final class StoragesViewModel {
     /// Wipe local snapshot cache. Doesn't touch the device's actual
     /// storage; just clears what Beaver is displaying.
     func clearLocalCache() {
+        parsedCache.removeAll()
         snapshots.removeAll()
         expandedRecordKeys.removeAll()
         rawModeKeys.removeAll()
@@ -452,6 +471,7 @@ final class StoragesViewModel {
                 fresh[ns] = snap
             }
         }
+        parsedCache.removeAll()
         snapshots = fresh
         recomputeMatches()
     }

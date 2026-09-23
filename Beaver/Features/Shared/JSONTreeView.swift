@@ -27,6 +27,16 @@ struct JSONTreeView: View {
 
     private static let indentStep: CGFloat = 14
 
+    /// How many levels open by themselves.
+    ///
+    /// The rows are a plain `VStack`, so everything expanded is
+    /// materialised at once — and each row costs a `body` evaluation
+    /// plus its attribute-graph nodes. A payload nested five deep used
+    /// to render in full on sight; a profile caught exactly that,
+    /// thousands of `JSONTreeRow.body` frames stacked inside each other.
+    /// Two levels show the shape; the rest is one click away.
+    private static let autoExpandDepth = 2
+
     private var hasChildren: Bool {
         !(record.children?.isEmpty ?? true)
     }
@@ -48,7 +58,7 @@ struct JSONTreeView: View {
     }
 
     private var isExpanded: Bool {
-        expandedOverride ?? hasChildren
+        expandedOverride ?? (hasChildren && depth < Self.autoExpandDepth)
     }
 
     var body: some View {
@@ -91,7 +101,10 @@ struct JSONTreeView: View {
             }
             if let tree = decoded.tree, let children = tree.children, !children.isEmpty {
                 ForEach(children) { child in
-                    JSONTreeView(record: child)
+                    // Carries the depth on: a decoded subtree is deeper
+                    // than its parent, not a fresh tree, so it neither
+                    // restarts the auto-expand budget nor the indent.
+                    JSONTreeView(record: child, depth: depth + 1)
                 }
             } else if let text = decoded.text {
                 Text(text)
@@ -116,7 +129,6 @@ struct JSONTreeView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help(isExpanded ? "Collapse" : "Expand")
         } else {
             // Reserve the gutter so leaf and container rows align.
             Color.clear.frame(width: 10, height: 10)
@@ -138,7 +150,6 @@ private struct JSONTreeRow: View {
                 kind: record.kind
             )
             .textSelection(.enabled)
-            .help(record.key)
             .lineLimit(1)
             .truncationMode(.tail)
 
