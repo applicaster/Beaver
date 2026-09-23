@@ -197,6 +197,17 @@ struct NetworkFilterTests {
     }
 
     @Test
+    func regexSearchNarrowsFacets() {
+        var f = NetworkFilter(); f.searchIsRegex = true; f.search = "auth\\.io|cdn\\.io"
+        #expect(f.availableMethods(in: mixed) == [FacetOption(value: "GET", count: 1),
+                                                    FacetOption(value: "POST", count: 1)])
+        #expect(f.availableStatuses(in: mixed) == [FacetOption(value: .code(400), count: 1),
+                                                     FacetOption(value: .noStatus, count: 1)])
+        #expect(f.availableHosts(in: mixed) == [FacetOption(value: "auth.io", count: 1),
+                                                  FacetOption(value: "cdn.io", count: 1)])
+    }
+
+    @Test
     func exclusionsNarrowFacets() {
         var f = NetworkFilter(); f.excludedHosts = ["api.io"]
         #expect(f.availableStatuses(in: mixed).map(\.value) == [.code(400), .noStatus])

@@ -48,9 +48,19 @@ public enum HARExport {
         // HAR writes 0 for "no response".
         if let status = (response["status"] as? NSNumber)?.intValue, status > 0 { o["status"] = status }
         if let text = response["statusText"] as? String, !text.isEmpty { o["statusText"] = text }
-        if let body = (request["postData"] as? [String: Any])?["text"] as? String { o["requestBody"] = body }
-        if let content = response["content"] as? [String: Any], let body = content["text"] as? String {
-            o["responseBody"] = bodyText(body, encoding: content["encoding"] as? String)
+        if let postData = request["postData"] as? [String: Any] {
+            if let body = postData["text"] as? String { o["requestBody"] = body }
+            if let bodySize = (request["bodySize"] as? NSNumber)?.intValue, bodySize > 0 {
+                o["requestBodySize"] = bodySize
+            }
+        }
+        if let content = response["content"] as? [String: Any] {
+            if let body = content["text"] as? String {
+                o["responseBody"] = bodyText(body, encoding: content["encoding"] as? String)
+            }
+            if let size = (content["size"] as? NSNumber)?.intValue, size > 0 {
+                o["responseBodySize"] = size
+            }
         }
         if let error = h["_error"] as? String { o["error"] = error }
 

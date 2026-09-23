@@ -247,13 +247,13 @@ private struct NetworkDetailContent: View {
     /// Content-Length, or a real-size warning when only a truncated
     /// capture is known.
     private static func sizeText(_ size: NetworkEntry.BodySize) -> (text: String, isWarning: Bool) {
-        let grouped = size.bytes.formatted()
+        let grouped = size.bytes.formatted(.number.locale(Locale(identifier: "en_US")))
         let compact = NetworkEntry.compactSize(size.bytes)
         switch size.source {
         case .reported:
             return ("\(grouped) bytes (\(compact))", false)
-        case .contentLength(let compressed):
-            let note = compressed ? ", gzip-compressed on the wire" : ""
+        case .contentLength(let encoding):
+            let note = encoding.map { ", \($0)-compressed on the wire" } ?? ""
             return ("\(grouped) bytes (\(compact)) · Content-Length\(note)", false)
         case .captured where size.isLowerBound:
             return ("≥ \(grouped) bytes (\(compact)+) · real size unknown — the SDK cut the body", true)
@@ -340,8 +340,10 @@ private struct NetworkDetailContent: View {
         if let text, !text.isEmpty {
             // A truncated JSON body that won't repair is still JSON.
             let isJSON = tree != nil || text.first == "{" || text.first == "["
-            let size = reportedSize.map { "\(NetworkEntry.compactSize($0)) (showing first 100 KB)" }
-                ?? NetworkEntry.compactSize(text.utf8.count)
+            let sizeBytes = reportedSize ?? text.utf8.count
+            let size = truncated
+                ? "\(NetworkEntry.compactSize(sizeBytes)) (showing first 100 KB)"
+                : NetworkEntry.compactSize(sizeBytes)
             Subsection(title: "Body · \(isJSON ? "JSON" : "Text") · \(size)", name: name,
                        tree: tree, raw: text, truncated: truncated)
         }

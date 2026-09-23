@@ -72,16 +72,15 @@ struct HARExportTests {
         let truncated = e(#"""
         {"url":"https://api.io/x","status":200,"responseBodySize":312450,"responseBody":"short... [TRUNCATED]"}
         """#)
-        let content = try #require((try firstEntry(truncated)["response"] as? [String: Any])?["content"] as? [String: Any])
+        let truncatedResponse = try #require(try firstEntry(truncated)["response"] as? [String: Any])
+        let content = try #require(truncatedResponse["content"] as? [String: Any])
         #expect(content["size"] as? Int == 312450)
         // bodySize (unrelated field) still reflects what was actually captured.
-        #expect(try firstEntry(truncated)["response"] as? [String: Any] != nil)
-        let response = try #require(try firstEntry(truncated)["response"] as? [String: Any])
-        #expect(response["bodySize"] as? Int == truncated.responseBody?.utf8.count)
+        #expect(truncatedResponse["bodySize"] as? Int == truncated.responseBody?.utf8.count)
 
         // No reported size: falls back to the captured body's length.
-        #expect(try firstEntry(get)["response"] as? [String: Any] != nil)
-        let getContent = try #require((try firstEntry(get)["response"] as? [String: Any])?["content"] as? [String: Any])
+        let getResponse = try #require(try firstEntry(get)["response"] as? [String: Any])
+        let getContent = try #require(getResponse["content"] as? [String: Any])
         #expect(getContent["size"] as? Int == get.responseBody?.utf8.count)
     }
 
@@ -160,6 +159,19 @@ struct HARExportTests {
         #expect(back[0].responseBody == #"{"ok":true}"#)
         #expect(back[0].requestBody == nil)
         #expect(back[2].error == "offline")
+    }
+
+    @Test
+    func encodeThenDecodeRoundTripsTheReportedBodySizes() throws {
+        let entry = e(#"""
+        {"url":"https://api.io/x","method":"POST","status":200,
+         "requestBodySize":9,"requestBody":"{\"u\":\"a\"}",
+         "responseBodySize":312450,"responseBody":"short... [TRUNCATED]"}
+        """#)
+        let data = try HARExport.encode([entry], creatorVersion: "1")
+        let back = try #require(HARExport.decode(data).first)
+        #expect(back.requestBodySize == 9)
+        #expect(back.responseBodySize == 312450)
     }
 
     @Test

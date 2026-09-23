@@ -284,7 +284,7 @@ struct NetworkCopyTests {
         let entry = e(#"""
         {"url":"https://api.io/x","responseBody":"short... [TRUNCATED]","responseHeaders":{"Content-Length":"8197"}}
         """#)
-        #expect(entry.responseSize == NetworkEntry.BodySize(bytes: 8197, source: .contentLength(compressed: false), isLowerBound: false))
+        #expect(entry.responseSize == NetworkEntry.BodySize(bytes: 8197, source: .contentLength(encoding: nil), isLowerBound: false))
     }
 
     @Test
@@ -296,21 +296,38 @@ struct NetworkCopyTests {
     }
 
     @Test
-    func responseSizeContentEncodingGzipMeansCompressed() {
+    func responseSizeContentEncodingGzipIsReported() {
         let entry = e(#"""
         {"url":"https://api.io/x","responseBody":"short... [TRUNCATED]",
          "responseHeaders":{"Content-Length":"8197","Content-Encoding":"gzip"}}
         """#)
-        #expect(entry.responseSize?.source == .contentLength(compressed: true))
+        #expect(entry.responseSize?.source == .contentLength(encoding: "gzip"))
     }
 
     @Test
-    func responseSizeContentEncodingIdentityMeansNotCompressed() {
+    func responseSizeContentEncodingBrIsReported() {
+        let entry = e(#"""
+        {"url":"https://api.io/x","responseBody":"short... [TRUNCATED]",
+         "responseHeaders":{"Content-Length":"8197","Content-Encoding":"br"}}
+        """#)
+        #expect(entry.responseSize?.source == .contentLength(encoding: "br"))
+    }
+
+    @Test
+    func responseSizeContentEncodingIdentityMeansNoEncoding() {
         let entry = e(#"""
         {"url":"https://api.io/x","responseBody":"short... [TRUNCATED]",
          "responseHeaders":{"Content-Length":"8197","Content-Encoding":"identity"}}
         """#)
-        #expect(entry.responseSize?.source == .contentLength(compressed: false))
+        #expect(entry.responseSize?.source == .contentLength(encoding: nil))
+    }
+
+    @Test
+    func responseSizeWithoutContentEncodingHeaderMeansNoEncoding() {
+        let entry = e(#"""
+        {"url":"https://api.io/x","responseBody":"short... [TRUNCATED]","responseHeaders":{"Content-Length":"8197"}}
+        """#)
+        #expect(entry.responseSize?.source == .contentLength(encoding: nil))
     }
 
     @Test

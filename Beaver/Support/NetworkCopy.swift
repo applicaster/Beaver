@@ -105,7 +105,9 @@ extension NetworkEntry {
     public struct BodySize: Equatable, Sendable {
         public enum Source: Equatable, Sendable {
             case reported
-            case contentLength(compressed: Bool)
+            /// The `Content-Encoding` value (lowercased, trimmed); `nil`
+            /// when absent or `identity`.
+            case contentLength(encoding: String?)
             case captured
         }
         public let bytes: Int
@@ -118,9 +120,10 @@ extension NetworkEntry {
     public var responseSize: BodySize? {
         if let responseBodySize { return BodySize(bytes: responseBodySize, source: .reported, isLowerBound: false) }
         if isResponseBodyTruncated, let bytes = Self.contentLength(responseHeaders) {
-            let compressed = Self.header("Content-Encoding", in: responseHeaders)
-                .map { $0.lowercased() != "identity" } ?? false
-            return BodySize(bytes: bytes, source: .contentLength(compressed: compressed), isLowerBound: false)
+            let normalized = Self.header("Content-Encoding", in: responseHeaders)?
+                .trimmingCharacters(in: .whitespaces).lowercased()
+            let encoding = normalized == "identity" ? nil : normalized
+            return BodySize(bytes: bytes, source: .contentLength(encoding: encoding), isLowerBound: false)
         }
         guard let responseBytes else { return nil }
         return BodySize(bytes: responseBytes, source: .captured, isLowerBound: isResponseBodyTruncated)

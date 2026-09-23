@@ -68,14 +68,13 @@ struct NetworkView: View {
             FilterPillField(systemImage: "magnifyingglass", placeholder: "Search URLs, headers, bodies…",
                             text: $vm.filter.search, regex: $vm.filter.searchIsRegex)
                 .frame(maxWidth: 320)
-            let base = vm.base
             FacetPicker(title: "Method", selection: $vm.filter.method,
-                        options: vm.filter.availableMethods(in: base), tint: MethodBadge.tint)
+                        options: { vm.filter.availableMethods(in: vm.base) }, tint: MethodBadge.tint)
             FacetPicker(title: "Status", selection: $vm.filter.status,
-                        options: vm.filter.availableStatuses(in: base),
+                        options: { vm.filter.availableStatuses(in: vm.base) },
                         label: NetworkEntry.statusLabel(for:), tint: \.color)
             FacetPicker(title: "Host", selection: $vm.filter.host,
-                        options: vm.filter.availableHosts(in: base))
+                        options: { vm.filter.availableHosts(in: vm.base) })
             if !vm.filter.isEmpty || vm.filter.searchIsRegex {
                 Button("Clear filters") { vm.filter = NetworkFilter() }
             }
@@ -259,7 +258,8 @@ struct NetworkView: View {
                 Button("Only \(e.method)") { vm.filter.method = e.method }
                 Button("Hide \(e.method)") { vm.filter.excludedMethods.insert(e.method) }
                 let pick = NetworkFilter.StatusPick(e.status)
-                Button("Only \(NetworkEntry.statusLabel(for: pick))") { vm.filter.status = pick }
+                let statusMenuLabel = pick == .noStatus ? "entries without status" : NetworkEntry.statusLabel(for: pick)
+                Button("Only \(statusMenuLabel)") { vm.filter.status = pick }
                 let statusClass = e.statusClass
                 Button("Hide \(statusClass.displayName)") { vm.filter.excludedStatusClasses.insert(statusClass) }
                 Divider()
@@ -409,7 +409,10 @@ struct StatusBadge: View {
 private struct FacetPicker<Value: Hashable & Sendable>: View {
     let title: String
     @Binding var selection: Value?
-    let options: [FacetOption<Value>]
+    /// Evaluated only while the popover is open — options can be an O(n)
+    /// scan over the entries, so a hidden pill shouldn't pay for it on
+    /// every render.
+    let options: () -> [FacetOption<Value>]
     var label: (Value) -> String = { "\($0)" }
     var tint: (Value) -> Color = { _ in .accentColor }
     @State private var isShown = false
@@ -437,16 +440,17 @@ private struct FacetPicker<Value: Hashable & Sendable>: View {
         .onHover { isHovered = $0 }
         .help("Show one \(title.lowercased()) only")
         .popover(isPresented: $isShown, arrowEdge: .bottom) {
+            let opts = options()
             // ponytail: scrolls past 14 rows; a search field if hosts get into the hundreds.
-            if options.count > 14 {
-                ScrollView { rows }.frame(height: 420)
+            if opts.count > 14 {
+                ScrollView { rows(opts) }.frame(height: 420)
             } else {
-                rows
+                rows(opts)
             }
         }
     }
 
-    private var rows: some View {
+    private func rows(_ options: [FacetOption<Value>]) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             FacetPickerRow(text: "All", count: options.reduce(0) { $0 + $1.count },
                            isSelected: selection == nil, tint: .primary) { pick(nil) }
