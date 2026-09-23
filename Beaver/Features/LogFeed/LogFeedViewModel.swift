@@ -261,6 +261,28 @@ final class LogFeedViewModel {
         return result
     }
 
+    /// The row that actually displays `eventId`.
+    ///
+    /// With Collapse on, a run of identical events becomes one row
+    /// represented by the first of them; the rest have no row of their
+    /// own. Selecting or scrolling to a folded id silently does
+    /// nothing, which is what made match navigation look dead — the
+    /// counter advanced while the table never moved.
+    func displayedRowId(for eventId: EventRecord.ID) -> EventRecord.ID {
+        guard collapseRepeats else { return eventId }
+        var representative: EventRecord?
+        for event in page {
+            if let last = representative, isSameKind(last, event) {
+                // Same group: the representative still stands.
+            } else {
+                representative = event
+            }
+            if event.id == eventId { return representative?.id ?? eventId }
+        }
+        return eventId
+    }
+
+
     private func isSameKind(_ a: EventRecord, _ b: EventRecord) -> Bool {
         a.level == b.level &&
         a.subsystem == b.subsystem &&
@@ -694,8 +716,11 @@ final class LogFeedViewModel {
         // Auto-pause so incoming events don't scroll us off the
         // match we just navigated to.
         isPaused = true
-        // Trigger scroll + selection.
-        scrollTarget = (eventId, UUID())
-        selectedEventId = eventId
+        // Trigger scroll + selection — on the row that actually shows
+        // this event. Resolved after the reload, because `page` has to
+        // hold the target before its displaying row can be found.
+        let rowId = displayedRowId(for: eventId)
+        scrollTarget = (rowId, UUID())
+        selectedEventId = rowId
     }
 }
