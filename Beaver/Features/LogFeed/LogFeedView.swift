@@ -708,7 +708,13 @@ private struct FacetMenuButton: View {
     let facet: Filter.Facet
     let title: String
 
-    private var values: [String] { vm.values(for: facet) }
+    /// Ordered by what the menu shows — the store sorts full values,
+    /// which with the bundle id dropped would read out of order.
+    private var values: [String] {
+        vm.values(for: facet).sorted {
+            facet.displayName($0).localizedCaseInsensitiveCompare(facet.displayName($1)) == .orderedAscending
+        }
+    }
     private var activeCount: Int { vm.filter.chipCount(for: facet) }
 
     var body: some View {
@@ -720,7 +726,8 @@ private struct FacetMenuButton: View {
                     Button {
                         vm.cycleChip(value, in: facet)
                     } label: {
-                        Label(value, systemImage: icon(for: vm.filter.state(of: value, in: facet)))
+                        Label(facet.displayName(value),
+                              systemImage: icon(for: vm.filter.state(of: value, in: facet)))
                     }
                 }
             }
@@ -787,12 +794,12 @@ private struct ActiveChipsBar: View {
     @ViewBuilder
     private func chips(for facet: Filter.Facet) -> some View {
         ForEach(vm.filter.included(facet).sorted(), id: \.self) { value in
-            FilterChip(value: value, state: .include) {
+            FilterChip(value: value, title: facet.displayName(value), state: .include) {
                 vm.cycleChip(value, in: facet)
             }
         }
         ForEach(vm.filter.excluded(facet).sorted(), id: \.self) { value in
-            FilterChip(value: value, state: .exclude) {
+            FilterChip(value: value, title: facet.displayName(value), state: .exclude) {
                 vm.cycleChip(value, in: facet)
             }
         }
@@ -801,6 +808,8 @@ private struct ActiveChipsBar: View {
 
 private struct FilterChip: View {
     let value: String
+    /// What the chip reads; `value` stays in the tooltip.
+    let title: String
     let state: Filter.ChipState
     let onTap: () -> Void
 
@@ -811,7 +820,7 @@ private struct FilterChip: View {
             HStack(spacing: 4) {
                 Image(systemName: state == .include ? "checkmark" : "minus")
                     .font(.caption2.weight(.bold))
-                Text(value)
+                Text(title)
                     .lineLimit(1)
             }
             .font(.caption)
@@ -886,7 +895,7 @@ private struct LogFeedTable: View {
                 .customizationID("message")
 
                 TableColumn("Subsystem") { (row: LogFeedViewModel.CollapsedRow) in
-                    Text(highlighted(row.event.subsystem))
+                    Text(highlighted(row.event.shortSubsystem))
                 }
                 .width(min: 150, ideal: 200)
                 .customizationID("subsystem")
@@ -1079,11 +1088,11 @@ private struct LogFeedTable: View {
         Section {
             Button("Filter to this Subsystem") {
                 vm.setChip(.include, for: event.subsystem, in: .subsystem)
-                toasts.info("Showing only \(event.subsystem)")
+                toasts.info("Showing only \(event.shortSubsystem)")
             }
             Button("Exclude this Subsystem") {
                 vm.setChip(.exclude, for: event.subsystem, in: .subsystem)
-                toasts.info("Hiding \(event.subsystem)")
+                toasts.info("Hiding \(event.shortSubsystem)")
             }
         }
         if !event.category.isEmpty {

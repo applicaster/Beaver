@@ -155,8 +155,9 @@ private struct JSONTreeRow: View {
 
             valueTags
 
-            Spacer(minLength: 6)
-
+            // Right after the value, not at the far edge: on a wide pane
+            // the button drifted so far from short rows that it was
+            // unclear which one it would copy.
             Button {
                 copyToPasteboard()
             } label: {
@@ -168,6 +169,9 @@ private struct JSONTreeRow: View {
             .help(record.kind.isContainer ? "Copy as JSON" : "Copy value")
             .opacity(isHovered ? 1 : 0)
             .allowsHitTesting(isHovered)
+
+            // Keeps the hover area the full row width.
+            Spacer(minLength: 0)
         }
         .font(.system(.caption, design: .monospaced))
         .contentShape(Rectangle())

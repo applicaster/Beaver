@@ -57,3 +57,22 @@ struct EventRecordSizeTests {
         #expect(event(message: String(repeating: "a", count: 1_468_006)).sizeText == "1.4 MB")
     }
 }
+
+@Suite("EventRecord subsystem")
+struct EventRecordSubsystemTests {
+
+    @Test("The bundle id in front of a subsystem is dropped for display",
+          arguments: [
+              ("com.appadventuresinodyssey/quick_brick/General", "quick_brick/General"),
+              ("com.applicaster.ent.com.appadventuresinodyssey/quick_brick/Screen", "quick_brick/Screen"),
+              ("native_application/network_requests", "native_application/network_requests"),
+              ("DebugFeatures/ConsoleCommands/GeneralHandler", "DebugFeatures/ConsoleCommands/GeneralHandler"),
+              ("loggernext.protocol", "loggernext.protocol"),
+              ("com.example/", "com.example/"),
+              ("some app.name/x", "some app.name/x"),
+              ("", ""),
+          ])
+    func shortSubsystem(full: String, short: String) {
+        #expect(EventRecord.shortSubsystem(full) == short)
+    }
+}
