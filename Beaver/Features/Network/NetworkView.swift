@@ -14,10 +14,15 @@ struct NetworkView: View {
         VStack(spacing: 0) {
             filterBar(rows)
             Divider()
+            // HSplitView sizes to its ideal height unless every pane and the
+            // split itself ask for the full height — same as LogFeedView.
             HSplitView {
-                table(rows).frame(minWidth: 420)
-                NetworkDetailView(entry: vm.selected).frame(minWidth: 320)
+                table(rows)
+                    .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
+                NetworkDetailView(entry: vm.selected)
+                    .frame(minWidth: 320, idealWidth: 360, maxHeight: .infinity)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
