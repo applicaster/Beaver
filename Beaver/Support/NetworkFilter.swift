@@ -38,16 +38,23 @@ public struct NetworkFilter: Equatable, Sendable {
     }
 }
 
-/// Summary line under the filter bar.
+/// The Network tab's results bar. Like zapp-support, the success ratio
+/// only counts requests that got an HTTP response: a timeout or a
+/// cancelled request (-999) is neither a success nor a failure here.
 public struct NetworkStats: Equatable, Sendable {
     public let count: Int
-    public let successRate: Double?
+    /// 2xx responses.
+    public let successCount: Int
+    /// Entries with an HTTP status (>= 100).
+    public let httpCount: Int
     public let averageDurationMillis: Int?
+
+    public var successRate: Double? { httpCount == 0 ? nil : Double(successCount) / Double(httpCount) }
 
     public init(_ entries: [NetworkEntry]) {
         count = entries.count
-        successRate = entries.isEmpty ? nil
-            : Double(entries.filter { $0.statusClass == .success }.count) / Double(entries.count)
+        httpCount = entries.filter { ($0.status ?? 0) >= 100 }.count
+        successCount = entries.filter { $0.statusClass == .success }.count
         let durations = entries.compactMap(\.durationMillis)
         averageDurationMillis = durations.isEmpty ? nil : durations.reduce(0, +) / durations.count
     }

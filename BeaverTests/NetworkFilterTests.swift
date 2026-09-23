@@ -70,8 +70,21 @@ struct NetworkFilterTests {
     func statsCountSuccessRateAndAverage() {
         let s = NetworkStats([ok, notFound, timeout])
         #expect(s.count == 3)
-        #expect(s.successRate == 1.0 / 3.0)
+        // Only requests with an HTTP response count: the timeout has none.
+        #expect(s.successCount == 1)
+        #expect(s.httpCount == 2)
+        #expect(s.successRate == 1.0 / 2.0)
         #expect(s.averageDurationMillis == 200)   // timeout has no duration: excluded
         #expect(NetworkStats([]).successRate == nil)
+        #expect(NetworkStats([timeout]).successRate == nil)
+    }
+
+    @Test
+    func statsExcludeNonHTTPCodes() {
+        let cancelled = e(#"{"url":"https://api.io/x","status":-999,"error":"cancelled"}"#)
+        let s = NetworkStats([ok, cancelled])
+        #expect(s.httpCount == 1)
+        #expect(s.successCount == 1)
+        #expect(s.successRate == 1.0)
     }
 }
