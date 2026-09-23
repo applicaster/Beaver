@@ -138,4 +138,110 @@ struct NetworkCopyTests {
         #expect(e(#"{"url":"https://api.io/x"}"#).statusLine == "—")
         #expect(e(#"{"url":"https://api.io/x","error":"offline"}"#).statusLine == "offline")
     }
+
+    // MARK: fetch snippet
+
+    @Test
+    func fetchForGetWithoutHeadersMatchesTheUsersExample() {
+        let entry = e(#"{"url":"https://assets-production.applicaster.com/zapp/x/app_loader.json","method":"GET"}"#)
+        #expect(entry.fetchSnippet == """
+        fetch("https://assets-production.applicaster.com/zapp/x/app_loader.json", {
+          method: "GET",
+        });
+        """)
+    }
+
+    @Test
+    func fetchForPostWithSortedHeadersAndAnEscapedBody() {
+        let entry = e(#"""
+        {"url":"https://api.io/login","method":"POST",
+         "requestHeaders":{"X-Token":"a\"b","Accept":"*/*"},
+         "requestBody":"{\"user\":\"a\"}\nline2\\end"}
+        """#)
+        #expect(entry.fetchSnippet == #"""
+        fetch("https://api.io/login", {
+          method: "POST",
+          headers: {
+            "Accept": "*/*",
+            "X-Token": "a\"b",
+          },
+          body: "{\"user\":\"a\"}\nline2\\end",
+        });
+        """#)
+    }
+
+    // MARK: Query parameters
+
+    @Test
+    func queryItemsArePercentDecoded() {
+        let entry = e(#"{"url":"https://api.io/x?q=a%20b&n=1"}"#)
+        #expect(entry.queryItems.map(\.name) == ["q", "n"])
+        #expect(entry.queryItems.first?.value == "a b")
+        #expect(entry.rawQuery == "q=a%20b&n=1")
+        #expect(object(entry.queryJSON ?? "") as NSDictionary == ["q": "a b", "n": "1"] as NSDictionary)
+    }
+
+    @Test
+    func aRepeatedKeyBecomesAnArrayAndKeysAreSorted() throws {
+        let entry = e(#"{"url":"https://api.io/x?t=2&a&t=1"}"#)
+        let json = try #require(entry.queryJSON)
+        #expect(object(json)["t"] as? [String] == ["2", "1"])
+        #expect(object(json)["a"] as? String == "")
+        #expect(json.range(of: "\"a\"")!.lowerBound < json.range(of: "\"t\"")!.lowerBound)
+    }
+
+    @Test
+    func aURLWithoutQueryHasNoQueryParameters() {
+        let entry = e(#"{"url":"https://api.io/x"}"#)
+        #expect(entry.queryItems.isEmpty)
+        #expect(entry.rawQuery == nil)
+        #expect(entry.queryJSON == nil)
+    }
+
+    private static func base64URL(_ text: String) -> String {
+        Data(text.utf8).base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+    }
+
+    /// Synthetic stand-in for the real `ctx` parameter: URL-safe Base64 of a
+    /// JSON object holding an (expired, fake-signed) access token.
+    @Test
+    func ctxDecodesThroughBase64AndJSONToAnExpiredJWT() throws {
+        let jwt = [#"{"alg":"HS256"}"#, #"{"exp": 1000000000}"#].map(Self.base64URL).joined(separator: ".") + ".c2ln"
+        let ctx = Self.base64URL(#"{"quick-brick-login-flow.access_token": "\#(jwt)"}"#)
+        #expect(!ctx.hasSuffix("="))
+        let entry = e(#"{"url":"https://api.io/feed?ctx=\#(ctx)&asset_type=episodes"}"#)
+
+        let query = object(try #require(entry.queryJSON))
+        let ctxValue = try #require(query["ctx"] as? String)
+        #expect(query["asset_type"] as? String == "episodes")
+
+        let decoded = try #require(LeafDecoder.decode(ctxValue))
+        #expect(decoded.kinds.first == .base64)
+        #expect(decoded.kinds == [.base64, .json])
+        let tree = try #require(decoded.tree)
+        #expect(LeafDecoder.nestedJWTStatus(in: tree) == .expired)
+        let token = try #require(tree.children?.first)
+        #expect(token.key == "quick-brick-login-flow.access_token")
+        guard case .string(let raw) = token.kind else { Issue.record("token is not a string"); return }
+        #expect(LeafDecoder.decode(raw)?.chip == .expired)
+    }
+
+    @Test
+    func urlSafeUnpaddedBase64WithDashesDecodes() throws {
+        let value = Self.base64URL(#"{"note":"a?b>c~, a longer tail"}"#)
+        #expect(value.contains("-") && value.count % 4 != 0)
+        #expect(try #require(LeafDecoder.decode(value)).kinds == [.base64, .json])
+    }
+
+    // MARK: Truncation
+
+    @Test
+    func truncatedResponseBodyIsDetected() {
+        #expect(e(#"{"url":"https://api.io/x","responseBody":"{\"a\":1... [TRUNCATED]"}"#).isResponseBodyTruncated)
+        #expect(!e(#"{"url":"https://api.io/x","responseBody":"{\"a\":1}"}"#).isResponseBodyTruncated)
+        #expect(!e(#"{"url":"https://api.io/x"}"#).isResponseBodyTruncated)
+    }
 }

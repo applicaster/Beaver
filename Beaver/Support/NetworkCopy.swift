@@ -18,6 +18,38 @@ extension NetworkEntry {
         return parts.joined(separator: " ")
     }
 
+    /// A JS `fetch(...)` call reproducing the request.
+    public var fetchSnippet: String {
+        var lines = ["fetch(\(Self.jsLiteral(url)), {", "  method: \(Self.jsLiteral(method)),"]
+        if !requestHeaders.isEmpty {
+            lines.append("  headers: {")
+            lines += requestHeaders.keys.sorted().map {
+                "    \(Self.jsLiteral($0)): \(Self.jsLiteral(requestHeaders[$0]!)),"
+            }
+            lines.append("  },")
+        }
+        if let requestBody, !requestBody.isEmpty { lines.append("  body: \(Self.jsLiteral(requestBody)),") }
+        lines.append("});")
+        return lines.joined(separator: "\n")
+    }
+
+    /// Percent-decoded, in URL order.
+    public var queryItems: [URLQueryItem] { URLComponents(string: url)?.queryItems ?? [] }
+
+    public var rawQuery: String? { URLComponents(string: url)?.percentEncodedQuery }
+
+    /// Query parameters as a sorted JSON object; a repeated key becomes an array.
+    public var queryJSON: String? {
+        let items = queryItems
+        guard !items.isEmpty else { return nil }
+        var values: [String: [String]] = [:]
+        for item in items { values[item.name, default: []].append(item.value ?? "") }
+        return Self.pretty(values.mapValues { $0.count == 1 ? $0[0] as Any : $0 as Any })
+    }
+
+    /// The SDK caps bodies at 100 000 characters and marks the cut.
+    public var isResponseBodyTruncated: Bool { responseBody?.hasSuffix("... [TRUNCATED]") ?? false }
+
     public var requestJSON: String {
         var o: [String: Any] = ["method": method, "url": url]
         if !requestHeaders.isEmpty { o["headers"] = requestHeaders }
@@ -81,6 +113,12 @@ extension NetworkEntry {
     }
 
     /// Parsed JSON (object or array) when the body is JSON, else the raw text.
+    /// A JSON string literal, which is also a valid JS one.
+    private static func jsLiteral(_ s: String) -> String {
+        let data = try? JSONSerialization.data(withJSONObject: s, options: [.fragmentsAllowed, .withoutEscapingSlashes])
+        return data.map { String(decoding: $0, as: UTF8.self) } ?? "\"\""
+    }
+
     private static func bodyValue(_ body: String?) -> Any? {
         guard let body, !body.isEmpty else { return nil }
         return (try? JSONSerialization.jsonObject(with: Data(body.utf8))) ?? body
