@@ -5,6 +5,7 @@
 
 import Sparkle
 import SwiftUI
+import os
 
 @main
 struct BeaverApp: App {
@@ -16,6 +17,14 @@ struct BeaverApp: App {
     /// added", …). Lives at the App level so it survives every
     /// tab / window mutation.
     @State private var toasts = ToastCenter()
+
+    /// Agent Access (design §3.2): on by default, one toggle in the app menu.
+    @AppStorage(AgentAccess.enabledKey) private var agentAccessEnabled = true
+    private let agentAccess: AgentAccess
+
+    /// Serializes `applyAgentAccess()` calls so a quick off→on toggle
+    /// doesn't race the previous stop against the next start.
+    @State private var agentAccessApply: Task<Void, Never>?
 
     /// Sparkle's standard controller — owns the updater process,
     /// runs the periodic appcast check, and presents the system
@@ -40,7 +49,9 @@ struct BeaverApp: App {
             fatalError("Failed to open log store: \(error)")
         }
         let server = WSServer(port: 9080)
-        _env = State(initialValue: AppEnvironment(store: store, server: server))
+        let environment = AppEnvironment(store: store, server: server)
+        _env = State(initialValue: environment)
+        agentAccess = AgentAccess(store: store, ui: environment)
 
         // Sparkle: `startingUpdater: true` schedules the first
         // appcast check shortly after launch. Subsequent checks run
@@ -64,6 +75,8 @@ struct BeaverApp: App {
             MainWindow()
                 .environment(env)
                 .environment(toasts)
+                .task { await scheduleAgentAccessApply() }
+                .onChange(of: agentAccessEnabled) { Task { await scheduleAgentAccessApply() } }
         }
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1200, height: 800)
@@ -83,6 +96,16 @@ struct BeaverApp: App {
                     toasts.success("Copied \(url)")
                 }
                 .keyboardShortcut("c", modifiers: [.command, .shift])
+                Divider()
+                Toggle("Agent Access (MCP)", isOn: $agentAccessEnabled)
+                Text("MCP: \(env.agentAccessStatus)")
+                Button("Copy MCP Setup Command") {
+                    let command = AgentAccess.setupCommand(port: env.agentAccessPort ?? AgentAccess.configuredPort())
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(command, forType: .string)
+                    toasts.success("Copied: \(command)")
+                }
+                .disabled(env.agentAccessPort == nil)
             }
         }
     }
@@ -166,6 +189,47 @@ struct BeaverApp: App {
             }
         }
     }
+
+    /// Chains onto the previous `applyAgentAccess()` call so a quick
+    /// off→on toggle doesn't bind the port while the old listener is
+    /// still closing — which would otherwise show a false "port in use".
+    @MainActor
+    private func scheduleAgentAccessApply() async {
+        let previous = agentAccessApply
+        let task = Task {
+            await previous?.value
+            await applyAgentAccess()
+        }
+        agentAccessApply = task
+        await task.value
+    }
+
+    /// Starts or stops the MCP listener to match the toggle, and reports
+    /// the result in the app menu.
+    @MainActor
+    private func applyAgentAccess() async {
+        guard agentAccessEnabled else {
+            await agentAccess.stop()
+            env.agentAccessPort = nil
+            env.agentAccessStatus = "Off"
+            return
+        }
+        let port = AgentAccess.configuredPort()
+        do {
+            let bound = try await agentAccess.start(port: port)
+            env.agentAccessPort = bound
+            env.agentAccessStatus = "On · 127.0.0.1:\(bound)"
+        } catch is CancellationError {
+            // Superseded by a later start/stop call; that call owns the
+            // final status.
+        } catch {
+            Self.log.error("Agent Access failed to bind port \(port): \(error.localizedDescription)")
+            env.agentAccessPort = nil
+            env.agentAccessStatus = "Port \(port) in use"
+        }
+    }
+
+    private static let log = Logger(subsystem: "com.applicaster.LoggerNext", category: "AgentAccess")
 
     private static func handleInbound(frame: Data, env: AppEnvironment) async {
         let sessionId = await MainActor.run { env.currentSessionId }

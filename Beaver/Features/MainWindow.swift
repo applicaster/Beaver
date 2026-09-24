@@ -20,6 +20,8 @@ struct MainWindow: View {
     @State private var exportDocument: JSONExportDocument?
     @State private var showingBookmarks = false
     @State private var bookmarksSnapshot: [BookmarkedEvent] = []
+    @State private var showingAgentPanel = false
+    @State private var agentActivity: AgentActivityViewModel?
     @State private var showingTimeJump = false
     /// A request's start time waiting for the Log feed to mount, from
     /// Network's "Show in Log feed". See `detail`.
@@ -54,6 +56,12 @@ struct MainWindow: View {
             }
             .navigationTitle(navigationTitle)
             .toolbar { toolbarContent }
+            // "Is the panel open" comes from the presentation state, not
+            // the view's onAppear, so entries are marked seen exactly
+            // while the popover is showing.
+            .onChange(of: showingAgentPanel) { _, isPresented in
+                agentActivity?.isOpen = isPresented
+            }
             Divider()
             CommandBarView()
         }
@@ -81,6 +89,7 @@ struct MainWindow: View {
         // was opened while the toggle's write was still in flight.
         // Lifetime tied to MainWindow; one subscription per window.
         .task {
+            if agentActivity == nil { agentActivity = AgentActivityViewModel(store: env.store) }
             let stream = await env.store.changes()
             for await change in stream {
                 if case .bookmarksChanged(let sid) = change,
@@ -381,6 +390,18 @@ struct MainWindow: View {
             .buttonStyle(.plain)
             .help("Copy ws://<ip>:9080 to the clipboard")
         }
+        ToolbarItem(placement: .primaryAction) {
+            if let agentActivity {
+                // A popover like Bookmarks, not an inspector: an inspector
+                // squeezed the feed and the detail pane, and on the split
+                // view it swallowed every toolbar item.
+                AgentToolbarButton(model: agentActivity, isPresented: $showingAgentPanel)
+                    .popover(isPresented: $showingAgentPanel, arrowEdge: .bottom) {
+                        AgentActivityView(model: agentActivity)
+                            .frame(width: 560, height: 640)
+                    }
+            }
+        }
         // Centered Connected pill. `.principal` keeps it anchored
         // in the middle of the title bar so the device badge can
         // sit on the leading edge and the action buttons on the
@@ -612,7 +633,7 @@ private struct ToolbarDeviceBadge: View {
     }
 }
 
-private struct ToolbarButtonLabel: View {
+struct ToolbarButtonLabel: View {
     let systemImage: String
     let title: String
     var tint: Color? = nil

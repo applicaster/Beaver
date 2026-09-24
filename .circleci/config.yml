@@ -39,6 +39,40 @@ executors:
     # `macos.m1.*.gen1`). Same as ZappAppleBuilder uses.
     resource_class: m4pro.medium
 
+commands:
+  import-developer-id:
+    description: Ephemeral keychain with the Developer ID Application certificate
+    steps:
+      - run:
+          name: Import Developer ID Application certificate
+          command: |
+            set -euo pipefail
+            KEYCHAIN=ci.keychain
+            KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+
+            echo "${DEVELOPER_ID_P12_BASE64}" | base64 --decode > /tmp/cert.p12
+
+            security create-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN}"
+            security default-keychain -s "${KEYCHAIN}"
+            security unlock-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN}"
+            # Keep the keychain unlocked for the duration of the build.
+            security set-keychain-settings -t 7200 -u "${KEYCHAIN}"
+
+            security import /tmp/cert.p12 \
+              -k "${KEYCHAIN}" \
+              -P "${DEVELOPER_ID_P12_PASSWORD}" \
+              -T /usr/bin/codesign \
+              -T /usr/bin/security \
+              -T /usr/bin/productbuild
+
+            # Allow codesign to use the private key without GUI prompt.
+            security set-key-partition-list \
+              -S apple-tool:,apple:,codesign: \
+              -s -k "${KEYCHAIN_PASSWORD}" "${KEYCHAIN}"
+
+            rm -f /tmp/cert.p12
+            security find-identity -v -p codesigning
+
 jobs:
   build-and-test:
     executor: macos
@@ -119,35 +153,7 @@ jobs:
             echo "Release ${BEAVER_VERSION} not found — proceeding."
 
       # ── Set up an ephemeral keychain with the Developer ID cert ─────
-      - run:
-          name: Import Developer ID Application certificate
-          command: |
-            set -euo pipefail
-            KEYCHAIN=ci.keychain
-            KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
-
-            echo "${DEVELOPER_ID_P12_BASE64}" | base64 --decode > /tmp/cert.p12
-
-            security create-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN}"
-            security default-keychain -s "${KEYCHAIN}"
-            security unlock-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN}"
-            # Keep the keychain unlocked for the duration of the build.
-            security set-keychain-settings -t 7200 -u "${KEYCHAIN}"
-
-            security import /tmp/cert.p12 \
-              -k "${KEYCHAIN}" \
-              -P "${DEVELOPER_ID_P12_PASSWORD}" \
-              -T /usr/bin/codesign \
-              -T /usr/bin/security \
-              -T /usr/bin/productbuild
-
-            # Allow codesign to use the private key without GUI prompt.
-            security set-key-partition-list \
-              -S apple-tool:,apple:,codesign: \
-              -s -k "${KEYCHAIN_PASSWORD}" "${KEYCHAIN}"
-
-            rm -f /tmp/cert.p12
-            security find-identity -v -p codesigning
+      - import-developer-id
 
       # ── Apply the version bump to the pbxproj ───────────────────────
       #
@@ -284,10 +290,37 @@ jobs:
           path: build
           destination: build
 
+  tester-bundle:
+    executor: macos
+    steps:
+      - checkout
+      - import-developer-id
+      - run:
+          name: Build, sign, notarize (not published)
+          command: |
+            set -euo pipefail
+            PR="${CIRCLE_PR_NUMBER:-$(echo "${CIRCLE_BRANCH}" | tr '/' '-')}"
+            VERSION="pr-${PR}-${CIRCLE_SHA1:0:7}" SKIP_APPCAST=1 make release
+          no_output_timeout: 15m
+      - store_artifacts:
+          path: build
+          destination: build
+
 workflows:
   on-pull-request:
     jobs:
       - build-and-test:
+          filters:
+            branches:
+              ignore: main
+      - hold-tester-bundle:
+          type: approval
+          filters:
+            branches:
+              ignore: main
+      - tester-bundle:
+          requires:
+            - hold-tester-bundle
           filters:
             branches:
               ignore: main

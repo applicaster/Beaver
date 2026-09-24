@@ -593,6 +593,15 @@ extension LogStoreTests {
         #expect(loaded?.filter.excludedCategories.isEmpty == true)
         #expect(loaded?.filter == filter)
     }
+
+    @Test("Sessions created back-to-back are returned newest (highest id) first")
+    func sessionOrderingNewestFirst() async throws {
+        let store = try LogStore(source: .inMemory)
+        let s1 = try await store.createSession(source: .imported)
+        let s2 = try await store.createSession(source: .live)
+        let all = try await store.sessions()
+        #expect(all.map { $0.id } == [s2.id, s1.id])
+    }
 }
 
 // MARK: - Test helpers

@@ -50,6 +50,12 @@ public final class AppEnvironment {
     /// to the rows the user is currently looking at — see D26.
     public var activeFilter: Filter = .none
 
+    /// Menu text for Agent Access: "On · 127.0.0.1:9081", "Off", "Port 9081 in use".
+    public var agentAccessStatus: String = "Off"
+
+    /// The bound MCP port while Agent Access is on.
+    public var agentAccessPort: UInt16?
+
     public init(store: LogStore, server: WSServer) {
         self.store = store
         self.server = server

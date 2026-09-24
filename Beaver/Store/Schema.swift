@@ -250,6 +250,27 @@ enum Schema {
             """)
         }
 
+        // Agent Access journal (design M17). Not tied to a session's life:
+        // deleting a session keeps the entries and clears the link.
+        migrator.registerMigration("v9_agent_activity", foreignKeyChecks: .immediate) { db in
+            try db.execute(sql: """
+                CREATE TABLE agent_activity (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    at          INTEGER NOT NULL,
+                    client      TEXT,
+                    tool        TEXT,
+                    kind        TEXT NOT NULL,
+                    summary     TEXT NOT NULL,
+                    level       TEXT,
+                    is_error    INTEGER NOT NULL DEFAULT 0,
+                    error       TEXT,
+                    links_json  TEXT,
+                    session_id  INTEGER REFERENCES session(id) ON DELETE SET NULL,
+                    seen        INTEGER NOT NULL DEFAULT 0
+                );
+            """)
+        }
+
         return migrator
     }
 }

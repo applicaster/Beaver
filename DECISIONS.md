@@ -1947,3 +1947,537 @@ pass as a computed property.
 **Trade-off.** A stored filter from before a `Filter` field was added
 won't decode, and the feed starts unfiltered once.
 
+---
+
+## D43. The MCP server lives inside Beaver.app
+
+**Status:** Accepted (2026-09-23). Spec: plans/2026-09-23-mcp-design.md (M1).
+
+- **Why:** only the running app has the live WebSocket to the device
+  (commands, storage, phase 2), the live UI state (`ui_*`), and the
+  actors that already serialize access to the store.
+- **Alternatives:** (a) a stdio CLI reading `store.sqlite` read-only:
+  works without Beaver running, but cannot send anything to the
+  device or touch the UI, and adds a second writer-adjacent process
+  on the database; (b) both.
+- **To change:** a stdio shim can be added later as a thin proxy to
+  the HTTP endpoint, without changing tools.
+
+---
+
+## D44. Transport: stateless Streamable HTTP, POST only
+
+**Status:** Accepted (2026-09-23). Spec: plans/2026-09-23-mcp-design.md (M2).
+
+- **Why:** every mainstream client supports HTTP servers directly
+  (`claude mcp add --scope user --transport http …`). Stateless POST is a small
+  amount of code on `NWListener`, which the project already uses, and
+  matches what the SDK ships on the device.
+- **Alternatives:** full Streamable HTTP with an SSE stream and
+  sessions (needed only for server-initiated messages: `list_changed`,
+  progress, log push); stdio (impossible for an app that is already
+  running).
+- **To change:** adding `GET` + SSE is additive; tools are unaffected.
+
+---
+
+## D45. Loopback only, port 9081, Origin check, no auth token
+
+**Status:** Accepted (2026-09-23). Spec: plans/2026-09-23-mcp-design.md (M3).
+
+- **Why:** agents run on the same Mac. Loopback plus an Origin check
+  blocks other machines and browser pages (DNS rebinding). A token
+  would add setup steps for every client while protecting only
+  against local processes, which already run as the user.
+- **Alternatives:** bind all interfaces (remote agents; exposes
+  device data to the LAN); bearer token in the client config.
+- **To change:** a token is an extra header check plus a "Copy setup
+  command" that includes it.
+- **Implemented:** `MCPHTTPListener.stop()` is `async` and only
+  returns once the listener has actually reached `.cancelled` —
+  `NWListener.cancel()` doesn't free the port synchronously, so an
+  immediate rebind on the same port could otherwise see
+  `EADDRINUSE`. `start()` and `stop()` are safe against overlapping
+  calls: a `start()` racing a `stop()`, or two `start()`s, resolve to
+  exactly one live listener. `Origin: null` is rejected, not
+  allowed — a sandboxed iframe, `data:` or `file:` page sends exactly
+  that origin, so treating it as trusted would defeat the check;
+  only an absent `Origin` (every non-browser MCP client) passes
+  without a loopback host. A `POST` with a non-empty body also needs
+  `Content-Type: application/json` (parameters ignored, case
+  folded), rejected otherwise with `415` — without it, a page could
+  send a same-origin `text/plain` body with no preflight and still
+  reach a tool.
+
+---
+
+## D46. On for everyone in phase 1; one toggle in the app menu
+
+**Status:** Accepted (2026-09-23). Spec: plans/2026-09-23-mcp-design.md (M4).
+
+- **Why:** agreed with the user (2026-09-23). The value is in agents
+  finding it with no setup; the risk is bounded by M3 and by nobody
+  outside the team knowing the feature exists. Customers get it too
+  (same `Beaver.zip`).
+- **Alternatives:** opt-in toggle; see M24 for access control.
+- **To change:** flip the `@AppStorage` default, or settle M24.
+- **Implemented:** `AgentAccess` guards `start`/`stop` with a
+  generation counter — whichever call happens last wins over any
+  interleaved one — and the app serializes applying the toggle (it
+  awaits the previous apply before starting the next), so a quick
+  off→on click can't leave two listeners racing for the port.
+
+---
+
+## D47. Destructive tools are allowed; the client confirms
+
+**Status:** Accepted (2026-09-23). Spec: plans/2026-09-23-mcp-design.md (M5).
+
+- **Why:** agreed with the user. MCP clients already ask before
+  calling a tool (Claude Code's permission prompt), and
+  `destructiveHint` tells them which ones deserve care. A second
+  confirmation inside Beaver would steal focus, which contradicts
+  M12.
+- **Alternatives:** a "Allow destructive agent actions" setting;
+  per-call confirmation in Beaver.
+- **To change:** the handler checks one setting before running any
+  tool with `destructiveHint`.
+
+---
+
+## D48. Tool names are `group_verb` with underscores
+
+**Status:** Accepted (2026-09-23). Spec: plans/2026-09-23-mcp-design.md (M6).
+
+- **Why:** the Claude API restricts tool names to `[a-zA-Z0-9_-]`,
+  and clients prefix server names (`mcp__beaver__logs_query`). Dots
+  work in some clients and not others.
+- **Alternatives:** dots, like the SDK (`logs.tail`).
+- **To change:** a rename is a breaking change for agents' saved
+  permissions, so do it before release or not at all.
+
+---
+
+## D49. Tools only: no resources, prompts or subscriptions
+
+**Status:** Accepted (2026-09-23). Spec: plans/2026-09-23-mcp-design.md (M7).
+
+- **Why:** tools are the one primitive every client supports well.
+  Resources and subscriptions would duplicate `*_get` and
+  `logs_wait`, and subscriptions need the SSE stream M2 leaves out.
+- **To change:** additive.
+
+---
+
+## D50. One tool per capability, grouped (30 tools)
+
+**Status:** Accepted (2026-09-23). Spec: plans/2026-09-23-mcp-design.md (M8).
+
+- **Why:** agents choose better between named, narrow tools than
+  between modes of one giant tool. 30 is well within what clients
+  handle.
+- **Alternatives:** a few "god tools" (`query(kind, …)`); one tool
+  per UI control (hundreds).
+- **To change:** merge within a group; the drift test and `MCP.md`
+  follow.
+- **Implemented:** the groups live in `Beaver/MCP/Tools/*.swift`
+  (`StatusTools`, `LogTools`, `NetworkTools`, `StateTools`,
+  `GuideTool`); `Beaver/MCP/BeaverTools.swift` is the registry
+  (`BeaverTools.all`), not the catalog itself.
+
+---
+
+## D51. Default session: live → viewed → most recent
+
+**Status:** Accepted (2026-09-23). Spec: plans/2026-09-23-mcp-design.md (M9).
+
+- **Why:** matches what a person means by "the logs" when a device
+  is connected, and still works offline or on imported sessions.
+  Echoing the chosen id prevents silent confusion. What happens
+  across a reconnect is M26.
+- **To change:** one function, `ToolContext.resolveSession`.
+- **Implemented:** "most recent" and `sessions_list` both order by
+  `started_at DESC, id DESC` — the same tie-break everywhere a
+  session is picked, so same-millisecond sessions never disagree
+  between the store, `resolveSession`, and the list.
+  `sessions_list(source:)` accepts `live` / `imported` / `any` and
+  rejects anything else with an error, rather than silently ignoring
+  an unrecognized value.
+
+---
+
+## D52. Results: text + `structuredContent`, hard caps, id cursors, filter = `Filter`
+
+**Status:** Accepted (2026-09-23). Spec: plans/2026-09-23-mcp-design.md (M10).
+
+- **Why:** text is what models read best; structured data is there
+  for clients and scripts. Caps protect the agent's context from a
+  100k-event session. Id cursors are stable while events stream in.
+  Reusing `Filter` means the agent and the UI can never disagree on
+  what a filter matches.
+- **To change:** caps live in `ToolText` (`Beaver/MCP/ToolInput.swift`),
+  plus a few per-tool literals (e.g. `logs_query`'s 2 KB `includeData`
+  cap) — not `BeaverTools.swift`, which is only the tool registry.
+- **Implemented:** facet structured lists (`logs_facets`) are capped
+  at 100 subsystems / 100 categories, with `subsystemsMore` /
+  `categoriesMore` counting the rest. Payloads everywhere are capped
+  at 256 KB with an explicit `truncated` flag rather than a silent
+  cut. An unknown host or subsystem in a filter fails with the
+  closest real names, not an empty result. Every tool result carries
+  a non-empty `Next:` suggestion.
+
+---
+
+## D53. `logs_wait` is a long-poll with a timeout ≤ 60 s
+
+**Status:** Accepted (2026-09-23). Spec: plans/2026-09-23-mcp-design.md (M11).
+
+- **Why:** the "act, then observe" loop is the most common agent
+  pattern here. Long-poll needs no push channel (M2); it polls the
+  store every 250 ms rather than using `LogStore.changes()` — same
+  behavior, a third of the code, since appends are already batched
+  at 50 ms anyway.
+- **Alternatives:** the agent polls `logs_query` in a loop (slower,
+  noisier); resource subscriptions (need SSE).
+- **To change:** the max is a constant; client-side tool timeouts
+  (e.g. Claude Code's `MCP_TOOL_TIMEOUT`) must stay above it.
+- **Implemented:** the result also carries `total` (how many events
+  matched) and `hasMore` (whether `limit` cut the batch), alongside
+  the matching events themselves.
+
+---
+
+## D54. Background UI: agents change state, never input
+
+**Status:** Accepted (2026-09-23). Spec: plans/2026-09-23-mcp-design.md (M12).
+
+- **Why:** agreed with the user. The agent configures Beaver without
+  interrupting the person; the window reflects the change whenever
+  it is looked at. `reveal` is explicit.
+- **How:** tab, selection and a reveal counter move from
+  `MainWindow`'s `@State` to `AppEnvironment` (§7).
+- **Alternatives:** Accessibility / synthetic clicks (takes over the
+  mouse, needs a TCC grant, breaks on any layout change); no UI
+  tools.
+- **To change:** the `AgentUI` protocol is the boundary; new UI tools
+  add members to it.
+- **Implemented:** from PR 3 (not in PR 1) — `AgentUI` in PR 1 is
+  read-only (`snapshot()`); the `ui_show` members this decision
+  describes don't exist yet.
+
+---
+
+## D55. Agent guidance: `instructions` + descriptions + `MCP.md`; no skill file
+
+**Status:** Accepted (2026-09-23). Spec: plans/2026-09-23-mcp-design.md (M13).
+
+- **Why:** `instructions` reach every client with no setup, including
+  agents working in the app repos rather than this one. `MCP.md` is
+  for humans and review. A skill would be a third copy to keep in
+  sync.
+- **To change:** add `.claude/skills/beaver/SKILL.md` if agents show
+  misuse that instructions do not fix.
+- **Implemented:** `MCP.md` lives at `Beaver/Resources/MCP.md`
+  (bundled into the app via SPM `resources: [.copy("Resources/MCP.md")]`),
+  not at the repo root.
+
+---
+
+## D56. MCP code lives in `BeaverCore`; UI is reached through a protocol
+
+**Status:** Accepted (2026-09-23). Spec: plans/2026-09-23-mcp-design.md (M14).
+
+- **Why:** `swift test` covers the server, listener and every tool
+  headlessly. `AgentUI` has one live implementation
+  (`AppEnvironment`) and one fake, and exists because
+  `AppEnvironment` is excluded from the SPM target.
+- **To change:** nothing else depends on the split.
+
+---
+
+## D57. Tools reach the device through `DeviceLink`, implemented by `WSServer`
+
+**Status:** Accepted (2026-09-23). Spec: plans/2026-09-23-mcp-design.md (M15).
+
+- **Why:** storage and command tools need a fake device in tests. The
+  protocol is two methods: `send(command:)`, and in phase 2
+  `send(mcp:)`.
+- **To change:** adding a method adds it to `WSServer` and the fake.
+- **Implemented:** PR 1 ships without `DeviceLink`; `ToolContext` is
+  `{ store, ui, now }`. `DeviceLink` and the tools that send to the
+  device (`storage_set`, `storage_delete`, `commands_send`) arrive in
+  PR 2.
+
+---
+
+## D58. `storage_set` / `storage_delete` behave exactly like the Storages screen
+
+**Status:** Accepted (2026-09-23). Spec: plans/2026-09-23-mcp-design.md (M16).
+
+- **Why:** same wire limitation (no quoting, PROTOCOL.md §3.2), same
+  read-back verification. The agent gets the same honest "device
+  didn't apply this" as a person.
+- **To change:** shared code in `StorageCommand`; both paths move
+  together.
+
+---
+
+## D59. Agent activity journal: every call, agent notes, badges; not in exports
+
+**Status:** Accepted (2026-09-23). Spec: plans/2026-09-23-mcp-design.md (M17).
+
+- **Why:** agreed with the user (2026-09-23). The person needs to see
+  what the agent did, notice when something new happens, and jump to
+  what the agent found, all without the window taking focus (§7.2).
+  Recording in the dispatcher means no tool can forget to log. A
+  separate table keeps agent activity out of session exports, which
+  go to customers and zapp-support. `journal_note` lets the agent say
+  something to the person with clickable links, which a tool-call
+  list cannot.
+- **Volumes:** journal for everything, toasts for destructive calls
+  and `attention` notes, a macOS notification for `attention` notes
+  while Beaver is in the background (M28).
+- **Alternatives:** toasts only (gone when missed, no history);
+  synthetic `beaver.agent` events in the session (would end up in
+  exports); `os_log` only (invisible).
+- **To change:** kinds, cap and badge rules are constants in
+  `AgentJournal`; the panel is one view. A `journal_list` tool for
+  agents is additive if a use appears.
+- **Implemented:** every `tools/call` is journaled, including a call
+  naming an unknown tool (recorded as an error row under that name)
+  — `AgentJournal.record(toolName:kind:client:result:error:)`. Only a
+  request with no tool name at all (a malformed JSON-RPC params
+  object) skips the journal, since there is no tool to attribute it
+  to. The journal itself, above, is what PR 1 ships. Toasts for
+  destructive calls, `attention` notes, `journal_note` and the macOS
+  notification (M28) are **from PR 2/3 (not in PR 1)** — PR 1 has no
+  destructive tools and no `journal_note`.
+
+---
+
+## D60. `CLAUDE.md` rule + drift test keep the MCP in step with the app
+
+**Status:** Accepted (2026-09-23). Spec: plans/2026-09-23-mcp-design.md (M20).
+
+- **Why:** agreed with the user. A rule alone decays; the drift test
+  catches the most common miss mechanically. The text is in §9.
+- **To change:** edit `CLAUDE.md` and the test together.
+- **Implemented:** the rule lives in the repo's `CLAUDE.md` verbatim;
+  this spec's §9 keeps the original draft as a historical record.
+
+---
+
+## D61. Protocol versions: `2025-06-18`, `2025-03-26`, `2024-11-05`
+
+**Status:** Accepted (2026-09-23). Spec: plans/2026-09-23-mcp-design.md (M21).
+
+- **Why:** echo the client's requested version if supported, else
+  answer the newest. The subset used here (tools, text + structured
+  content, annotations) exists in all three. `structuredContent` is
+  omitted for clients older than `2025-06-18`.
+- **To change:** a list constant in `MCPServer`.
+- **Implemented:** `structuredContent` is included only when the
+  request's `MCP-Protocol-Version` header is exactly `2025-06-18`.
+  The first pass computed this with a ternary
+  (`structured ? result.structured : nil`) whose `nil` branch was
+  inferred as `JSON` through `ExpressibleByNilLiteral`, so it became
+  `.null` instead of "omit the key" — older clients briefly received
+  `structuredContent: null`. Fixed with an explicit `JSON?`.
+
+---
+
+## D62. Settings live in the app menu, not a Settings window
+
+**Status:** Accepted (2026-09-23). Spec: plans/2026-09-23-mcp-design.md (M22).
+
+- **Why:** Beaver has no Settings scene. Two items cover it: "Agent
+  Access (MCP)" (toggle, with the port and state in the title) and
+  "Copy MCP Setup Command" (copies the `claude mcp add --scope user …` line).
+- **To change:** move to a `Settings` scene if more settings appear.
+
+---
+
+## D63. This spec lives in `plans/`; decisions migrate to `DECISIONS.md`
+
+**Status:** Accepted (2026-09-23). Spec: plans/2026-09-23-mcp-design.md (M23).
+
+- **Why:** `docs/` is the GitHub Pages site (appcast), so anything
+  there is published. `plans/` already holds specs and plans. `M`
+  numbers avoid colliding with D-numbers other branches may take.
+- **To change:** renumber on migration.
+- **Implemented:** this migration — M1–M17 → D43–D59, M20–M31 →
+  D60–D71; M18 and M19 stay in the spec, deferred to phase 2.
+
+---
+
+## D64. Access control is open in phase 1 — to decide before phase 2
+
+**Status:** Open — to decide before phase 2 (2026-09-23).
+
+- **Decided now:** no build flag, no policy key, no token. The
+  feature is isolated behind `AgentAccess` (§3.2), so any of those is
+  one check in one place later.
+- **Must be decided before phase 2**, when an agent can also restart
+  the app and change its storage: how to keep Agent Access, or some
+  of its data, from customers. Options are listed in §3.2: build flag
+  + customer build, `defaults` key (also usable by a configuration
+  profile), off by default with the team turning it on, client token.
+  An environment variable is not an option: apps started from Finder
+  don't see it.
+
+---
+
+## D65. The API is ready for several connected apps
+
+**Status:** Accepted (2026-09-23). Spec: plans/2026-09-23-mcp-design.md (M25).
+
+- **Why:** the user expects to connect several apps at once later
+  (today D2 allows one). Tool shapes are hard to change once agents
+  rely on them, so phase 1 already uses the multi-device shape:
+  `beaver_status.devices` is an array, live-device tools take an
+  optional `deviceId`, and with more than one live device a call
+  that doesn't say which one fails with the list.
+- **Alternatives:** a single `device` object now, reshaped later (a
+  breaking change for agents).
+- **To change:** lifting D2 changes `WSServer` and session creation;
+  the tool API stays as is.
+
+---
+
+## D66. Omitted `sessionId` follows the device across reconnects
+
+**Status:** Accepted (2026-09-23). Spec: plans/2026-09-23-mcp-design.md (M26).
+
+- **Why:** agreed with the user. A command can restart the app, and
+  Beaver starts a new session on reconnect (D2). Beaver can't know
+  which commands do that, so it doesn't refuse any. Instead, waits
+  carry on in the new session and say so (`sessionChanged`), and a
+  pinned `sessionId` reports `sessionEnded`. `restart` →
+  `logs_wait(search: "App started")` just works. The journal records
+  the disconnect as a system entry.
+- **Alternatives:** refuse such commands without
+  `expectDisconnect: true` (needs a list of disconnecting commands
+  nobody has); leave it to the agent.
+- **To change:** the follow logic lives in
+  `ToolContext.resolveSession` and the wait helper shared by
+  `logs_wait` and `commands_send`.
+- **Implemented:** from PR 2 (not in PR 1). `resolveSession` in PR 1
+  resolves once per call; there is no `commands_send`, and `logs_wait`
+  does not re-resolve or report `sessionChanged` / `sessionEnded` if
+  the device disconnects and reconnects mid-wait.
+
+---
+
+## D67. Testers use signed PR bundles, no Xcode
+
+**Status:** Accepted (2026-09-23). Spec: plans/2026-09-23-mcp-design.md (M27).
+
+- **Why:** a few testers will check each step with a built app only,
+  and testing happens in PRs (agreed 2026-09-23). Today the PR
+  workflow only builds and tests; a signed app exists only after
+  merge, which is also a release to customers. So:
+  - the `on-pull-request` workflow gets a **manual approval job**,
+    "Tester bundle", that builds, signs and notarizes `Beaver.zip`
+    with the release job's steps, stores it as a CircleCI artifact
+    and does **not** publish or touch the appcast. It costs nothing
+    unless someone clicks it;
+  - everything a tester needs works from the app menu: the toggle,
+    "Copy MCP Setup Command", the Agent panel, and *Copy* in the
+    panel for reports;
+  - `MCP.md` has a "Testing without Xcode" section: install the
+    bundle, connect Claude Code (and Cursor), a `curl` smoke test
+    (`tools/list` against `http://127.0.0.1:9081/mcp`), a checklist
+    per delivery step, and how to report (journal *Copy* + Beaver
+    version).
+- **Alternatives:** test only released builds (customers get
+  untested changes); run the job on every PR (a notarization per
+  push).
+- **To change:** the job's trigger in `.circleci/config.yml`.
+
+---
+
+## D68. macOS notifications for `attention` notes, with a way back from "off"
+
+**Status:** Accepted (2026-09-23). Spec: plans/2026-09-23-mcp-design.md (M28).
+
+- **Why:** agreed with the user (2026-09-23). A toast is only seen if
+  the window is in view; the agent needs a way to say "look" while
+  Beaver is in the background, and a click should bring Beaver
+  forward on what it found. A notification does that without taking
+  focus until clicked. macOS asks for permission only once, so the
+  design must lead back from a refusal: a strip in the Agent panel
+  and a menu item whose button is the system prompt
+  (`notDetermined`) or System Settings (`denied`), a mark on
+  undelivered notes, and the state reported to the agent.
+- **Details:** asked in context on the first `attention` note, not at
+  launch; re-checked on `didBecomeActive`; coalesced to one per 30 s;
+  mutable within Beaver.
+- **Alternatives:** ask at launch (people refuse prompts without
+  context); provisional authorization (quiet delivery to
+  Notification Center only, no banner, so nobody notices); no
+  notifications (agent can't reach a person whose window is hidden).
+- **To change:** `AgentNotifier` (app target) owns permission,
+  delivery and coalescing; the coalescing window is a constant.
+- **Implemented:** from PR 2/3 (not in PR 1). There is no `attention`
+  note, `AgentNotifier`, or permission UI yet — PR 1's tools are all
+  read-only and never need to get the person's attention.
+
+---
+
+## D69. Watches: named, cheap, notify the person
+
+**Status:** Accepted (2026-09-23). Spec: plans/2026-09-23-mcp-design.md (M29).
+
+- **Why:** agreed with the user (2026-09-23). "Watch player errors
+  while the tester plays for 20 minutes" can't be done with
+  `logs_wait` (≤ 60 s) without the agent looping and burning tokens,
+  and an agent's turn may end before the tester does. Since every
+  event is already stored, a watch is a start id plus a filter, and
+  counts are one query at `watch_status` time.
+- **Limit:** Beaver can't wake the agent (M2). A notification reaches
+  the person, who can tell the agent. Server-to-agent push would need
+  M2's SSE extension and client support for acting on it.
+- **Alternatives:** the agent loops `logs_wait` (costly, dies with
+  the turn); persisted watches (no need: the start id is what
+  matters, and it survives).
+- **To change:** watches are a dictionary in one actor; persisting
+  them is a table.
+- **Implemented:** from PR 2/3 (not in PR 1). There is no
+  `watch_status` or any other watch tool yet.
+
+---
+
+## D70. Designed for the weakest agent
+
+**Status:** Accepted (2026-09-23). Spec: plans/2026-09-23-mcp-design.md (M30).
+
+- **Why:** agreed with the user (2026-09-23): "a dumb agent should
+  still work at the maximum." Forgiving inputs, time-or-id, `Next:`
+  hints, errors with example calls, summary-first results and
+  `beaver_guide` (§8.1) cost little code and remove the common ways a
+  weak model gets stuck.
+- **Guardrail:** globs and times are resolved and echoed, never
+  applied silently, so a strong agent and the person can see exactly
+  what ran.
+- **To change:** each is local to the tool layer; `Next:` hints are
+  one function per tool.
+
+---
+
+## D71. `MCP.md` is also the agents' guide, served by `beaver_guide`
+
+**Status:** Accepted (2026-09-23). Spec: plans/2026-09-23-mcp-design.md (M31).
+
+- **Why:** the `instructions` string must stay short, but full flows
+  help weak agents most. Serving the same `MCP.md` that humans read
+  keeps one copy. It is copied into the app bundle at build time;
+  `beaver_guide` returns one section by its heading.
+- **Guardrails:** a test checks the bundled copy is the repo file,
+  every topic listed in `beaver_guide` has a section, and every tool
+  appears in at least one recipe.
+- **To change:** topics are the `##` headings of `MCP.md`'s recipes
+  part.
+- **Implemented:** the bundled file is `Beaver/Resources/MCP.md`
+  (SPM `resources: [.copy("Resources/MCP.md")]`), not a repo-root
+  `MCP.md`.
+

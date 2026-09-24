@@ -33,6 +33,7 @@ public actor LogStore {
         case networkBookmarksChanged(sessionId: Int64)
         /// A batch of live events could not be written and is lost.
         case writeFailed(message: String)
+        case agentActivityChanged
     }
 
     public enum Source {
@@ -413,14 +414,16 @@ public actor LogStore {
     public func facetCounts(
         sessionId: Int64,
         facet: Filter.Facet,
-        filter: Filter
+        filter: Filter,
+        afterId: Int64? = nil,
+        beforeId: Int64? = nil
     ) async throws -> [FacetCount] {
         let column = facet == .subsystem ? "subsystem" : "category"
         var others = filter
         others.clearChips(in: facet)
         let found = try await dbQueue.read { [others] db in
             // `where` always returns a clause starting with WHERE.
-            let (whereClause, args) = Self.where(filter: others, sessionId: sessionId)
+            let (whereClause, args) = Self.where(filter: others, sessionId: sessionId, afterId: afterId, beforeId: beforeId)
             return try Row.fetchAll(
                 db,
                 sql: """
@@ -464,6 +467,74 @@ public actor LogStore {
                 sql: "SELECT COUNT(*) FROM event \(whereClause)",
                 arguments: StatementArguments(args)
             ) ?? 0
+        }
+    }
+
+    /// A page in id order, for the MCP tools' cursors: unlike offsets,
+    /// ids don't shift while events stream in.
+    public func eventPage(
+        sessionId: Int64,
+        filter: Filter,
+        afterId: Int64? = nil,
+        beforeId: Int64? = nil,
+        limit: Int,
+        newestFirst: Bool,
+        includePayloads: Bool = false
+    ) async throws -> EventPage {
+        try await dbQueue.read { db in
+            let (whereClause, args) = Self.where(filter: filter, sessionId: sessionId,
+                                                 afterId: afterId, beforeId: beforeId)
+            let rows = try Row.fetchAll(
+                db,
+                sql: """
+                    SELECT \(Self.eventColumns(includePayloads: includePayloads))
+                    FROM event
+                    \(whereClause)
+                    ORDER BY id \(newestFirst ? "DESC" : "ASC")
+                    LIMIT ?
+                """,
+                arguments: StatementArguments(args + [limit])
+            )
+            let total = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM event \(whereClause)",
+                                         arguments: StatementArguments(args)) ?? 0
+            return EventPage(events: rows.map(Self.makeEventRecord), total: total)
+        }
+    }
+
+    /// Events per level under every other part of the filter.
+    public func levelCounts(
+        sessionId: Int64,
+        filter: Filter,
+        afterId: Int64? = nil,
+        beforeId: Int64? = nil
+    ) async throws -> [LogLevel: Int] {
+        var others = filter
+        others.minLevel = .verbose
+        return try await dbQueue.read { [others] db in
+            let (whereClause, args) = Self.where(filter: others, sessionId: sessionId,
+                                                 afterId: afterId, beforeId: beforeId)
+            var counts: [LogLevel: Int] = [:]
+            for row in try Row.fetchAll(
+                db,
+                sql: "SELECT level, COUNT(*) AS n FROM event \(whereClause) GROUP BY level",
+                arguments: StatementArguments(args)
+            ) {
+                let raw: String = row["level"]
+                if let level = LogLevel(rawValue: raw) { counts[level] = row["n"] }
+            }
+            return counts
+        }
+    }
+
+    /// The first event (by id) stamped at or after `ms`; `since` in the
+    /// MCP tools resolves to the id before it.
+    public func firstEventId(sessionId: Int64, atOrAfterMillis ms: UInt64) async throws -> Int64? {
+        try await dbQueue.read { db in
+            try Int64.fetchOne(
+                db,
+                sql: "SELECT MIN(id) FROM event WHERE session_id = ? AND timestamp_ms >= ?",
+                arguments: [sessionId, Int64(clamping: ms)]
+            )
         }
     }
 
@@ -516,6 +587,12 @@ public actor LogStore {
     }
 
     // MARK: - Events: Log feed
+
+    /// One page of events in id (arrival) order, and how many match in all.
+    public struct EventPage: Sendable {
+        public let events: [EventRecord]
+        public let total: Int
+    }
 
     /// What the Log feed shows for a filter, read in one go.
     public struct FeedSnapshot: Sendable {
@@ -1095,6 +1172,19 @@ public actor LogStore {
         }
     }
 
+    public func networkEntry(id: Int64) async throws -> NetworkEntry? {
+        try await dbQueue.read { db in
+            try Row.fetchOne(
+                db,
+                sql: "SELECT id, timestamp_ms, payload_json FROM network_entry WHERE id = ?",
+                arguments: [id]
+            ).flatMap { row in
+                NetworkEntry.parse(row["payload_json"], id: row["id"],
+                                   fallbackMillis: UInt64(row["timestamp_ms"] as Int))
+            }
+        }
+    }
+
     /// One entry's payload as received, for Copy JSON: the in-memory
     /// entries keep only the parsed fields.
     public func networkPayload(id: Int64) async throws -> String? {
@@ -1179,7 +1269,7 @@ public actor LogStore {
             sql: """
                 SELECT \(sessionColumns)
                 FROM session
-                ORDER BY started_at DESC
+                ORDER BY started_at DESC, id DESC
             """
         ).map(makeSession)
     }
@@ -1241,7 +1331,9 @@ public actor LogStore {
     /// at our scale (~100k events).
     private static func `where`(
         filter: Filter,
-        sessionId: Int64
+        sessionId: Int64,
+        afterId: Int64? = nil,
+        beforeId: Int64? = nil
     ) -> (String, [any DatabaseValueConvertible]) {
         var clauses: [String] = ["session_id = ?"]
         var args: [any DatabaseValueConvertible] = [sessionId]
@@ -1275,6 +1367,16 @@ public actor LogStore {
         if let hiddenThrough = filter.hiddenThroughEventId {
             clauses.append("id > ?")
             args.append(hiddenThrough)
+        }
+
+        // Id cursors for the MCP tools: stable while events stream in.
+        if let afterId {
+            clauses.append("id > ?")
+            args.append(afterId)
+        }
+        if let beforeId {
+            clauses.append("id < ?")
+            args.append(beforeId)
         }
 
         // Subsystem / category chips. Sorted so the SQL text is stable
@@ -1351,5 +1453,77 @@ public actor LogStore {
             clauses.append("\(column) NOT IN (\(placeholders))")
             args.append(contentsOf: values)
         }
+    }
+
+    // MARK: - Agent activity journal
+
+    public static let agentActivityCap = 2_000
+
+    @discardableResult
+    public func recordAgentActivity(_ new: NewAgentActivity, at: Date = Date()) async throws -> Int64 {
+        let id = try await dbQueue.write { db in
+            // A session deleted between the call and this write becomes no link.
+            try db.execute(
+                sql: """
+                    INSERT INTO agent_activity
+                        (at, client, tool, kind, summary, level, is_error, error, links_json, session_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, (SELECT id FROM session WHERE id = ?))
+                """,
+                arguments: [Int64(at.timeIntervalSince1970 * 1000), new.client, new.tool,
+                            new.kind.rawValue, new.summary, new.level, new.isError, new.error,
+                            new.linksJSON, new.sessionId]
+            )
+            let id = db.lastInsertedRowID
+            try db.execute(sql: "DELETE FROM agent_activity WHERE id <= ?",
+                           arguments: [id - Int64(Self.agentActivityCap)])
+            return id
+        }
+        broadcast(.agentActivityChanged)
+        return id
+    }
+
+    public func agentActivity(limit: Int = LogStore.agentActivityCap) async throws -> [AgentActivity] {
+        try await dbQueue.read { db in
+            try Row.fetchAll(
+                db,
+                sql: """
+                    SELECT id, at, client, tool, kind, summary, level, is_error, error,
+                           links_json, session_id, seen
+                    FROM agent_activity ORDER BY id DESC LIMIT ?
+                """,
+                arguments: [limit]
+            ).map { row in
+                AgentActivity(
+                    id: row["id"],
+                    at: Date(timeIntervalSince1970: TimeInterval(row["at"] as Int64) / 1000),
+                    client: row["client"], tool: row["tool"],
+                    kind: AgentActivity.Kind(rawValue: row["kind"]) ?? .system,
+                    summary: row["summary"], level: row["level"],
+                    isError: row["is_error"], error: row["error"],
+                    linksJSON: row["links_json"], sessionId: row["session_id"],
+                    seen: row["seen"]
+                )
+            }
+        }
+    }
+
+    public func unseenAgentActivityCount() async throws -> Int {
+        try await dbQueue.read { db in
+            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM agent_activity WHERE seen = 0") ?? 0
+        }
+    }
+
+    public func markAgentActivitySeen() async throws {
+        try await dbQueue.write { db in
+            try db.execute(sql: "UPDATE agent_activity SET seen = 1 WHERE seen = 0")
+        }
+        broadcast(.agentActivityChanged)
+    }
+
+    public func clearAgentActivity() async throws {
+        try await dbQueue.write { db in
+            try db.execute(sql: "DELETE FROM agent_activity")
+        }
+        broadcast(.agentActivityChanged)
     }
 }
