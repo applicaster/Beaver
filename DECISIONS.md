@@ -1733,18 +1733,20 @@ Network tab, with these choices:
    optional field on the wire needs a `NetworkEntry.parse` change and
    nothing else — no schema migration, no backfill.
 2. **Filter in memory.** `NetworkFilter.matches` runs as a plain
-   `Array.filter` in `NetworkViewModel.filtered` over the session's
-   full `entries` array, not a SQL `WHERE` clause. Ceiling: fine up to
-   a few thousand requests per session (marked with a `ponytail:`
-   comment at the call site); move to SQL or incremental filtering,
-   the way the Log feed already does for `event`, if a session ever
-   gets much bigger.
-3. **`clearEvents` deletes network rows.** The "Clear" toolbar action
-   deletes from `event`, `event_bookmark`, and now `network_entry` in
-   the same transaction. Unlike `storage_snapshot` — which is a
-   point-in-time snapshot the user may still want after clearing the
-   noisy log feed — network rows are a stream like `event`, so they
-   clear with it.
+   `Array.filter` over the session's `entries` array, not a SQL
+   `WHERE` clause. `NetworkViewModel` stores the result and redoes it
+   only when the filter, bookmarks or entries change; an append
+   filters just the new rows, and search edits are debounced. Ceiling:
+   a search re-scans every body, fine up to a few thousand requests
+   per session; move to SQL, the way the Log feed does for `event`,
+   if a session ever gets much bigger.
+3. **`clearEvents` keeps network rows.** `clearEvents` deletes from
+   `event` and `event_bookmark` only. Network rows (and their
+   bookmarks) go only when the session is deleted, through the
+   `ON DELETE CASCADE`. *Revised 2026-09-23:* it first deleted
+   `network_entry` too, treating requests as a stream like `event`, but
+   that silently destroyed request history whenever the user cleared
+   log noise. The Network tab has its own Clear, which only hides rows.
 4. **Rows are kept in arrival order, not start time.**
    `LogStore.networkEntries` reads back `ORDER BY id`, matching the
    order `NetworkViewModel` builds live by appending each new row as
@@ -1779,10 +1781,9 @@ migration on every SDK addition. `event` already sets this precedent:
   to SQL without FTS. Punted until the in-memory ceiling is actually
   hit; the Log feed's own `LIKE`-based approach (D15) suggests a SQL
   rewrite is worth doing the same way if the day comes.
-- *Don't clear `network_entry` on Clear*: considered for symmetry with
-  `storage_snapshot`, but `network_entry` behaves like `event` (a
-  stream you're actively trying to declutter), not like a storage
-  snapshot (a state you asked for and want to keep referring to).
+- *Clear `network_entry` with events*: the first version did, as a
+  stream like `event`; reverted (see 3) because clearing log noise
+  shouldn't cost the request history.
 
 **Android.** iOS sends `network` frames today
 (quick-brick-xray ≥ [#2676](https://github.com/applicaster/Zapp-Frameworks/pull/2676)).
@@ -1794,7 +1795,7 @@ frame (see PROTOCOL.md §4.3 for the two platforms' minor differences
 in header joining and `startTime` derivation).
 
 **Implications.**
-- `ProtocolDecoder.InboundPacket.network(NetworkEntry)` and
+- `ProtocolDecoder.InboundPacket.network(NetworkCapture)` and
   `.malformedNetwork` join `.event` / `.storage` and their existing
   error cases; `BeaverApp.handleInbound` routes `network` the same way
   `event` and `storage` are routed, so a malformed `network` frame

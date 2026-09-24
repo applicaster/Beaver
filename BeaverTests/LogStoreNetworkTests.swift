@@ -45,15 +45,18 @@ struct LogStoreNetworkTests {
     }
 
     @Test
-    func entriesAreScopedToSessionAndClearedWithEvents() async throws {
+    func entriesSurviveClearEventsAndGoWithTheSession() async throws {
         let store = try LogStore(source: .inMemory)
         let s1 = try await store.createSession(source: .live)
         let s2 = try await store.createSession(source: .live)
         try await store.recordNetworkEntry(entry("https://a.io", at: 1), sessionId: s1.id)
         try await store.recordNetworkEntry(entry("https://b.io", at: 1), sessionId: s2.id)
 
+        // The Log feed's Clear is about log noise, not request history.
         try await store.clearEvents(sessionId: s1.id)
+        #expect(try await store.networkEntries(sessionId: s1.id).count == 1)
 
+        try await store.deleteSession(id: s1.id)
         #expect(try await store.networkEntries(sessionId: s1.id).isEmpty)
         #expect(try await store.networkEntries(sessionId: s2.id).count == 1)
     }

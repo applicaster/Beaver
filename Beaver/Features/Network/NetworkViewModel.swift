@@ -115,13 +115,7 @@ final class NetworkViewModel {
                     if self.isPaused { self.pendingCount += 1 } else { await self.loadNew() }
                 case .networkBookmarksChanged(let sid) where sid == self.sessionId:
                     await self.loadBookmarks()
-                case .cleared(let sid) where sid == self.sessionId:
-                    self.entries = []
-                    self.recompute()
-                    self.selection = nil
-                    self.maxLoadedId = 0
-                    self.pendingCount = 0
-                    self.bookmarkedIds = []
+                // Not `.cleared`: the Log feed's clearEvents keeps network rows.
                 default:
                     break
                 }

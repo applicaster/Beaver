@@ -233,15 +233,19 @@ CREATE INDEX idx_network_session_ts ON network_entry(session_id, timestamp_ms);
 - `endSession(_ id: Int64) async`
   Marks `ended_at = now()`.
 
-- `recordNetworkEntry(_ entry: NetworkEntry, sessionId: Int64) async throws`
+- `recordNetworkEntry(_ capture: NetworkCapture, sessionId: Int64) async throws`
   / `networkEntries(sessionId: Int64, afterId: Int64 = 0) async throws -> [NetworkEntry]`
+  / `networkPayload(id: Int64)` / `networkPayloads(sessionId: Int64)`
   Insert and re-read `network_entry` rows. Unlike `append`, not batched —
   one frame is one insert — since `network` frames arrive far less often
   than `event` frames. Rows are read back `ORDER BY id`, i.e. arrival
   (insertion) order — which is completion order, since the SDK sends a
   `network` frame only once a request finishes (PROTOCOL.md §4.3). Live
   and reopened sessions therefore show the same order; see D39.
-  `clearEvents` deletes `network_entry` rows along with `event`.
+  Entries hold parsed fields only; the payload as received stays in
+  the row and is read by id for Copy JSON, and in bulk for Export.
+  `clearEvents` keeps `network_entry` rows: they go only with their
+  session, through the cascade.
 
 **Why GRDB over SwiftData.** Predictable performance under high-throughput
 append load; mature FTS5 integration; explicit migrations; explicit

@@ -292,8 +292,8 @@ public actor LogStore {
     }
 
     /// Delete every event row in a session plus any bookmarks that
-    /// pointed at those events. Used by the "Clear" toolbar button.
-    /// The session row itself is kept.
+    /// pointed at those events. The session row itself is kept, and so
+    /// are its network requests: they go only with the session (D39).
     public func clearEvents(sessionId: Int64) async throws {
         try await dbQueue.write { db in
             try db.execute(
@@ -305,10 +305,6 @@ public actor LogStore {
             // orphaned rows.
             try db.execute(
                 sql: "DELETE FROM event_bookmark WHERE session_id = ?",
-                arguments: [sessionId]
-            )
-            try db.execute(
-                sql: "DELETE FROM network_entry WHERE session_id = ?",
                 arguments: [sessionId]
             )
         }
