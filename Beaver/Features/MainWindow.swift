@@ -52,25 +52,13 @@ struct MainWindow: View {
             NavigationSplitView {
                 sidebar
             } detail: {
-                // The inspector hangs off the detail column, not the
-                // split view: on the split view it swallowed every
-                // toolbar item (Import, Export, Agent, …).
                 detail
-                    .inspector(isPresented: $showingAgentPanel) {
-                        if let agentActivity {
-                            AgentActivityView(model: agentActivity)
-                                .inspectorColumnWidth(min: 280, ideal: 360, max: 520)
-                        }
-                    }
             }
             .navigationTitle(navigationTitle)
             .toolbar { toolbarContent }
-            // `.inspector`'s content is mounted regardless of
-            // `isPresented` (its `onAppear` fires immediately, even
-            // hidden), so the view can't track "is the panel open"
-            // itself. Drive it from the presentation state instead —
-            // otherwise every entry gets marked seen the instant the
-            // app launches and the unseen badge never shows.
+            // "Is the panel open" comes from the presentation state, not
+            // the view's onAppear, so entries are marked seen exactly
+            // while the popover is showing.
             .onChange(of: showingAgentPanel) { _, isPresented in
                 agentActivity?.isOpen = isPresented
             }
@@ -404,7 +392,14 @@ struct MainWindow: View {
         }
         ToolbarItem(placement: .primaryAction) {
             if let agentActivity {
+                // A popover like Bookmarks, not an inspector: an inspector
+                // squeezed the feed and the detail pane, and on the split
+                // view it swallowed every toolbar item.
                 AgentToolbarButton(model: agentActivity, isPresented: $showingAgentPanel)
+                    .popover(isPresented: $showingAgentPanel, arrowEdge: .bottom) {
+                        AgentActivityView(model: agentActivity)
+                            .frame(width: 560, height: 640)
+                    }
             }
         }
         // Centered Connected pill. `.principal` keeps it anchored

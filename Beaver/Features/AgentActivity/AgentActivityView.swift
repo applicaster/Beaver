@@ -64,11 +64,12 @@ private struct AgentActivityRow: View {
             .font(.caption)
             Text(entry.summary)
                 .font(.callout)
-                .lineLimit(3)
+                .lineLimit(6)
+                .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
         }
-        .opacity(entry.kind == .read && !entry.isError ? 0.6 : 1)
-        .padding(.vertical, 2)
+        .opacity(entry.kind == .read && !entry.isError ? 0.75 : 1)
+        .padding(.vertical, 4)
     }
 }
 
