@@ -14,6 +14,15 @@ When releasing:
 
 ## [Unreleased]
 
+### Added
+- **Agent Access: the agent can point Beaver at something.** Asked to show
+  the failed requests or the auth errors, it switches the tab, session,
+  filters, storage layer and selected row while Beaver stays in the
+  background. Beaver comes forward only when the agent passes
+  `reveal: true`, which agents are told to do only when you ask to see it.
+  In the **Agent** panel, a call that touched a session, event or request
+  links to it — click to open it.
+
 ### Fixed
 - **Events sent right after a device connects are no longer lost.** What
   the SDK sent the moment it connected (for example, events it buffered
@@ -41,13 +50,6 @@ When releasing:
   everything an agent did, with a badge for what you haven't seen, and
   **Connect agent** shows how to hook up Claude Code, Cursor or any other
   MCP client — Claude Code, Cursor, Perplexity (also in the README).
-- **Agent Access: the agent can point Beaver at something.** Asked to show
-  the failed requests or the auth errors, it switches the tab, session,
-  filters, storage layer and selected row while Beaver stays in the
-  background. Beaver comes forward only when the agent passes
-  `reveal: true`, which agents are told to do only when you ask to see it.
-  In the **Agent** panel, a call that touched a session, event or request
-  links to it — click to open it.
 - **Log feed: the filter survives reconnects and relaunches**, and
   changing it keeps the selected row when it still matches.
   Right-click → **Show in Context** clears the filter and lands on the
