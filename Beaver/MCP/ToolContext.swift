@@ -9,6 +9,9 @@ import Foundation
 /// in the app target; tests pass a fake. PR 3 adds the `ui_show` members.
 public protocol AgentUI: Sendable {
     func snapshot() async -> HostSnapshot
+    /// A command reached the device from outside the command bar; it
+    /// joins the command bar's history like a typed one (design §5.6).
+    func didSendCommand(_ command: String) async
 }
 
 public struct HostSnapshot: Sendable, Equatable {

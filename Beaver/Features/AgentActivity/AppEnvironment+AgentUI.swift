@@ -27,4 +27,10 @@ extension AppEnvironment: AgentUI {
             )
         }
     }
+
+    nonisolated public func didSendCommand(_ command: String) async {
+        await MainActor.run {
+            NotificationCenter.default.post(name: .beaverCommandSent, object: command)
+        }
+    }
 }

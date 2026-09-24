@@ -62,6 +62,7 @@ or a release):
 | `network_copy` | A request as cURL, fetch() or JSON, with replay warnings |
 | `storage_snapshot` | Latest session / local / keychain storage snapshot |
 | `commands_list` | Commands the connected app accepts |
+| `commands_send` | Send a command to the app; optionally collect the logs it causes, following a restart |
 | `bookmarks_list` | Events and requests the user bookmarked |
 | `filters_list` | The user's saved filters |
 | `beaver_guide` | These recipes, by topic |
@@ -92,8 +93,8 @@ wherever ids do. Every result ends with `Next:` suggestions.
 ### wait — see what an action causes
 
 1. `beaver_status()` — note `latestEventId` of the device.
-2. Ask the user to do the action on the device (or do it yourself once
-   command tools exist).
+2. Ask the user to do the action on the device, or do it yourself with
+   `commands_send` / `storage_set`.
 3. `logs_wait(afterId: <latestEventId>, filter: {search: "…"}, timeoutMs: 30000)`.
 4. Timed out? `logs_query(afterId: <latestEventId>)` shows what did arrive.
 
@@ -110,9 +111,30 @@ wherever ids do. Every result ends with `Next:` suggestions.
 2. No snapshot? Ask the user to open Beaver's Storages tab while the device is
    connected.
 
-### commands — what the app accepts
+### commands — what the app accepts, and sending one
 
 1. `commands_list()` — names, syntax, descriptions from the app's `cmdlist`.
+2. `commands_send(command: "<name> <args>")` — exactly as typed in Beaver's
+   command bar; it joins the bar's history.
+
+### act-and-observe — change something and see the effect
+
+1. `commands_list()` — what the app accepts.
+2. `commands_send(command: "debug.flag.on newPlayer", collectLogsMs: 5000)` —
+   sends it and returns what the app logged in the next 5 s.
+3. Or in two steps: `beaver_status()` → note `latestEventId`, then
+   `commands_send(command: …)`, then
+   `logs_wait(afterId: <latestEventId>, filter: {subsystems: ["player*"]})`.
+
+### restart — the app restarts and you carry on
+
+1. `commands_send(command: "<restart command from commands_list>", collectLogsMs: 20000)`.
+2. The result says `sessionChanged: {from, to}` when the app came back in a
+   new session, and holds the logs from the new launch. Without `sessionId`,
+   `logs_wait` and `commands_send` follow the device; pass `sessionId` to stay
+   on one session (you get `sessionEnded: true` when it ends).
+3. `deviceDisconnected: true`: the app hasn't come back — ask the user to
+   open it.
 
 ### organise — what the user marked
 

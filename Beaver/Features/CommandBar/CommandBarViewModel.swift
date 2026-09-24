@@ -36,13 +36,7 @@ final class CommandBarViewModel {
     func submit() {
         let command = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !command.isEmpty else { return }
-
-        // Push to history (deduped, newest first).
-        history.removeAll { $0 == command }
-        history.insert(command, at: 0)
-        if history.count > historyLimit {
-            history.removeLast(history.count - historyLimit)
-        }
+        remember(command)
 
         // Send via the server.
         Task { [server, command] in
@@ -52,6 +46,16 @@ final class CommandBarViewModel {
         // Reset input + cursor.
         input = ""
         historyCursor = nil
+    }
+
+    /// Push onto history (deduped, newest first). Also called for commands
+    /// sent from outside the bar — see `Notification.Name.beaverCommandSent`.
+    func remember(_ command: String) {
+        history.removeAll { $0 == command }
+        history.insert(command, at: 0)
+        if history.count > historyLimit {
+            history.removeLast(history.count - historyLimit)
+        }
     }
 
     // MARK: - History navigation
@@ -77,4 +81,10 @@ final class CommandBarViewModel {
         historyCursor = cursor - 1
         input = history[cursor - 1]
     }
+}
+
+extension Notification.Name {
+    /// Posted with `object: String` when a command reached the device from
+    /// outside the command bar, so it joins the bar's history.
+    static let beaverCommandSent = Notification.Name("BeaverCommandSent")
 }
