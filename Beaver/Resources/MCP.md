@@ -74,6 +74,9 @@ or a release):
 | `filters_list` | The user's saved filters |
 | `filters_save` | Save a named filter (replaces one with the same name) |
 | `filters_delete` | Delete a saved filter |
+| `watch_start` | Count matching events for minutes to hours; optionally notify the user at a count |
+| `watch_status` | What a watch caught: counts, first/last, breakdown, whether it fired |
+| `watch_stop` | Stop a watch and get its final status |
 | `journal_note` | Tell the user something in the Agent panel, with clickable links; `attention` also notifies |
 | `beaver_guide` | These recipes, by topic |
 
@@ -200,3 +203,16 @@ wherever ids do. Every result ends with `Next:` suggestions.
    Banners). The Agent panel shows the same path with a button.
 3. `muted`: the user turned agent notifications off in Beaver's Agent panel
    on purpose; don't ask them to change it.
+
+### watch — while someone tests, for minutes to hours
+
+1. `watch_start(name: "player errors", filter: {minLevel: "error", subsystems: ["player*"]}, notify: {atCount: 10})`
+   — counting starts now. `notify` tells the **user** (an attention note and
+   a notification); you are not woken. Without `sessionId` the watch follows
+   the device into new sessions.
+2. Your turn may end; later, `watch_status(name: "player errors")` — matches,
+   first and last ids, counts per level, subsystem, category, whether it fired.
+3. `logs_query(afterId: <startId>, filter: {…same…}, order: "oldest")` for the
+   lines themselves.
+4. `watch_stop(name: "player errors")` — final status. Watches live until
+   Beaver quits.

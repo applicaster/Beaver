@@ -57,13 +57,16 @@ public struct ToolContext: Sendable {
     public let store: LogStore
     public let ui: any AgentUI
     public let device: any DeviceLink
+    /// Design M29: in memory until Beaver quits (or Agent Access is turned off).
+    public let watches: Watches
     public let now: @Sendable () -> Date
 
-    public init(store: LogStore, ui: any AgentUI, device: any DeviceLink,
+    public init(store: LogStore, ui: any AgentUI, device: any DeviceLink, watches: Watches = Watches(),
                 now: @escaping @Sendable () -> Date = { Date() }) {
         self.store = store
         self.ui = ui
         self.device = device
+        self.watches = watches
         self.now = now
     }
 }

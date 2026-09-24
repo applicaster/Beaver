@@ -13,6 +13,7 @@ public actor AgentAccess {
     public static let portKey = "mcpPort"
 
     private let server: MCPServer
+    private let watches: Watches
     private var listener: MCPHTTPListener?
     /// Bumped by every `start()`/`stop()`; the value a call bumped it to
     /// is its ticket. Checked against the current value at every point
@@ -35,8 +36,10 @@ public actor AgentAccess {
     public init(store: LogStore, ui: any AgentUI, device: any DeviceLink,
                 beforeBind: (@Sendable () async -> Void)? = nil,
                 duringDrain: (@Sendable () async -> Void)? = nil) {
+        let watches = Watches()
+        self.watches = watches
         server = MCPServer(tools: BeaverTools.all,
-                           context: ToolContext(store: store, ui: ui, device: device),
+                           context: ToolContext(store: store, ui: ui, device: device, watches: watches),
                            journal: AgentJournal(store: store))
         self.beforeBind = beforeBind
         self.duringDrain = duringDrain
@@ -85,6 +88,8 @@ public actor AgentAccess {
     public func stop() async {
         generation &+= 1
         await drain(generation)
+        // Turned off: no watch should notify the person afterwards.
+        _ = await watches.removeAll()
     }
 
     /// Stops and clears whatever listener is currently claimed, as long
