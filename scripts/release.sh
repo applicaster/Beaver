@@ -207,7 +207,11 @@ rm -f "$NOTARIZE_ZIP" "$EXPORT_OPTIONS_PLIST"
 # docs/appcast.xml. CI also calls this; running locally without a
 # key isn't an error, the release just doesn't ship through Sparkle.
 
-if [ -x "$REPO_ROOT/scripts/sign-appcast.sh" ]; then
+# Tester bundles (CI "Tester bundle" job) set SKIP_APPCAST=1: a PR build
+# must never reach the Sparkle feed installed Beavers read.
+if [ -n "${SKIP_APPCAST:-}" ]; then
+    echo "ℹ️  SKIP_APPCAST set — not touching docs/appcast.xml."
+elif [ -x "$REPO_ROOT/scripts/sign-appcast.sh" ]; then
     if [ -n "${SPARKLE_PRIVATE_KEY_BASE64:-}" ] \
        || security find-generic-password -s "https://sparkle-project.org" \
               >/dev/null 2>&1; then
