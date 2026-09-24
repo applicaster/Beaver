@@ -230,7 +230,7 @@ Conventions for every tool:
 
 | Tool | Args | Returns | Hints |
 |---|---|---|---|
-| `beaver_status` | — | Beaver version; WS state (`listening` / `clientConnected` / `failed(reason)`); `ws://` URLs for the device to connect to; `devices: [...]` — each with id, fingerprint (app, version, model, platform, OS) and live session id; an array even though D2 allows one *(M25)*; viewed session id; MCP port; `notifications` state *(M28)* | R |
+| `beaver_status` | — | Beaver version; WS state (`listening` / `clientConnected` / `failed(reason)`); `ws://` URLs for the device to connect to; `devices: [...]` — each with id, fingerprint (app, version, model, platform, OS), live session id and its latest event id (the starting point for `afterId`); an array even though D2 allows one *(M25)*; viewed session id; MCP port; `notifications` state *(M28)* | R |
 
 ### 5.2 Sessions
 
