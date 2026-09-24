@@ -72,14 +72,23 @@ enum StatusTools {
         ])
     ) { args, ctx in
         let limit = try args.limit(default: 20, max: 200)
-        let source = try args.string("source").flatMap(Session.Source.init(rawValue:))
-        let filtered = try await ctx.store.sessions().filter { source == nil || $0.source == source }
-        let all = filtered.sorted { s0, s1 in
-            if s0.startedAt != s1.startedAt {
-                return s0.startedAt > s1.startedAt
+        let sourceStr = try args.string("source")
+        let source: Session.Source?
+        if let s = sourceStr {
+            let normalized = s.lowercased()
+            if normalized == "any" {
+                source = nil
+            } else if normalized == "live" {
+                source = .live
+            } else if normalized == "imported" {
+                source = .imported
+            } else {
+                throw ToolError("source must be live, imported or any. Example: sessions_list(source: \"live\").")
             }
-            return s0.id > s1.id
+        } else {
+            source = nil
         }
+        let all = try await ctx.store.sessions().filter { source == nil || $0.source == source }
         guard !all.isEmpty else {
             return ToolResult(summary: "Beaver has no sessions yet.",
                               structured: ["sessions": []],

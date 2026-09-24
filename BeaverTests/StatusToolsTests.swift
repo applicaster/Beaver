@@ -49,4 +49,40 @@ struct StatusToolsTests {
         #expect(r.summary == "Beaver has no sessions yet.")
         #expect(!r.next.isEmpty)
     }
+
+    @Test("sessions_list filters by source: imported only")
+    func sourceImportedOnly() async throws {
+        let store = try LogStore(source: .inMemory)
+        _ = try await store.createSession(source: .live)
+        let imported = try await store.createSession(source: .imported)
+        let args = ToolArguments(["source": .string("imported")])
+        let r = try await StatusTools.sessionsList.run(args, makeContext(store))
+        let rows = try #require(r.structured["sessions"]?.array)
+        #expect(rows.count == 1)
+        #expect(rows.first?["id"]?.int64 == imported.id)
+    }
+
+    @Test("sessions_list with limit: returns one row")
+    func limitOne() async throws {
+        let store = try LogStore(source: .inMemory)
+        _ = try await store.createSession(source: .imported)
+        _ = try await store.createSession(source: .live)
+        let args = ToolArguments(["limit": JSON(1)])
+        let r = try await StatusTools.sessionsList.run(args, makeContext(store))
+        let rows = try #require(r.structured["sessions"]?.array)
+        #expect(rows.count == 1)
+        #expect(r.structured["total"]?.int64 == 2)
+    }
+
+    @Test("sessions_list rejects invalid source")
+    func sourceBogusRejected() async throws {
+        let store = try LogStore(source: .inMemory)
+        let args = ToolArguments(["source": .string("bogus")])
+        do {
+            _ = try await StatusTools.sessionsList.run(args, makeContext(store))
+            #expect(Bool(false), "Expected ToolError to be thrown")
+        } catch let error as ToolError {
+            #expect(error.message.contains("source must be live, imported or any"))
+        }
+    }
 }

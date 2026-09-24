@@ -1269,7 +1269,7 @@ public actor LogStore {
             sql: """
                 SELECT \(sessionColumns)
                 FROM session
-                ORDER BY started_at DESC
+                ORDER BY started_at DESC, id DESC
             """
         ).map(makeSession)
     }

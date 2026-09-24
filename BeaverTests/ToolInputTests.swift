@@ -112,4 +112,15 @@ struct ToolInputTests {
         #expect(capped.truncated)
         #expect(capped.text.utf8.count <= 5)
     }
+
+    @Test("resolveSession picks the same session as sessions_list lists first")
+    func resolveSessionConsistency() async throws {
+        let store = try LogStore(source: .inMemory)
+        _ = try await store.createSession(source: .imported)
+        _ = try await store.createSession(source: .live)
+        let ctx = makeContext(store)
+        let resolved = try await ctx.resolveSession(ToolArguments())
+        let sessions = try await store.sessions()
+        #expect(resolved.id == sessions.first?.id)
+    }
 }
