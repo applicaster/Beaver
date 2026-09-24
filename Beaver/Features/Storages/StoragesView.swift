@@ -464,9 +464,10 @@ private struct StoragesTopBar: View {
                 } label: {
                     Label("Reload", systemImage: "arrow.clockwise")
                 }
+                .keyboardShortcut("r", modifiers: .command)
                 .disabled(!isClientConnected)
                 .help(isClientConnected
-                      ? "Re-fetch the device's storage snapshot now"
+                      ? "Re-fetch the device's storage snapshot now (⌘R)"
                       : "Reconnect the device to refresh")
             }
 
@@ -539,8 +540,13 @@ private struct StoragesSearchBar: View {
 
     private var searchField: some View {
         HStack(spacing: 6) {
-            Image(systemName: "magnifyingglass")
-                .foregroundStyle(.secondary)
+            Button { isFocused = true } label: {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .keyboardShortcut("f", modifiers: .command)
+            .help("Search (⌘F)")
 
             TextField("Discover keys and values…", text: $vm.searchTerm)
                 .textFieldStyle(.plain)
@@ -1166,11 +1172,39 @@ private struct NamespaceRow: View {
                 } label: {
                     Label("Copy as JSON", systemImage: "curlybraces")
                 }
+                if canSet {
+                    Divider()
+                    Button {
+                        onAddInside(record, namespace)
+                    } label: {
+                        Label("Add key inside…", systemImage: "plus")
+                    }
+                    .disabled(!isClientConnected)
+                }
             } else {
                 Button {
                     copyScalarValue()
                 } label: {
                     Label("Copy value", systemImage: "doc.on.doc")
+                }
+                if canSet || canDelete {
+                    Divider()
+                }
+                if canSet {
+                    Button {
+                        onEdit(namespace, nil, record.key, record.valueText ?? "")
+                    } label: {
+                        Label("Edit…", systemImage: "pencil")
+                    }
+                    .disabled(!isClientConnected)
+                }
+                if canDelete {
+                    Button(role: .destructive) {
+                        onDelete(record, namespace)
+                    } label: {
+                        Label("Delete…", systemImage: "trash")
+                    }
+                    .disabled(!isClientConnected)
                 }
             }
         }
@@ -1575,6 +1609,21 @@ private struct InnerKeyRow: View {
                 copyKeyValueLine()
             } label: {
                 Label("Copy \"key\": value", systemImage: "text.alignleft")
+            }
+            if (canSet && !child.isContainer) || canDelete {
+                Divider()
+            }
+            if canSet && !child.isContainer {
+                Button { onEdit(rawText) } label: {
+                    Label("Edit…", systemImage: "pencil")
+                }
+                .disabled(!isClientConnected)
+            }
+            if canDelete {
+                Button(role: .destructive, action: onDelete) {
+                    Label("Delete…", systemImage: "trash")
+                }
+                .disabled(!isClientConnected)
             }
         }
     }
