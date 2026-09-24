@@ -5,7 +5,7 @@ Date: 2026-09-23
 Scope: phase 1 (Beaver itself) in full; phase 2 (the app's toolbox through
 Beaver) as a direction to be researched before it is planned.
 
-Every choice below is a numbered decision in §12 (M1…M28), each with its
+Every choice below is a numbered decision in §12 (M1…M31), each with its
 reason, the alternatives, and what changing it would touch. Sections refer to
 them as *(M4)*. To change the design, change the decision and follow its
 "to change" note. When the first implementation PR lands, accepted decisions
@@ -118,6 +118,8 @@ MCP client (Claude Code / Cursor / Codex)
 | `Beaver/Store/Schema.swift` | BeaverCore | One migration: the `agent_activity` table (§7.2) |
 | `Beaver/Features/AgentActivity/AgentActivityView.swift` | app | The Agent panel (inspector), toolbar button with badge, Dock badge *(M17)* |
 | `Beaver/Features/AgentActivity/AgentNotifier.swift` | app | `UNUserNotificationCenter`: permission state, the prompt, System Settings deep link, coalescing, click → reveal and show *(M28)* |
+| `Beaver/MCP/Watches.swift` | BeaverCore | Watch registry, `notify` task over `LogStore.changes()` *(M29)* |
+| `Beaver/MCP/ToolInput.swift` | BeaverCore | Forgiving inputs: glob/case resolution against facets, level aliases, `since`/`until` → ids, `Next:` hint helpers *(M30)* |
 | `Beaver/MCP/AgentAccess.swift` | BeaverCore | The only entry point the app calls: `start(env:)`, `stop()`. The future access check goes here *(M24)* |
 | `Beaver/AppEnvironment.swift` | app | Conforms to `AgentUI`; gains `selectedTab`, `selection`, `reveal()` *(M12)* |
 | `Beaver/BeaverApp.swift` | app | Starts and stops the listener with the menu toggle *(M4, M22)* |
@@ -209,6 +211,18 @@ Conventions for every tool:
   `subsystems[]`, `excludeSubsystems[]`, `categories[]`,
   `excludeCategories[]`. It maps 1:1 onto `Filter`, so agent and UI results
   match *(M10)*.
+- **Forgiving inputs** *(M30)*. Subsystem and category values accept `*`
+  globs and ignore case; they are resolved against the session's facets to
+  exact names, and the result echoes what they resolved to. A name that
+  matches nothing fails with the closest existing names. Levels accept
+  aliases (`warn`, `err`, `e`, integers 0–4).
+- **Time or id.** Wherever `afterId` / `beforeId` are accepted, `since` /
+  `until` are too: a duration back from now (`"5m"`, `"2h"`) or an ISO time.
+  They resolve to ids with `LogStore.nearestEventId`, and the result echoes
+  the ids, so the agent can keep paging by id.
+- **Every result ends with `Next:`** — one to three suggested calls, with
+  arguments filled in (`Next: logs_get(ids: [48211]) for the payload`). Every
+  error says what to do, with an example call *(M30)*.
 - R = `readOnlyHint`, D = `destructiveHint`, I = `idempotentHint`, W = writes
   but not destructive.
 
@@ -231,7 +245,7 @@ Conventions for every tool:
 
 | Tool | Args | Returns | Hints |
 |---|---|---|---|
-| `logs_facets` | `sessionId`, `filter` | counts per level, subsystem and category under the other facets (same as `LogStore.facetCounts`) | R |
+| `logs_facets` | `sessionId`, `filter`, `afterId` / `beforeId` (or `since` / `until`) — what arrived in a range | counts per level, subsystem and category under the other facets (same as `LogStore.facetCounts`) | R |
 | `logs_query` | `sessionId`, `filter`, `afterId`, `beforeId`, `limit` (default 100, max 500), `order` (`newest` default / `oldest`), `includeData` (default false) | one line per event, `#<id> HH:mm:ss.SSS LEVEL subsystem/category: message`; `total` matching; `nextCursor` | R |
 | `logs_get` | `ids[]` (max 50) | full events with `data` and `context` JSON; payloads over 256 KB truncated with a `truncated` flag | R |
 | `logs_wait` | `sessionId`, `filter`, `afterId` (default: latest id now), `timeoutMs` (default 15 000, max 60 000), `limit` | the matching events that arrived, or `timedOut: true`; plus `sessionChanged` / `sessionEnded` / `deviceDisconnected` when they happen *(M26)* | R. Long-poll on `LogStore.changes()` *(M11)* |
@@ -283,7 +297,34 @@ Conventions for every tool:
 |---|---|---|---|
 | `journal_note` | `text`, `level` (`info` default / `attention`), `links[]` (each `{sessionId}`, `{eventId}`, `{networkId}` or `{savedFilter}`) | the note id; `notified: true|false` and why not *(M28)* | W. How the agent tells the person something ("this subsystem floods 2 000 lines/s", "here is the cause"). Notes stand out in the panel; each link is clickable |
 
-Twenty-six tools. Adding a user-facing capability to Beaver means adding or
+### 5.10 Watches *(M29)*
+
+A watch is a named "since here, matching this" that outlives one call. Counts
+are computed from the store when asked, so a watch costs nothing while it
+waits; only `notify` needs a background task.
+
+| Tool | Args | Returns | Hints |
+|---|---|---|---|
+| `watch_start` | `name`, `filter`, `sessionId` (omitted: follow the device, M26), `notify` (`{onFirst: true}` or `{atCount: n}`, optional) | start event id, start time | W |
+| `watch_status` | `name` (omitted: all watches) | per watch: matches since start, first and last matching event, counts per level / subsystem / category, id range, whether `notify` fired, session changes seen | R |
+| `watch_stop` | `name` (or `all: true`) | the final `watch_status` | W, I |
+
+- When `notify` fires, the **person** is told: a journal entry and an
+  `attention` note ("Watch 'player errors': 10 matches", click shows the
+  first). Beaver cannot wake the **agent** (M2: no server-initiated
+  messages); the agent sees it on its next `watch_status`, or the person tells
+  it.
+- Watches live in memory until Beaver quits. Their start id does not, so the
+  events stay reachable with `logs_query(afterId: startId)`.
+- Starting, firing and stopping are journal entries.
+
+### 5.11 Guide *(M31)*
+
+| Tool | Args | Returns | Hints |
+|---|---|---|---|
+| `beaver_guide` | `topic` (optional: `overview`, `investigate`, `act-and-observe`, `restart`, `watch`, `review-errors`, `network`, `storage`, `files`, `ui`, `notifications`) | the matching section of `MCP.md`: step-by-step recipes with real calls. No topic → the list of topics with one line each | R |
+
+Thirty tools. Adding a user-facing capability to Beaver means adding or
 extending one of them (§9).
 
 ---
@@ -466,13 +507,16 @@ Three layers, each covering what the others cannot:
    an app repo gets it with no setup. Draft:
 
    > Beaver is a macOS log viewer connected to one mobile app over WebSocket.
-   > Start with `beaver_status`: if no device is connected, the user must
+   > If unsure how to do something, call `beaver_guide`. Start with
+   > `beaver_status`: if no device is connected, the user must
    > open remote assistance on the device, and you can still read past
    > sessions. Omitted `sessionId` means the live session, else the viewed one.
    > Discover before filtering: call `logs_facets` before `logs_query`,
    > because subsystem names are namespaced strings you will not guess. To
    > see what a device action causes, note the latest id, act
-   > (`commands_send`, `storage_set`), then `logs_wait` with `afterId`.
+   > (`commands_send`, `storage_set`), then `logs_wait` with `afterId`. To follow something for
+   > minutes or longer, use `watch_start` and check `watch_status` later; you
+   > will not be woken, the user is notified.
    > Network bodies are capped at 100 KB by the SDK and headers such as
    > Authorization are redacted, so a replayed cURL may fail. Storage values
    > cannot contain spaces through `storage_set`. Omitting `sessionId`
@@ -486,11 +530,31 @@ Three layers, each covering what the others cannot:
    > says `notified: false`, tell them notifications are off and pass on the
    > `howToEnable` text.
 
-2. **Tool and parameter descriptions**: what each does, defaults, limits.
+2. **Tool and parameter descriptions**: each starts with "Use when…", then
+   defaults and limits.
 
-3. **`MCP.md`**: the same catalog as §5 for humans, the usage rules above, and
-   the connection instructions per client. The drift test (§10) keeps it
-   honest.
+3. **`MCP.md`**: what the MCP can do, the full flows as recipes, the catalog
+   as in §5, and connection instructions per client. The drift test (§10)
+   keeps it honest. It is **also served to agents** by `beaver_guide`
+   (§5.11), so an agent that is unsure reads the recipe instead of guessing.
+   Its seed is `plans/2026-09-23-mcp-capabilities.md`.
+
+### 8.1 Built so a weak agent still gets the most out of it *(M30)*
+
+The target is not the best agent, it is the weakest one someone will point at
+Beaver. Every choice below removes a way to get stuck:
+
+| A weak agent… | So Beaver… |
+|---|---|
+| doesn't know where to start | `instructions` say "start with `beaver_status`"; its result ends with `Next:` calls |
+| guesses subsystem names | accepts globs, ignores case, answers a miss with the closest real names |
+| thinks in time, not ids | accepts `since: "5m"` anywhere ids are accepted |
+| doesn't know the next step | every result ends with `Next:` suggestions, arguments filled in |
+| repeats a failing call | every error says what to do, with an example call |
+| drowns in output | small default limits, one line per row, payloads only on request, a summary sentence first ("41 errors in #13 since 14:02; top: auth ×30") |
+| forgets how a flow goes | `beaver_guide(topic)` returns the recipe |
+| polls in a loop | `logs_wait` for seconds, watches for minutes to hours |
+| loses the session after a restart | omitted `sessionId` follows the device (M26) |
 
 A `SKILL.md` is not shipped. The `instructions` string already reaches every
 client; add a skill only if agents are seen misusing the tools in ways
@@ -549,6 +613,9 @@ Swift Testing, `swift test`, no device and no app host:
 | `BeaverToolsTests` | each group against `LogStore(databaseURL: .inMemory)` and a `FakeDeviceLink`: filter mapping equals the UI's `Filter`; pagination cursors; `logs_wait` returns on append and times out; `storage_set` rejects whitespace, reports `applied` / `notApplied` from the read-back; session resolution order *(M9)* |
 | `AgentJournalTests` | every call is recorded with the right kind; failed calls carry the error; notes keep their links; the 2 000-row trim; entries survive session delete with the link nulled; `SessionExport` output contains no journal data |
 | `AgentSignalTests` | which calls produce a toast / Dock badge / notification (the table in §7.2); coalescing to one per 30 s with a fake clock; each permission state maps to the right strip text, path and button action; an undelivered note is marked and returns `notified: false` |
+| `WatchTests` | counts match `logs_query` over the same range; `notify` fires once at `onFirst` / `atCount`; a watch follows the device across a reconnect; `watch_stop` returns the final status |
+| `ToolInputTests` | globs and case resolve to the exact facet names and are echoed; a miss lists the closest names; level aliases; `since: "5m"` resolves to the right id; every tool result ends with `Next:`; every error has an example call |
+| `GuideTests` | the bundled `MCP.md` equals the repo file; every `beaver_guide` topic has a section; every registered tool appears in at least one recipe |
 | `FollowDeviceTests` | omitted `sessionId` carries a wait across a disconnect/reconnect and reports `sessionChanged`; a pinned session reports `sessionEnded`; no reconnect → `deviceDisconnected` |
 | `AgentAccessTests` | the menu toggle starts and stops the listener; toggled off, the port is closed |
 | `MCPDocDriftTests` | the tool names in `MCP.md`'s tables equal the registered names |
@@ -673,9 +740,9 @@ Each decision: what, why, alternatives, and what changing it touches.
   subscriptions need the SSE stream M2 leaves out.
 - **To change:** additive.
 
-### M8. One tool per capability, grouped (26 tools)
+### M8. One tool per capability, grouped (30 tools)
 - **Why:** agents choose better between named, narrow tools than between
-  modes of one giant tool. 26 is well within what clients handle.
+  modes of one giant tool. 30 is well within what clients handle.
 - **Alternatives:** a few "god tools" (`query(kind, …)`); one tool per UI
   control (hundreds).
 - **To change:** merge within a group; the drift test and `MCP.md` follow.
@@ -872,6 +939,40 @@ Each decision: what, why, alternatives, and what changing it touches.
 - **To change:** `AgentNotifier` (app target) owns permission, delivery and
   coalescing; the coalescing window is a constant.
 
+### M29. Watches: named, cheap, notify the person
+- **Why:** agreed with the user (2026-09-23). "Watch player errors while the
+  tester plays for 20 minutes" can't be done with `logs_wait` (≤ 60 s)
+  without the agent looping and burning tokens, and an agent's turn may end
+  before the tester does. Since every event is already stored, a watch is a
+  start id plus a filter, and counts are one query at `watch_status` time.
+- **Limit:** Beaver can't wake the agent (M2). A notification reaches the
+  person, who can tell the agent. Server-to-agent push would need M2's SSE
+  extension and client support for acting on it.
+- **Alternatives:** the agent loops `logs_wait` (costly, dies with the turn);
+  persisted watches (no need: the start id is what matters, and it survives).
+- **To change:** watches are a dictionary in one actor; persisting them is a
+  table.
+
+### M30. Designed for the weakest agent
+- **Why:** agreed with the user (2026-09-23): "a dumb agent should still work
+  at the maximum." Forgiving inputs, time-or-id, `Next:` hints, errors with
+  example calls, summary-first results and `beaver_guide` (§8.1) cost little
+  code and remove the common ways a weak model gets stuck.
+- **Guardrail:** globs and times are resolved and echoed, never applied
+  silently, so a strong agent and the person can see exactly what ran.
+- **To change:** each is local to the tool layer; `Next:` hints are one
+  function per tool.
+
+### M31. `MCP.md` is also the agents' guide, served by `beaver_guide`
+- **Why:** the `instructions` string must stay short, but full flows help weak
+  agents most. Serving the same `MCP.md` that humans read keeps one copy.
+  It is copied into the app bundle at build time; `beaver_guide` returns one
+  section by its heading.
+- **Guardrails:** a test checks the bundled copy is the repo file, every
+  topic listed in `beaver_guide` has a section, and every tool appears in at
+  least one recipe.
+- **To change:** topics are the `##` headings of `MCP.md`'s recipes part.
+
 ---
 
 ## 13. Delivery
@@ -880,18 +981,19 @@ Each step is a PR that releases on merge (see `CLAUDE.md`), so each must stand
 on its own. Testers check each PR on its tester bundle before merge *(M27)*.
 
 1. **Core, read tools, journal.** `AgentAccess`, `MCPServer`, listener, menu
-   items, `beaver_status`, `sessions_list`, `logs_*`, `network_*`,
+   items, forgiving inputs and `Next:` hints (M30), `beaver_guide` with
+   `MCP.md` bundled (M31), `beaver_status`, `sessions_list`, `logs_*`, `network_*`,
    `storage_snapshot(refresh:false)`, `commands_list`, `bookmarks_list`,
    `filters_list`; `AgentJournal`, the `agent_activity` migration and the
    Agent panel with badges; `MCP.md` with "Testing without Xcode"; the drift
    test; the `CLAUDE.md` rule; the CI "Tester bundle" job; migration of
-   M1–M17 and M20–M28 to `DECISIONS.md` (M24 as an open decision).
+   M1–M17 and M20–M31 to `DECISIONS.md` (M24 as an open decision).
 2. **Actions.** `commands_send`, `storage_snapshot(refresh:true)`,
    `storage_set/delete`, `sessions_import/export/delete`, `logs_clear`,
    `bookmarks_set`, `filters_save/delete`, `journal_note`, follow-device
    waits (M26) and the disconnect system entry; toasts for destructive calls
    and `attention` notes; macOS notifications with the permission strip and
-   menu item (M28).
+   menu item (M28); watches (M29).
 3. **UI.** State move (§7.1), `ui_state`, `ui_show`, clickable journal links.
 4. **Before phase 2:** settle M24 (access control). Then phase 2 research
    (§11), its own spec update and plan.
