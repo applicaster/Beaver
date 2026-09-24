@@ -107,6 +107,22 @@ it resumes follow-tail.
 - Floating button overlay over the table.
 - Counter increments while paused, resets to zero when follow-tail resumes.
 
+**Implemented (2026-09-23).** Until then, following was split across an
+"Auto-scroll" toggle (off by default) and a Pause button, and the
+"N new" pill only showed while paused. Now:
+- `TailFollow` holds the state. `ScrollWatcher` reports whether a user
+  scroll ended within three rows of the bottom, and that decides
+  following. Programmatic scrolls don't report.
+- Off the tail, a floating pill over the table reads "N new ↓", or
+  "Latest ↓" when nothing has arrived. Clicking it unpauses, follows
+  and scrolls to the newest row.
+- Jumps (match, bookmark, time, `j`/`k`/`e` off the last row, a
+  restored selection) stop following instead of pausing.
+- The Auto-scroll toggle is gone; being at the bottom now does that
+  job. Pause stays as the explicit "stop new rows arriving" switch.
+  Scrolling to the bottom doesn't unpause.
+- A fresh feed follows from the start, so it opens on the newest rows.
+
 ---
 
 ## D4. Search and filtering: substring + level + regex toggle + saved filters
@@ -1896,4 +1912,35 @@ would misorder them, and a reload per late event would undo the win.
 
 "Before" counts the regroup once. It used to run on every `body`
 pass as a computed property.
+
+---
+
+## D42. The Log-feed filter outlives its session; selection outlives a filter change
+
+**Status:** Accepted (2026-09-23). Extends D32.
+
+**Decision.**
+- When the viewed session changes (reconnect, or picking another one),
+  the new `LogFeedViewModel` starts with the previous one's filter,
+  minus Clear's `hiddenThroughEventId`, which is an event id from the
+  old session. The filter is also remembered in `UserDefaults`
+  (`logFeed.lastFilter`, JSON of `Filter`), so the first session after
+  a relaunch starts with it too.
+- A filter change keeps the selection. Once the new snapshot lands,
+  selected events that still match are re-selected, on whichever rows
+  now show them, and the first is scrolled into view. The table still
+  passes through the empty state D32's crash workaround needs.
+- "Show in Context" on a row clears the filter, keeping Clear unless it
+  hides that row, and lands on the row among its neighbours.
+
+**Alternatives considered.**
+- *A saved filter marked Default.* Deferred. Remembering the last
+  filter covers relaunch without a new setting, and presets still work
+  as before.
+- *Store the last filter in the database.* It's a per-user view
+  preference, not session data. `UserDefaults` already holds the
+  column layout.
+
+**Trade-off.** A stored filter from before a `Filter` field was added
+won't decode, and the feed starts unfiltered once.
 
