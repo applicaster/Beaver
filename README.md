@@ -32,6 +32,7 @@ source tree lives under `Beaver/`.
 | `DECISIONS.md`      | Numbered, dated decision log (D1–D20). Source of truth.       |
 | `ARCHITECTURE.md`   | Layered design synthesizing the decisions.                    |
 | `PROTOCOL.md`       | Wire-protocol contract with the mobile SDK.                   |
+| `SESSION_FILE_FORMAT.md` | Export/import file shared with zapp-support (normative). |
 | `COMMAND_CATALOG.md`| Forward-looking spec for the SDK `cmdspec` command (D17).     |
 | `SCAFFOLD.md`       | One-time Xcode project setup steps.                           |
 
