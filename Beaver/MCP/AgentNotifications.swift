@@ -125,6 +125,12 @@ public struct NotificationThrottle: Sendable {
         return count
     }
 
+    /// The window ended but nothing was posted (permission changed, Beaver
+    /// came to front): drop what's held without opening a new window.
+    public mutating func discardHeld() {
+        held = 0
+    }
+
     /// When the current window closes, or nil when nothing is held.
     public var windowEnds: Date? {
         held > 0 ? lastSent?.addingTimeInterval(AgentNotifications.window) : nil

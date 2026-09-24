@@ -37,10 +37,13 @@ enum StatusTools {
             + (host.deviceURL.map { " · the device connects to \($0)" } ?? ""))
         if let viewing = host.viewingSessionId { lines.append("The user is viewing session #\(viewing).") }
         lines.append("\(sessions.count) session(s) stored.")
-        lines.append("Agent notifications: \(host.notifications.rawValue)"
-            + (host.notifications == .allowed ? "."
-               : host.notifications == .muted ? " (the user muted them in Beaver)."
-               : " — attention notes can't reach the user in the background. Turn on: \(AgentNotifications.howToEnable)."))
+        let notificationsSuffix: String = switch host.notifications {
+        case .allowed: "."
+        case .muted: " (the user muted them in Beaver)."
+        case .notDetermined: " — Beaver asks the user the first time you send an attention note."
+        case .denied: " — attention notes can't reach the user in the background. Turn on: \(AgentNotifications.howToEnable)."
+        }
+        lines.append("Agent notifications: \(host.notifications.rawValue)" + notificationsSuffix)
 
         let summary = devices.isEmpty
             ? "No device is connected. \(sessions.isEmpty ? "No sessions are stored yet." : "Past sessions can still be read.")"

@@ -101,4 +101,23 @@ struct AgentSignalTests {
         #expect(AgentNotifications.summary(count: 1) == "1 new finding from the agent")
         #expect(AgentNotifications.summary(count: 3) == "3 new findings from the agent")
     }
+
+    @Test("discardHeld drops what's held without opening a new window")
+    func discardHeld() {
+        let t0 = Date(timeIntervalSince1970: 1_000)
+        var t = NotificationThrottle()
+        let admit1 = t.admit(at: t0)
+        let admit2 = t.admit(at: t0 + 10)
+        let windowEnds1 = t.windowEnds
+        t.discardHeld()
+        let windowEnds2 = t.windowEnds
+        // Unlike drain(), discardHeld() never opens a new window: the next
+        // note still has to wait out the original 30 s from t0.
+        let admit3 = t.admit(at: t0 + 20)
+        #expect(admit1)
+        #expect(!admit2)
+        #expect(windowEnds1 == t0 + 30)
+        #expect(windowEnds2 == nil)
+        #expect(!admit3)
+    }
 }

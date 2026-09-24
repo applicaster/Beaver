@@ -38,12 +38,19 @@ final class AgentNotifier {
     /// button, a summary notification).
     private(set) var panelRequests = 0
 
+    /// Muted always wins: a muted person is never shown the system prompt,
+    /// whatever `authorization` says.
     var state: AgentNotifications.State {
-        authorization == .allowed && muted ? .muted : authorization
+        muted ? .muted : authorization
     }
 
     @ObservationIgnored private var throttle = NotificationThrottle()
     @ObservationIgnored private var summaryTask: Task<Void, Never>?
+    /// One in-flight permission request at a time; the latest note that
+    /// arrived while it's pending is the one delivered on grant (M28: never
+    /// more than one banner catching up after Allow).
+    @ObservationIgnored private var pendingAuth: Task<Void, Never>?
+    @ObservationIgnored private var pendingNote: AgentNote?
     private let delegate = NotificationDelegate()
     @ObservationIgnored private var activeObserver: NSObjectProtocol?
     private static let mutedKey = "agentNotificationsMuted"
@@ -79,25 +86,39 @@ final class AgentNotifier {
         guard !frontmost else { return AgentNotifications.outcome(state: state, frontmost: true, held: false) }
         switch state {
         case .allowed:
-            let now = Date()
-            if throttle.admit(at: now) {
-                post(note.text, links: note.links)
-                return AgentNotifications.outcome(state: .allowed, frontmost: false, held: false)
-            }
-            scheduleSummary()
-            return AgentNotifications.outcome(state: .allowed, frontmost: false, held: true)
+            return deliver(note)
         case .notDetermined:
             // Asked in context, on the first attention note — not at launch.
-            Task {
-                let granted = (try? await UNUserNotificationCenter.current()
-                    .requestAuthorization(options: [.alert, .sound, .badge])) ?? false
-                await refresh()
-                if granted, !muted { post(note.text, links: note.links) }
+            // Only one request in flight: a note that arrives while it's
+            // pending replaces the last one, still delivered through the
+            // same throttle as .allowed once (if) permission is granted.
+            pendingNote = note
+            if pendingAuth == nil {
+                pendingAuth = Task {
+                    let granted = (try? await UNUserNotificationCenter.current()
+                        .requestAuthorization(options: [.alert, .sound, .badge])) ?? false
+                    await refresh()
+                    pendingAuth = nil
+                    let toDeliver = pendingNote
+                    pendingNote = nil
+                    if granted, state == .allowed, let toDeliver { _ = deliver(toDeliver) }
+                }
             }
             return AgentNotifications.outcome(state: .notDetermined, frontmost: false, held: false)
         case .denied, .muted:
             return AgentNotifications.outcome(state: state, frontmost: false, held: false)
         }
+    }
+
+    /// The one path that actually posts (or holds for the summary): admits
+    /// through the 30 s throttle, same as every other allowed note.
+    private func deliver(_ note: AgentNote) -> NotifyOutcome {
+        if throttle.admit(at: Date()) {
+            post(note.text, links: note.links)
+            return AgentNotifications.outcome(state: .allowed, frontmost: false, held: false)
+        }
+        scheduleSummary()
+        return AgentNotifications.outcome(state: .allowed, frontmost: false, held: true)
     }
 
     /// The strip's button.
@@ -139,13 +160,21 @@ final class AgentNotifier {
     }
 
     /// At the end of the 30 s window, one notification for the held notes.
+    /// Drain (which advances the window) only happens when the summary is
+    /// actually going to post; otherwise the held notes are discarded
+    /// without moving `lastSent`, so a note right after still has to wait
+    /// out the original window.
     private func scheduleSummary() {
         guard summaryTask == nil, let ends = throttle.windowEnds else { return }
         summaryTask = Task {
             try? await Task.sleep(for: .seconds(max(0, ends.timeIntervalSinceNow)))
             summaryTask = nil
+            guard state == .allowed, !NSApp.isActive else {
+                throttle.discardHeld()
+                return
+            }
             let count = throttle.drain(at: Date())
-            guard count > 0, state == .allowed, !NSApp.isActive else { return }
+            guard count > 0 else { return }
             post(AgentNotifications.summary(count: count), links: [])
         }
     }

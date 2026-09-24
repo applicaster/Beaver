@@ -29,7 +29,7 @@ enum JournalTools {
             throw ToolError("text is required. Example: journal_note(text: \"Login fails: the refresh token expired\", links: [{eventId: 48211}]).")
         }
         guard text.count <= AgentJournal.noteCap else {
-            throw ToolError("text is \(text.count) characters; keep it under \(AgentJournal.noteCap) and put details behind links.")
+            throw ToolError("text is \(text.count) characters; keep it to at most \(AgentJournal.noteCap) and put details behind links.")
         }
         let level = try args.string("level")?.lowercased() ?? "info"
         guard ["info", AgentActivity.attention].contains(level) else {
