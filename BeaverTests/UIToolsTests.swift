@@ -112,6 +112,21 @@ struct UIToolsTests {
         #expect(await fake.value.ui.logFilter == .none)
     }
 
+    @Test("The resolved session is pinned in the change itself, not just read back from the snapshot")
+    func sessionPinned() async throws {
+        let f = try await fixture()
+        var ui = UIState()
+        ui.sessionId = f.a
+        ui.logFilter.hiddenThroughEventId = f.events[0]
+        let (ctx, fake) = makeUIContext(f.store, ui: HostSnapshot(ui: ui))
+
+        let r = try await show(["filter": ["minLevel": "error"]], ctx)
+        #expect(await fake.changes.last?.sessionId == f.a)
+        #expect(r.structured["sessionId"]?.int64 == f.a)
+        // Same session: the person's Clear watermark survives the call.
+        #expect(await fake.value.ui.logFilter.hiddenThroughEventId == f.events[0])
+    }
+
     @Test("select first / last resolve against the filter being set")
     func firstLast() async throws {
         let f = try await fixture()

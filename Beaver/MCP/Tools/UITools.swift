@@ -124,8 +124,14 @@ enum UITools {
             } else if sessionId == nil {
                 sessionId = try await ctx.resolveSession(ToolArguments()).id
             }
-            if sessionId != host.ui.sessionId { change.sessionId = sessionId }
+            // Pin the session in the change itself, not just this snapshot's
+            // `sessionId` local: if the person switches session while the
+            // store queries below are in flight, `ctx.ui.show(change)` must
+            // still land on the session this call resolved, not whatever is
+            // on screen by then.
+            change.sessionId = sessionId
         }
+        let switching = sessionId != host.ui.sessionId
 
         change.tab = askedTab ?? inferredTab(selection, filterGiven: filterGiven, args)
         let tab = change.tab ?? host.ui.tab
@@ -137,7 +143,7 @@ enum UITools {
             // from view too; any other filter keeps their Clear (⌘K).
             let showsAll = args["filter"]?.object?.isEmpty == true
                 && !ToolContext.filterKeys.contains { args[$0] != nil }
-            if !showsAll && change.sessionId == nil {
+            if !showsAll && !switching {
                 filter.hiddenThroughEventId = host.ui.logFilter.hiddenThroughEventId
             }
             change.logFilter = filter
