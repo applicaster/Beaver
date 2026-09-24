@@ -83,10 +83,11 @@ public struct NetworkEntry: Identifiable, Hashable, Sendable {
         let start = ProtocolDecoder.timestampMillis(timing?["startTime"])
             ?? ProtocolDecoder.timestampMillis(o["timestamp"])
             ?? fallbackMillis
-        let duration: Int? = int(timing?["duration"]) ?? {
+        // A clock step on the device can put endTime before startTime.
+        let duration: Int? = (int(timing?["duration"]) ?? {
             guard let end = int(timing?["endTime"]), let s = int(timing?["startTime"]) else { return nil }
             return end - s
-        }()
+        }()).map { max($0, 0) }
 
         let c = URLComponents(string: url)
         let path: String = {
@@ -106,8 +107,8 @@ public struct NetworkEntry: Identifiable, Hashable, Sendable {
             statusText: o["statusText"] as? String,
             requestHeaders: headers(o["requestHeaders"]),
             responseHeaders: headers(o["responseHeaders"]),
-            requestBody: o["requestBody"] as? String,
-            responseBody: o["responseBody"] as? String,
+            requestBody: body(o["requestBody"]),
+            responseBody: body(o["responseBody"]),
             requestBodySize: nonNegativeInt(o["requestBodySize"]),
             responseBodySize: nonNegativeInt(o["responseBodySize"]),
             startMillis: start,
@@ -131,6 +132,19 @@ public struct NetworkEntry: Identifiable, Hashable, Sendable {
     private static func nonNegativeInt(_ value: Any?) -> Int? {
         guard let n = int(value), n >= 0 else { return nil }
         return n
+    }
+
+    /// A body the SDK sent as JSON rather than a string is kept as JSON
+    /// text, not dropped; `null` means no body.
+    private static func body(_ value: Any?) -> String? {
+        switch value {
+        case nil, is NSNull: return nil
+        case let s as String: return s
+        case let v?:
+            let data = try? JSONSerialization.data(
+                withJSONObject: v, options: [.fragmentsAllowed, .sortedKeys, .withoutEscapingSlashes])
+            return data.map { String(decoding: $0, as: UTF8.self) } ?? "\(v)"
+        }
     }
 
     private static func headers(_ value: Any?) -> [String: String] {
