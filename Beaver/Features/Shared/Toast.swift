@@ -14,12 +14,27 @@ public struct Toast: Identifiable, Equatable, Sendable {
     public let message: String
     public let icon: String
     public let tint: Color
+    /// A button on the toast — e.g. Undo right after a storage edit.
+    public let action: ToastAction?
 
-    public init(message: String, icon: String, tint: Color) {
+    public init(message: String, icon: String, tint: Color, action: ToastAction? = nil) {
         self.id = UUID()
         self.message = message
         self.icon = icon
         self.tint = tint
+        self.action = action
+    }
+
+    public static func == (a: Toast, b: Toast) -> Bool { a.id == b.id }
+}
+
+public struct ToastAction: Sendable {
+    public let title: String
+    public let perform: @MainActor @Sendable () -> Void
+
+    public init(title: String, perform: @escaping @MainActor @Sendable () -> Void) {
+        self.title = title
+        self.perform = perform
     }
 }
 
@@ -59,9 +74,10 @@ public final class ToastCenter {
         _ message: String,
         icon: String = "checkmark.circle.fill",
         tint: Color = .green,
-        duration: TimeInterval = 2.0
+        duration: TimeInterval = 2.0,
+        action: ToastAction? = nil
     ) {
-        let toast = Toast(message: message, icon: icon, tint: tint)
+        let toast = Toast(message: message, icon: icon, tint: tint, action: action)
         current = toast
         dismissTask?.cancel()
         dismissTask = Task { [weak self] in
@@ -76,6 +92,11 @@ public final class ToastCenter {
                 }
             }
         }
+    }
+
+    public func dismiss() {
+        dismissTask?.cancel()
+        current = nil
     }
 
     // MARK: - Convenience presets
@@ -100,8 +121,8 @@ public final class ToastCenter {
 /// the top with the same easing as macOS's notification banners.
 ///
 /// Lives as an `.overlay(alignment: .top)` on `MainWindow.body` so
-/// it floats above every tab without affecting layout. Hit-tests
-/// don't propagate through — the chip is decorative.
+/// it floats above every tab without affecting layout. Clicks pass
+/// through the chip unless it carries an action button.
 public struct ToastPresenter: View {
     @Environment(ToastCenter.self) private var center
 
@@ -116,6 +137,14 @@ public struct ToastPresenter: View {
                         .font(.system(size: 14, weight: .semibold))
                     Text(toast.message)
                         .font(.subheadline.weight(.medium))
+                    if let action = toast.action {
+                        Button(action.title) {
+                            center.dismiss()
+                            action.perform()
+                        }
+                        .buttonStyle(.link)
+                        .font(.subheadline.weight(.semibold))
+                    }
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
@@ -136,11 +165,12 @@ public struct ToastPresenter: View {
                 // identity. The id forces a fresh node so the new
                 // toast slides in.
                 .id(toast.id)
-                .allowsHitTesting(false)
+                // Clicks pass through unless there's a button to press.
+                .allowsHitTesting(toast.action != nil)
             }
         }
         .animation(.easeOut(duration: 0.22), value: center.current?.id)
         .frame(maxWidth: .infinity, alignment: .top)
-        .allowsHitTesting(false)
+        .allowsHitTesting(center.current?.action != nil)
     }
 }
