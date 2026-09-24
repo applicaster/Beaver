@@ -192,7 +192,9 @@ Options on the table:
 - Body limit 4 MB in; responses are capped by the tools themselves (§6).
 - Bind failure (port taken) → the menu item shows "MCP: port 9081 in use", and
   `os_log` records it. The port can be overridden with
-  `defaults write com.applicaster.LoggerNext mcpPort -int <port>`.
+  `defaults write ~/Library/Preferences/com.applicaster.LoggerNext mcpPort -int <port>`
+  (the bare domain form resolves to a sandbox container on a machine that
+  once ran a sandboxed build, which this non-sandboxed Beaver never reads).
 
 ---
 

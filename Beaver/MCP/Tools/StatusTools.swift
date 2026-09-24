@@ -94,11 +94,17 @@ enum StatusTools {
                               structured: ["sessions": []],
                               next: ["beaver_status() to see how the device connects"])
         }
+        // `Session.isActive` (no endedAt) isn't enough on its own: a crash
+        // can leave an old session unended even though it's no longer the
+        // device's current one. Only the host's own liveSessionId says
+        // which session is actually live now.
+        let host = await ctx.ui.snapshot()
         var rows: [JSON] = []
         var lines: [String] = []
         for session in all.prefix(limit) {
             let events = try await ctx.store.eventCount(sessionId: session.id, filter: .none)
             let requests = try await ctx.store.networkEntryCount(sessionId: session.id)
+            let liveNow = session.id == host.liveSessionId
             rows.append([
                 "id": JSON(session.id), "source": .string(session.source.rawValue),
                 "startedAt": .string(session.startedAt.ISO8601Format()),
@@ -106,8 +112,9 @@ enum StatusTools {
                 "app": JSON(session.appName), "appVersion": JSON(session.appVersion),
                 "device": JSON(session.deviceModel), "platform": JSON(session.platform),
                 "events": JSON(events), "requests": JSON(requests),
+                "liveNow": .bool(liveNow),
             ])
-            lines.append("#\(session.id) \(session.source.rawValue)\(session.isActive ? " (live now)" : "")"
+            lines.append("#\(session.id) \(session.source.rawValue)\(liveNow ? " (live now)" : "")"
                 + " · started \(session.startedAt.ISO8601Format())"
                 + " · \(describeDevice(session)) · \(events) events · \(requests) requests")
         }

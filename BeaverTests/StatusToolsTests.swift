@@ -42,6 +42,25 @@ struct StatusToolsTests {
         #expect(r.body.split(separator: "\n").first?.hasPrefix("#\(new.id) live") == true)
     }
 
+    @Test("sessions_list marks (live now) only on the host's live session, not any unended live one")
+    func onlyHostLiveSessionMarkedLiveNow() async throws {
+        // A crash can leave an old session with no endedAt even though it's
+        // not the device's current session — Session.isActive alone can't
+        // tell them apart, only the host's own liveSessionId can.
+        let store = try LogStore(source: .inMemory)
+        let orphaned = try await store.createSession(source: .live)
+        let current = try await store.createSession(source: .live)
+        let ctx = makeContext(store, ui: HostSnapshot(liveSessionId: current.id))
+        let r = try await StatusTools.sessionsList.run(ToolArguments(), ctx)
+        let rows = try #require(r.structured["sessions"]?.array)
+        let byId = Dictionary(uniqueKeysWithValues: rows.compactMap { row in row["id"]?.int64.map { ($0, row) } })
+        #expect(byId[current.id]?["liveNow"] == true)
+        #expect(byId[orphaned.id]?["liveNow"] == false)
+        let lines = r.body.split(separator: "\n")
+        #expect(lines.first(where: { $0.hasPrefix("#\(current.id) ") })?.contains("(live now)") == true)
+        #expect(lines.first(where: { $0.hasPrefix("#\(orphaned.id) ") })?.contains("(live now)") == false)
+    }
+
     @Test("Review focus: sessions_list on a fresh install")
     func freshInstall() async throws {
         let store = try LogStore(source: .inMemory)

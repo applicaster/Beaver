@@ -19,8 +19,11 @@ panel. Design: `plans/2026-09-23-mcp-design.md`.
 3. Connect the device to Beaver as usual. The agent can also read past and
    imported sessions without one.
 
-Port taken? `defaults write com.applicaster.LoggerNext mcpPort -int 9082`, then
-toggle Agent Access off and on.
+Port taken? `defaults write ~/Library/Preferences/com.applicaster.LoggerNext mcpPort -int 9082`,
+then toggle Agent Access off and on. (The bare domain form resolves to a
+sandbox container on a machine that once ran a sandboxed build, which this
+non-sandboxed Beaver never reads — the explicit path always hits the right
+place.)
 
 ## Testing without Xcode
 
