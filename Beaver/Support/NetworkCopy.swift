@@ -18,6 +18,18 @@ extension NetworkEntry {
         return parts.joined(separator: " ")
     }
 
+    /// The toast after copying the request as `what` ("cURL", "fetch"),
+    /// saying why a replay may fail: "Copied cURL: Authorization redacted
+    /// by the SDK", "Copied fetch: body truncated".
+    public func copyToast(_ what: String) -> String {
+        let redacted = requestHeaders.filter { $0.value.contains("[REDACTED]") }.keys.sorted()
+        let notes = [
+            redacted.isEmpty ? nil : redacted.joined(separator: ", ") + " redacted by the SDK",
+            isRequestBodyTruncated ? "body truncated" : nil,
+        ].compactMap { $0 }
+        return "Copied \(what)" + (notes.isEmpty ? "" : ": " + notes.joined(separator: ", "))
+    }
+
     /// A JS `fetch(...)` call reproducing the request.
     public var fetchSnippet: String {
         var lines = ["fetch(\(Self.jsLiteral(url)), {", "  method: \(Self.jsLiteral(method)),"]

@@ -217,9 +217,9 @@ private struct NetworkDetailContent: View {
                 }
             }
                 .help("Copy the whole payload as received")
-            Button("cURL") { toasts.copy(entry.curlCommand, "Copied cURL") }
+            Button("cURL") { toasts.copy(entry.curlCommand, entry.copyToast("cURL")) }
                 .help("Copy as a cURL command")
-            Button("fetch") { toasts.copy(entry.fetchSnippet, "Copied fetch") }
+            Button("fetch") { toasts.copy(entry.fetchSnippet, entry.copyToast("fetch")) }
                 .help("Copy as a JavaScript fetch call")
         }
         .buttonStyle(.bordered)

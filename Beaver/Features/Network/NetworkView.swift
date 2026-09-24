@@ -341,7 +341,7 @@ struct NetworkView: View {
                 Button("Hide \(statusClass.displayName)") { vm.filter.excludedStatusClasses.insert(statusClass) }
                 Divider()
                 Button("Copy URL") { toasts.copy(e.url, "Copied URL") }
-                Button("Copy as cURL") { toasts.copy(e.curlCommand, "Copied cURL") }
+                Button("Copy as cURL") { toasts.copy(e.curlCommand, e.copyToast("cURL")) }
             }
         }
         .overlay {
