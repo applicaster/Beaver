@@ -75,6 +75,13 @@ struct AgentAccessTests {
         #expect(steps.allSatisfy { text.contains($0.code) })
     }
 
+    @Test("Capabilities: every registered tool is on exactly one card, and nothing else is")
+    func capabilities() {
+        let onCards = AgentAccess.capabilities.flatMap(\.tools)
+        #expect(onCards.sorted() == BeaverTools.all.map(\.name).sorted())
+        #expect(AgentAccess.capabilities.allSatisfy { $0.example.hasPrefix("Use beaver:") })
+    }
+
     @Test("Review focus: overlapping starts, then stop, leave nothing serving")
     func overlappingStartsThenStop() async throws {
         // Mirrors MCPHTTPListenerTests.overlappingStarts, one level up: two

@@ -177,4 +177,71 @@ public actor AgentAccess {
         }
         return ([intro] + steps).joined(separator: "\n\n")
     }
+
+    public struct Capability: Sendable, Equatable {
+        public let icon: String
+        public let title: String
+        public let note: String
+        public let example: String
+        public let tools: [String]
+    }
+
+    /// What an agent can do through Beaver, for the "What an agent can do"
+    /// screen. Every tool in `BeaverTools.all` is on exactly one card (tested).
+    public static let capabilities: [Capability] = [
+        Capability(
+            icon: "dot.radiowaves.left.and.right",
+            title: "Know what's going on",
+            note: "Which device and app are connected, which session is live, and what you're looking at in Beaver right now.",
+            example: "Use beaver: what is connected, and what am I looking at?",
+            tools: ["beaver_status", "ui_state", "beaver_guide"]),
+        Capability(
+            icon: "text.alignleft",
+            title: "Read the logs",
+            note: "Counts by level, subsystem and category, log lines by filter or time, and full payloads of the lines that matter.",
+            example: "Use beaver: what did the app log about login in the last 15 minutes?",
+            tools: ["logs_facets", "logs_query", "logs_get", "logs_clear"]),
+        Capability(
+            icon: "network",
+            title: "Inspect network requests",
+            note: "Find requests by status, method, host or text, read headers and bodies, and copy one as cURL, fetch() or JSON.",
+            example: "Use beaver: show the failing requests and give me the first one as cURL.",
+            tools: ["network_query", "network_get", "network_copy"]),
+        Capability(
+            icon: "tray.2",
+            title: "Read and change storage",
+            note: "Session, local and keychain storage, fresh from the app. Set or delete a key and Beaver checks the app applied it.",
+            example: "Use beaver: set local storage key onboardingSeen to false.",
+            tools: ["storage_snapshot", "storage_set", "storage_delete"]),
+        Capability(
+            icon: "terminal",
+            title: "Drive the app",
+            note: "Send the app's commands and collect the logs they cause — even across a restart — or wait for a log to show up.",
+            example: "Use beaver: send cmdlist to the app and show me what it logged.",
+            tools: ["commands_list", "commands_send", "logs_wait"]),
+        Capability(
+            icon: "binoculars",
+            title: "Watch over time",
+            note: "Count matching logs for minutes or hours and notify you when they reach a count, even with Beaver in the background.",
+            example: "Use beaver: watch for errors for an hour and tell me at the first one.",
+            tools: ["watch_start", "watch_status", "watch_stop"]),
+        Capability(
+            icon: "clock.arrow.circlepath",
+            title: "Sessions and files",
+            note: "Read past sessions without a device, import Beaver, zapp-support or HAR files, export a session as JSON or HAR, delete sessions.",
+            example: "Use beaver: export this session's network requests as HAR to ~/Desktop.",
+            tools: ["sessions_list", "sessions_import", "sessions_export", "sessions_delete"]),
+        Capability(
+            icon: "bookmark",
+            title: "Bookmarks and saved filters",
+            note: "See what you bookmarked, bookmark events and requests, and save or delete named filters.",
+            example: "Use beaver: save a filter \"Auth warnings\" for warnings from *auth*.",
+            tools: ["bookmarks_list", "bookmarks_set", "filters_list", "filters_save", "filters_delete"]),
+        Capability(
+            icon: "hand.point.up.left",
+            title: "Show you what it found",
+            note: "Point Beaver's window at a tab, filter or row without taking focus, and leave notes here with clickable links.",
+            example: "Use beaver: show me the failed requests — don't bring Beaver forward.",
+            tools: ["ui_show", "journal_note"]),
+    ]
 }
