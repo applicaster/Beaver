@@ -57,55 +57,84 @@ public struct NewAgentActivity: Sendable {
     }
 }
 
-/// What a journal entry points at (design §5.9, §7.2): one of the fields
-/// is set. Stored in `links_json` as `[{"eventId":48211}]` — the shape
-/// `journal_note(links:)` takes — and opened through `ui_show`'s path
-/// (`UITools.open`).
-public struct AgentLink: Codable, Hashable, Sendable {
-    public var sessionId: Int64?
-    public var eventId: Int64?
-    public var networkId: Int64?
-    public var savedFilter: String?
+/// What a journal entry points at (design §5.9). Stored in `links_json`
+/// as `[{"eventId":48211},{"networkId":391},{"sessionId":13},{"savedFilter":"Auth"}]`.
+public enum JournalLink: Sendable, Hashable {
+    case session(Int64)
+    case event(Int64)
+    case network(Int64)
+    case savedFilter(String)
 
-    public init(sessionId: Int64? = nil, eventId: Int64? = nil,
-                networkId: Int64? = nil, savedFilter: String? = nil) {
-        self.sessionId = sessionId; self.eventId = eventId
-        self.networkId = networkId; self.savedFilter = savedFilter
-    }
-
-    /// `Event #48211`, `Request #391`, `Filter “Auth”`, `Session #13`.
+    /// `event #48211`, `request #391`, `session #13`, `filter “Auth”`.
     public var label: String {
-        if let eventId { return "Event #\(eventId)" }
-        if let networkId { return "Request #\(networkId)" }
-        if let savedFilter { return "Filter “\(savedFilter)”" }
-        if let sessionId { return "Session #\(sessionId)" }
-        return "Link"
+        switch self {
+        case .session(let id): "session #\(id)"
+        case .event(let id): "event #\(id)"
+        case .network(let id): "request #\(id)"
+        case .savedFilter(let name): "filter “\(name)”"
+        }
     }
 
-    /// `nil` for no links, so the column stays NULL.
-    public static func encode(_ links: [AgentLink]) -> String? {
-        guard !links.isEmpty else { return nil }
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = .sortedKeys
-        return (try? encoder.encode(links)).map { String(decoding: $0, as: UTF8.self) }
+    public var json: JSON {
+        switch self {
+        case .session(let id): ["sessionId": JSON(id)]
+        case .event(let id): ["eventId": JSON(id)]
+        case .network(let id): ["networkId": JSON(id)]
+        case .savedFilter(let name): ["savedFilter": .string(name)]
+        }
     }
 
-    /// Unreadable JSON is no links, never a crash: rows outlive app versions.
-    public static func decode(_ json: String?) -> [AgentLink] {
-        guard let data = json?.data(using: .utf8),
-              let links = try? JSONDecoder().decode([AgentLink].self, from: data)
-        else { return [] }
-        return links.filter { $0 != AgentLink() }
+    public init?(json: JSON) {
+        if let id = json["eventId"]?.int64 { self = .event(id) }
+        else if let id = json["networkId"]?.int64 { self = .network(id) }
+        else if let id = json["sessionId"]?.int64 { self = .session(id) }
+        else if let name = json["savedFilter"]?.string { self = .savedFilter(name) }
+        else { return nil }
+    }
+
+    public static func encode(_ links: [JournalLink]) -> String? {
+        links.isEmpty ? nil : JSON.array(links.map(\.json)).text
+    }
+
+    public static func decode(_ text: String?) -> [JournalLink] {
+        guard let text, let items = (try? JSON.parse(Data(text.utf8)))?.array else { return [] }
+        return items.compactMap(JournalLink.init(json:))
     }
 }
 
+/// A toast in Beaver's window for a journal entry (design §7.2): only
+/// destructive calls and attention notes interrupt.
+public struct AgentToast: Sendable, Equatable {
+    public enum Button: Sendable, Equatable {
+        /// Opens the Agent panel.
+        case journal
+        /// Brings Beaver forward on what the note points at.
+        case show(JournalLink)
+    }
+    public let message: String
+    public let button: Button
+}
+
 extension AgentActivity {
-    /// What the row links to: its stored links, else the session the call
-    /// was about.
-    public var links: [AgentLink] {
-        let stored = AgentLink.decode(linksJSON)
-        if !stored.isEmpty { return stored }
-        return sessionId.map { [AgentLink(sessionId: $0)] } ?? []
+    public static let attention = "attention"
+
+    public var links: [JournalLink] { JournalLink.decode(linksJSON) }
+
+    /// What the Agent panel links the row to: its stored links, else the
+    /// session the call was about.
+    public var shownLinks: [JournalLink] {
+        let stored = links
+        return stored.isEmpty ? sessionId.map { [.session($0)] } ?? [] : stored
+    }
+
+    /// A `journal_note(level: attention)`, or a watch that fired.
+    public var isAttention: Bool { kind == .note && level == Self.attention }
+
+    public var toast: AgentToast? {
+        guard !isError else { return nil }
+        if kind == .destructive { return AgentToast(message: "Agent: \(summary)", button: .journal) }
+        if isAttention { return AgentToast(message: summary, button: links.first.map { .show($0) } ?? .journal) }
+        return nil
     }
 }
 
@@ -114,11 +143,20 @@ public enum AgentActivityText {
         hideReads ? entries.filter { $0.kind != .read || $0.isError } : entries
     }
 
-    /// `14:03:12 claude-code logs_query — 41 events`, `✗` on failures.
+    /// `14:03:12 claude-code logs_query — 41 events`, links after `→`,
+    /// `✗` on failures, a notice (why a note wasn't notified) in brackets.
     public static func line(_ a: AgentActivity) -> String {
         let who = a.client ?? "agent"
         let what = a.tool ?? a.kind.rawValue
-        return "\(timeFormatter.string(from: a.at)) \(who) \(what) — \(a.summary)" + (a.isError ? " ✗" : "")
+        var text = "\(timeFormatter.string(from: a.at)) \(who) \(what) — \(a.summary)"
+        let links = a.links
+        if !links.isEmpty { text += " → " + links.map(\.label).joined(separator: ", ") }
+        if a.isError {
+            text += " ✗"
+        } else if let notice = a.error {
+            text += " (\(notice))"
+        }
+        return text
     }
 
     public static func copyText(_ entries: [AgentActivity]) -> String {

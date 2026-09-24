@@ -2219,10 +2219,11 @@ won't decode, and the feed starts unfiltered once.
   protocol is two methods: `send(command:)`, and in phase 2
   `send(mcp:)`.
 - **To change:** adding a method adds it to `WSServer` and the fake.
-- **Implemented:** PR 1 ships without `DeviceLink`; `ToolContext` is
-  `{ store, ui, now }`. `DeviceLink` and the tools that send to the
-  device (`storage_set`, `storage_delete`, `commands_send`) arrive in
-  PR 2.
+- **Implemented:** PR 2. `DeviceLink` has one method, `send(command:)`;
+  `WSServer` conforms as is. `ToolContext` is `{ store, ui, device,
+  watches, now }`. Tools that need a live device go through
+  `ToolContext.requireDevice`, which also checks `deviceId` (only
+  `"current"` today, M25/D65).
 
 ---
 
@@ -2235,6 +2236,14 @@ won't decode, and the feed starts unfiltered once.
   didn't apply this" as a person.
 - **To change:** shared code in `StorageCommand`; both paths move
   together.
+- **Implemented:** PR 2. The read-back loop moved out of
+  `StoragesViewModel` into `StorageCommand.sendAndVerify`, which both the
+  Storages tab and the tools call. Outcomes are `applied`, `notApplied`
+  and `noAnswer` (no snapshot within ~3 s). A value `valueProblem`
+  refuses is a tool error with the reason, not a `rejected` result; keys
+  and namespaces with whitespace are refused the same way.
+  `storage_snapshot(refresh: true)` (the default) sends `storage.list` and
+  waits for the answer via `StorageCommand.refresh`.
 
 ---
 
@@ -2260,21 +2269,28 @@ won't decode, and the feed starts unfiltered once.
   `AgentJournal`; the panel is one view. A `journal_list` tool for
   agents is additive if a use appears.
 - **Implemented:** every `tools/call` is journaled, including a call
-  naming an unknown tool (recorded as an error row under that name)
-  — `AgentJournal.record(toolName:kind:client:result:error:)`. Only a
-  request with no tool name at all (a malformed JSON-RPC params
-  object) skips the journal, since there is no tool to attribute it
-  to. The journal itself, above, is what PR 1 ships. Toasts for
-  destructive calls, `attention` notes, `journal_note` and the macOS
-  notification (M28) are **from PR 2/3 (not in PR 1)** — PR 1 has no
-  destructive tools and no `journal_note`.
-  **PR 3:** entries link to what they point at. Links are
-  `[AgentLink]` in `links_json`, JSON `[{"eventId":…}]` — the shape
-  `journal_note(links:)` takes — and a row without stored links links to
-  its `session_id`. A click runs `UITools.open`, the `ui_show` path, in
-  context (a hiding filter is cleared, like Show in Context), and is not
-  journaled. PR 2's toast "Show" and notification click use the same
-  entry, `AppEnvironment.open(_:reveal: true)`.
+  naming an unknown tool (recorded as an error row under that name).
+  PR 2: notes (`journal_note`, kind `note`) carry `level` and
+  `links_json`; a tool's result can set both, plus a notice stored in
+  `error` with `is_error = 0` ("Not notified: …"). Watches and the
+  disconnect after an agent's command write rows through
+  `AgentJournal.post`. The app reads new rows to raise toasts (destructive
+  calls; attention notes) and the Dock badge (unseen attention notes).
+  `journal_note` returns no note id: the dispatcher writes the row after
+  the tool returns, and no tool takes one.
+  **PR 3:** every entry links to what it points at. Links are
+  `[JournalLink]` in `links_json` (`[{"eventId":…}]`, the shape
+  `journal_note(links:)` takes); reads that point at something
+  (`logs_get`, `network_get`, `network_copy`, `ui_show`) store theirs,
+  and the panel links a row without stored links to its `session_id`
+  (`AgentActivity.shownLinks`; toasts follow stored links only). Every
+  way in — a journal row's link, a toast's **Show**, a notification
+  click — runs `UITools.open`, the `ui_show` path, via
+  `AppEnvironment.open(_:reveal:)`: in context (a hiding filter is
+  cleared, like Show in Context), not journaled. A row's link opens with
+  `reveal: false` (the person is already in Beaver); Show and a
+  notification with `reveal: true`. PR 2's interim navigation
+  (`MainWindow.showAgentLink`'s own session/tab/bookmark jump) is gone.
 
 ---
 
@@ -2382,12 +2398,15 @@ won't decode, and the feed starts unfiltered once.
   `expectDisconnect: true` (needs a list of disconnecting commands
   nobody has); leave it to the agent.
 - **To change:** the follow logic lives in
-  `ToolContext.resolveSession` and the wait helper shared by
+  `ToolContext.waitForEvents` (`DeviceWait.swift`), the wait shared by
   `logs_wait` and `commands_send`.
-- **Implemented:** from PR 2 (not in PR 1). `resolveSession` in PR 1
-  resolves once per call; there is no `commands_send`, and `logs_wait`
-  does not re-resolve or report `sessionChanged` / `sessionEnded` if
-  the device disconnects and reconnects mid-wait.
+- **Implemented:** PR 2. `ToolContext.waitForEvents` (in
+  `DeviceWait.swift`) is the wait shared by `logs_wait` and
+  `commands_send(collectLogsMs:)`: it polls the store and the app's live
+  session every 250 ms and returns `sessionChanged`, `sessionEnded`,
+  `deviceDisconnected`. After every `commands_send`,
+  `watchForDisconnect` watches 30 s for a drop and writes one system entry
+  once the device is back ("→ session #14") or 30 s later without it.
 
 ---
 
@@ -2441,9 +2460,14 @@ won't decode, and the feed starts unfiltered once.
   notifications (agent can't reach a person whose window is hidden).
 - **To change:** `AgentNotifier` (app target) owns permission,
   delivery and coalescing; the coalescing window is a constant.
-- **Implemented:** from PR 2/3 (not in PR 1). There is no `attention`
-  note, `AgentNotifier`, or permission UI yet — PR 1's tools are all
-  read-only and never need to get the person's attention.
+- **Implemented:** PR 2. Rules and texts in `AgentNotifications`
+  (BeaverCore, tested): states, strip, menu title, what `journal_note`
+  returns, the 30 s `NotificationThrottle`. `AgentNotifier` (app) asks on
+  the first attention note, re-reads on `didBecomeActive`, posts, and
+  handles the click. Mute: `agentNotificationsMuted`. When Beaver is in
+  front a note is a toast and `notified: true`. Show and clicks use the
+  navigation Beaver already has (viewing session, tab, bookmark jump);
+  PR 3 routes them through `ui_show`.
 
 ---
 
@@ -2465,8 +2489,16 @@ won't decode, and the feed starts unfiltered once.
   matters, and it survives).
 - **To change:** watches are a dictionary in one actor; persisting
   them is a table.
-- **Implemented:** from PR 2/3 (not in PR 1). There is no
-  `watch_status` or any other watch tool yet.
+- **Implemented:** PR 2. `Watches` is an actor in `ToolContext`; a watch
+  is `{ name, filter, follows, sessionId, startId, startedAt, notifyAt,
+  firedAt }`. A following watch counts its start session after
+  `startId` plus every later live session (session ids grow), computed
+  when asked. `notify` checks every 500 ms and fires once; each check
+  counts only the matches after a per-segment cursor (the newest match
+  it has counted) and adds them to a running total, and a following
+  watch adds the device's new live session when the UI reports one — so
+  a watch left running for hours costs the ingest queue next to
+  nothing. Turning Agent Access off stops every watch.
 
 ---
 
@@ -2503,4 +2535,23 @@ won't decode, and the feed starts unfiltered once.
 - **Implemented:** the bundled file is `Beaver/Resources/MCP.md`
   (SPM `resources: [.copy("Resources/MCP.md")]`), not a repo-root
   `MCP.md`.
+
+---
+
+## D72. Agents read and write files only at absolute paths, and never overwrite silently
+
+**Status:** Accepted (2026-09-24). PR 2 of Agent Access (MCP).
+
+- **What:** `sessions_import` / `sessions_export` take a path that is
+  absolute or starts with `~`; relative paths are refused with an
+  example. `sessions_export` refuses an existing file unless
+  `overwrite: true`, and a missing folder. `logs_clear` acts on the
+  session the user is viewing only.
+- **Why:** Beaver runs as its own process and doesn't know the agent's
+  working directory, so a relative path would land somewhere surprising.
+  An agent replacing a person's file without being told to is data loss.
+  Clear is the Log feed's view state (`hiddenThroughEventId`), which only
+  the viewed session has.
+- **To change:** `ToolInput.fileURL` and the checks at the top of
+  `SessionTools.exportFile`.
 

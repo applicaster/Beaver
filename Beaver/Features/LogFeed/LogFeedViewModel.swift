@@ -616,8 +616,13 @@ final class LogFeedViewModel {
         guard let latest = try? await store.latestEventId(sessionId: sessionId) else {
             return
         }
+        clearView(through: latest)
+    }
+
+    /// Hide everything up to `watermark` — what an agent's `logs_clear` asks.
+    func clearView(through watermark: Int64) {
         selectedEventId = nil
-        filter.hiddenThroughEventId = latest
+        filter.hiddenThroughEventId = watermark
     }
 
     func restoreClearedView() {

@@ -11,8 +11,11 @@ opens, with the same result.
 - **Implementations.**
   - Beaver: `Beaver/Support/EventJSON.swift` (read + write),
     `Beaver/Support/SessionExport.swift` (what goes in a file),
+    `Beaver/Support/SessionImport.swift` (opening a file as a session — the
+    Import button and the MCP `sessions_import` tool),
     `Beaver/Support/HARExport.swift` (HAR). Tests:
-    `BeaverTests/EventJSONExportTests.swift`, `BeaverTests/ZappSupportImportTests.swift`.
+    `BeaverTests/EventJSONExportTests.swift`, `BeaverTests/ZappSupportImportTests.swift`,
+    `BeaverTests/SessionToolsTests.swift`.
   - zapp-support: `src/utils/sessionFile.ts` (read + write),
     `src/services/sessionExport.ts` (what goes in a file). Test:
     `src/utils/sessionFile.test.mts` (`pnpm test`).

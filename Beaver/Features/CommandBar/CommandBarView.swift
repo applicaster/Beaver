@@ -28,6 +28,9 @@ struct CommandBarView: View {
                 vm = CommandBarViewModel(server: env.server)
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .beaverCommandSent)) { note in
+            if let command = note.object as? String { vm?.remember(command) }
+        }
     }
 }
 

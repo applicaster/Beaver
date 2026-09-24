@@ -60,9 +60,9 @@ struct UIStateTests {
     func fake() async {
         let fake = FakeUI(value: HostSnapshot(viewingSessionId: 3))
         await fake.show(UIChange(tab: .network, reveal: true))
-        let value = await fake.value
+        let value = fake.value
         #expect(value.ui.tab == .network)
         #expect(value.viewingSessionId == 3)
-        #expect(await fake.changes == [UIChange(tab: .network, reveal: true)])
+        #expect(fake.changes == [UIChange(tab: .network, reveal: true)])
     }
 }

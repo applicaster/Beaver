@@ -6,67 +6,7 @@
 import Foundation
 
 enum StateTools {
-    static let all = [storageSnapshot, commandsList, bookmarksList, filtersList]
-
-    static func layers(_ raw: String?) throws -> [StorageSnapshot.Namespace] {
-        switch raw?.lowercased() {
-        case nil, "all", "": return StorageSnapshot.Namespace.allCases
-        case "session": return [.session]
-        case "local": return [.local]
-        case "secure", "keychain": return [.keychain]
-        case let other?:
-            throw ToolError("Unknown layer \"\(other)\". Use storage_snapshot(layer: \"local\") or session, secure (keychain), all.")
-        }
-    }
-
-    static let storageSnapshot = MCPTool(
-        name: "storage_snapshot",
-        title: "Storage snapshot",
-        description: "Use to read the app's session, local and keychain (secure) storage: the latest snapshot Beaver has for the session, with its time. Top-level keys inside a layer are the SDK's namespaces (applicaster.v2 by default).",
-        kind: .read,
-        inputSchema: ToolSchema.object([
-            "sessionId": ToolSchema.sessionId,
-            "layer": ToolSchema.string("session, local, secure (keychain) or all (default).",
-                                       oneOf: ["session", "local", "secure", "keychain", "all"]),
-        ])
-    ) { args, ctx in
-        let s = try await ctx.resolveSession(args)
-        let wanted = try layers(try args.string("layer"))
-        var blocks: [String] = []
-        var out: [String: JSON] = [:]
-        for ns in wanted {
-            guard let snap = try await ctx.store.latestStorageSnapshot(sessionId: s.id, namespace: ns) else {
-                blocks.append("\(ns.displayName): no snapshot")
-                continue
-            }
-            // Cap the raw dataJSON text first, then parse if whole
-            let capped = ToolText.capped(snap.dataJSON, maxBytes: ToolText.payloadCap)
-            let prettyIfWhole = !capped.truncated ? (try? JSON.parse(Data(capped.text.utf8)).prettyText) : nil
-            let text = ToolText.capped(prettyIfWhole ?? capped.text, maxBytes: ToolText.payloadCap)
-            blocks.append("\(ns.displayName) — as of \(snap.takenAt.ISO8601Format()):\n\(text.text)"
-                + (text.truncated ? "\n[cut at 256 KB]" : ""))
-            // Parsed when whole and valid, so the agent gets structure; the raw text otherwise.
-            func payload(_ p: (text: String, truncated: Bool)) -> JSON {
-                if !p.truncated, let parsed = try? JSON.parse(Data(p.text.utf8)) { return parsed }
-                return .string(p.text)
-            }
-            out[ns.rawValue] = ["takenAt": .string(snap.takenAt.ISO8601Format()),
-                                "data": payload(capped),
-                                "dataTruncated": .bool(capped.truncated)]
-        }
-        let found = out.count
-        let result = ToolResult(
-            summary: found == 0
-                ? "No storage snapshot in session \(s.label) yet. One arrives when the Storages tab is opened while the device is connected."
-                : "Storage of session \(s.label): \(found) of \(wanted.count) layer(s).",
-            body: blocks.joined(separator: "\n\n"),
-            structured: ["sessionId": JSON(s.id), "layers": .object(out)],
-            next: found == 0 ? ["ask the user to open Beaver's Storages tab while the device is connected"]
-                             : ["logs_query(filter: {search: \"storage\"}) for storage-related logs"],
-            sessionId: s.id
-        )
-        return result
-    }
+    static let all = [commandsList, bookmarksList, bookmarksSet, filtersList, filtersSave, filtersDelete]
 
     static let commandsList = MCPTool(
         name: "commands_list",
@@ -141,5 +81,134 @@ enum StateTools {
             structured: ["filters": .array(saved.map { ["name": .string($0.name), "describes": .string(ToolText.describe($0.filter))] })],
             next: nextSuggestions
         )
+    }
+
+    static let bookmarksSet = MCPTool(
+        name: "bookmarks_set",
+        title: "Bookmark",
+        description: "Use to mark an event or a network request for the user (a star in Beaver, and in bookmarks_list), or to remove the mark with on: false. Pass eventId or networkId.",
+        kind: .change,
+        idempotent: true,
+        inputSchema: ToolSchema.object([
+            "eventId": ToolSchema.integer("An event id from logs_query."),
+            "networkId": ToolSchema.integer("A request id from network_query."),
+            "on": ToolSchema.boolean("true to bookmark (default), false to remove the bookmark."),
+        ])
+    ) { args, ctx in
+        let on = try args.bool("on") ?? true
+        let eventId = try args.int64("eventId")
+        let networkId = try args.int64("networkId")
+        switch (eventId, networkId) {
+        case (let id?, nil):
+            guard let e = try await ctx.store.events(ids: [id]).first else {
+                throw ToolError("No event #\(id). Example: bookmarks_set(eventId: 48211) with an id from logs_query.")
+            }
+            if on {
+                try await ctx.store.addBookmark(eventId: id, sessionId: e.sessionId)
+            } else {
+                try await ctx.store.removeBookmark(eventId: id, sessionId: e.sessionId)
+            }
+            return ToolResult(summary: on ? "Bookmarked event #\(id)." : "Removed the bookmark from event #\(id).",
+                              structured: ["eventId": JSON(id), "on": .bool(on), "sessionId": JSON(e.sessionId)],
+                              next: ["bookmarks_list(sessionId: \(e.sessionId))"],
+                              sessionId: e.sessionId, links: [.event(id)])
+        case (nil, let id?):
+            guard let sid = try await ctx.store.networkEntrySessionId(id: id) else {
+                throw ToolError("No request #\(id). Example: bookmarks_set(networkId: 391) with an id from network_query.")
+            }
+            if try await ctx.store.networkBookmarkIds(sessionId: sid).contains(id) != on {
+                try await ctx.store.toggleNetworkBookmark(entryId: id, sessionId: sid)
+            }
+            return ToolResult(summary: on ? "Bookmarked request #\(id)." : "Removed the bookmark from request #\(id).",
+                              structured: ["networkId": JSON(id), "on": .bool(on), "sessionId": JSON(sid)],
+                              next: ["bookmarks_list(sessionId: \(sid))"],
+                              sessionId: sid, links: [.network(id)])
+        default:
+            throw ToolError("Pass eventId or networkId (one of them). Example: bookmarks_set(eventId: 48211) or bookmarks_set(networkId: 391, on: false).")
+        }
+    }
+
+    /// Whether `args` asks for subsystem / category resolution — checking
+    /// `filter` and, per `ToolContext.filterKeys`, the same keys lifted
+    /// from the top level — so `filtersSave` knows whether a missing
+    /// session is actually a problem.
+    private static let facetKeys = ["subsystems", "excludeSubsystems", "categories", "excludeCategories"]
+
+    private static func needsSessionToResolve(_ args: ToolArguments) throws -> Bool {
+        var merged = args["filter"]?.object ?? [:]
+        for key in facetKeys where merged[key] == nil {
+            if let value = args[key] { merged[key] = value }
+        }
+        let a = ToolArguments(merged)
+        for key in facetKeys {
+            if let patterns = try a.strings(key), !patterns.isEmpty { return true }
+        }
+        return false
+    }
+
+    static let filtersSave = MCPTool(
+        name: "filters_save",
+        title: "Save a filter",
+        description: "Use to save a named log filter the user can pick in Beaver's Log feed (filters_list shows them). Saving under an existing name replaces it. Subsystem and category patterns are resolved to exact names first.",
+        kind: .change,
+        idempotent: true,
+        inputSchema: ToolSchema.object([
+            "name": ToolSchema.string("The name the user sees, e.g. \"Auth problems\"."),
+            "filter": ToolSchema.filter,
+            "sessionId": ToolSchema.integer("Resolve subsystem / category patterns against this session. Default: live, viewed, most recent."),
+        ], required: ["name", "filter"])
+    ) { args, ctx in
+        let example = "Example: filters_save(name: \"Auth problems\", filter: {minLevel: \"warning\", subsystems: [\"*auth*\"]})."
+        guard let name = try args.string("name").flatMap(ToolContext.trimmedNonEmpty) else {
+            throw ToolError("name is required. \(example)")
+        }
+        // A filter without subsystems or categories needs no session, so
+        // this works on a fresh install too — but if it does have one of
+        // those, and there's no session to resolve it against, say so
+        // rather than silently resolving against a session id of 0.
+        let sessionId: Int64
+        if args["sessionId"] != nil {
+            sessionId = try await ctx.resolveSession(args).id
+        } else if let resolved = try? await ctx.resolveSession(args) {
+            sessionId = resolved.id
+        } else if try Self.needsSessionToResolve(args) {
+            throw ToolError("Beaver has no sessions yet, so subsystem and category patterns can't be resolved to names. Save the filter without them, or once a session exists. Example: filters_save(name: \"Errors\", filter: {minLevel: \"error\"}).")
+        } else {
+            sessionId = 0
+        }
+        let f = try await ctx.resolveFilter(args, sessionId: sessionId)
+        guard !f.filter.isEmpty else { throw ToolError("filter is empty: a saved filter needs at least one condition. \(example)") }
+        let existed = try await ctx.store.savedFilters().contains { $0.name == name }
+        try await ctx.store.upsertSavedFilter(name: name, filter: f.filter)
+        let resolved = f.notes.isEmpty ? "" : " Resolved: " + f.notes.joined(separator: "; ") + "."
+        return ToolResult(
+            summary: "Saved filter “\(name)”: \(ToolText.describe(f.filter))" + (existed ? " (replaced the old one)." : ".") + resolved,
+            structured: ["name": .string(name), "describes": .string(ToolText.describe(f.filter)),
+                         "replaced": .bool(existed), "resolved": .array(f.notes.map(JSON.string))],
+            next: ["filters_list()", "logs_query(filter: {…same…}) to see what it matches"],
+            links: [.savedFilter(name)]
+        )
+    }
+
+    static let filtersDelete = MCPTool(
+        name: "filters_delete",
+        title: "Delete a saved filter",
+        description: "Use when the user asks to remove one of their saved filters, by name (filters_list shows them).",
+        kind: .destructive,
+        inputSchema: ToolSchema.object(["name": ToolSchema.string("The saved filter's name.")], required: ["name"])
+    ) { args, ctx in
+        let saved = try await ctx.store.savedFilters()
+        let names = saved.map(\.name).joined(separator: ", ")
+        guard let name = try args.string("name").flatMap(ToolContext.trimmedNonEmpty) else {
+            throw ToolError("name is required. Saved: \(names.isEmpty ? "none" : names). Example: filters_delete(name: \"Auth problems\").")
+        }
+        guard let match = saved.first(where: { $0.name == name })
+                ?? saved.first(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame }) else {
+            throw ToolError("No saved filter “\(name)”. Saved: \(names.isEmpty ? "none" : names). Example: filters_delete(name: \"\(saved.first?.name ?? "Auth problems")\").")
+        }
+        try await ctx.store.deleteSavedFilter(id: match.id)
+        return ToolResult(summary: "Deleted saved filter “\(match.name)” (\(ToolText.describe(match.filter))).",
+                          structured: ["name": .string(match.name)],
+                          next: ["filters_list()"])
     }
 }

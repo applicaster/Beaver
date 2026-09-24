@@ -1,31 +1,78 @@
 import Foundation
+import Synchronization
 @testable import BeaverCore
 
-/// The app's `AgentUI` stand-in: applies changes the way `AppEnvironment`
-/// does, and keeps them for the test to read.
-actor FakeUI: AgentUI {
-    var value: HostSnapshot
-    private(set) var changes: [UIChange] = []
+/// The app's side of AgentUI. Changeable mid-test (the device dropping
+/// during a wait), and it records what tools asked the app to do; `show`
+/// applies window changes the way `AppEnvironment` does.
+final class FakeUI: AgentUI {
+    struct Clear: Equatable, Sendable { let sessionId: Int64; let through: Int64 }
+    private struct Calls: Sendable {
+        var commands: [String] = []
+        var clears: [Clear] = []
+        var notes: [AgentNote] = []
+        var changes: [UIChange] = []
+        var outcome = NotifyOutcome(notified: true)
+    }
 
-    init(value: HostSnapshot) { self.value = value }
+    private let state: Mutex<HostSnapshot>
+    private let calls = Mutex(Calls())
 
-    func snapshot() -> HostSnapshot { value }
+    init(value: HostSnapshot = HostSnapshot()) { state = Mutex(value) }
 
-    func show(_ change: UIChange) {
-        changes.append(change)
-        value.ui = value.ui.applying(change)
+    var value: HostSnapshot { state.withLock { $0 } }
+    func update(_ change: (inout HostSnapshot) -> Void) { state.withLock { change(&$0) } }
+
+    var sentCommands: [String] { calls.withLock { $0.commands } }
+    var clears: [Clear] { calls.withLock { $0.clears } }
+    var notes: [AgentNote] { calls.withLock { $0.notes } }
+    var changes: [UIChange] { calls.withLock { $0.changes } }
+    func setNotifyOutcome(_ outcome: NotifyOutcome) { calls.withLock { $0.outcome = outcome } }
+
+    func snapshot() async -> HostSnapshot { value }
+    func show(_ change: UIChange) async {
+        calls.withLock { $0.changes.append(change) }
+        state.withLock { $0.ui = $0.ui.applying(change) }
+    }
+    func didSendCommand(_ command: String) async { calls.withLock { $0.commands.append(command) } }
+    func clearLogView(sessionId: Int64, through eventId: Int64) async {
+        calls.withLock { $0.clears.append(Clear(sessionId: sessionId, through: eventId)) }
+    }
+    func notify(_ note: AgentNote) async -> NotifyOutcome {
+        calls.withLock { $0.notes.append(note); return $0.outcome }
     }
 }
 
-func makeContext(_ store: LogStore, ui: HostSnapshot = HostSnapshot(),
+/// The app on the other end of the WebSocket. `onSend` plays its part:
+/// log a line, answer storage.list.
+final class FakeDevice: DeviceLink {
+    private let log = Mutex<[String]>([])
+    private let onSend: @Sendable (String) async -> Void
+
+    init(onSend: @escaping @Sendable (String) async -> Void = { _ in }) { self.onSend = onSend }
+
+    var sent: [String] { log.withLock { $0 } }
+
+    func send(command: String) async {
+        log.withLock { $0.append(command) }
+        await onSend(command)
+    }
+}
+
+func makeContext(_ store: LogStore, ui: HostSnapshot = HostSnapshot(), device: FakeDevice = FakeDevice(),
                  now: Date = Date(timeIntervalSince1970: 1_000_000)) -> ToolContext {
-    ToolContext(store: store, ui: FakeUI(value: ui), now: { now })
+    makeContext(store, fakeUI: FakeUI(value: ui), device: device, now: now)
+}
+
+func makeContext(_ store: LogStore, fakeUI: FakeUI, device: FakeDevice = FakeDevice(),
+                 now: Date = Date(timeIntervalSince1970: 1_000_000)) -> ToolContext {
+    ToolContext(store: store, ui: fakeUI, device: device, now: { now })
 }
 
 /// A context whose fake UI the test can read back.
 func makeUIContext(_ store: LogStore, ui: HostSnapshot = HostSnapshot()) -> (ToolContext, FakeUI) {
     let fake = FakeUI(value: ui)
-    return (ToolContext(store: store, ui: fake, now: { Date(timeIntervalSince1970: 1_000_000) }), fake)
+    return (makeContext(store, fakeUI: fake), fake)
 }
 
 /// Appends `rows` (level, subsystem, category, message) 1 ms apart and
@@ -43,4 +90,9 @@ func seed(_ store: LogStore, session: Int64,
             to: session)
     }
     try await waitForEvents(before + rows.count, session: session, in: store)
+}
+
+func event(_ message: String, level: LogLevel = .info, subsystem: String = "app") -> DecodedEvent {
+    DecodedEvent(timestampMillis: 2_000, level: level, subsystem: subsystem, category: "",
+                 message: message, dataJSON: nil, contextJSON: nil)
 }

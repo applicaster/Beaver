@@ -58,11 +58,11 @@ enum UITools {
         try await run(args, ctx, inContext: false)
     }
 
-    /// A person's click on a journal link, and PR 2's toast "Show" and
-    /// notification click: `ui_show`'s path, not journaled. What a filter
-    /// hides is shown in context rather than refused.
-    static func open(_ link: AgentLink, reveal: Bool, _ ctx: ToolContext) async throws -> ToolResult {
-        if let name = link.savedFilter {
+    /// A person's click on a journal link, a toast's Show or a notification:
+    /// `ui_show`'s path, not journaled. What a filter hides is shown in
+    /// context rather than refused.
+    static func open(_ link: JournalLink, reveal: Bool, _ ctx: ToolContext) async throws -> ToolResult {
+        if case .savedFilter(let name) = link {
             guard let saved = try await ctx.store.savedFilters().first(where: { $0.name == name }) else {
                 throw ToolError("The saved filter “\(name)” no longer exists.")
             }
@@ -72,13 +72,13 @@ enum UITools {
             return stateResult(await ctx.ui.snapshot())
         }
         var args: [String: JSON] = ["reveal": .bool(reveal)]
-        if let id = link.eventId {
-            args["select"] = ["eventId": JSON(id)]
-        } else if let id = link.networkId {
-            args["select"] = ["networkId": JSON(id)]
-        } else if let id = link.sessionId {
+        switch link {
+        case .event(let id): args["select"] = ["eventId": JSON(id)]
+        case .network(let id): args["select"] = ["networkId": JSON(id)]
+        case .session(let id):
             args["sessionId"] = JSON(id)
             args["tab"] = "logs"
+        case .savedFilter: break
         }
         return try await run(ToolArguments(args), ctx, inContext: true)
     }
@@ -212,9 +212,9 @@ enum UITools {
         result.summary = (reveal ? "Brought Beaver forward: " : "Changed in the background, nothing took focus: ")
             + view(after.ui) + "."
             + (notes.isEmpty ? "" : " Resolved: " + notes.joined(separator: "; ") + ".")
-        result.links = change.selectedEventId.map { [AgentLink(eventId: $0)] }
-            ?? change.selectedNetworkId.map { [AgentLink(networkId: $0)] }
-            ?? after.ui.sessionId.map { [AgentLink(sessionId: $0)] } ?? []
+        result.links = change.selectedEventId.map { [.event($0)] }
+            ?? change.selectedNetworkId.map { [.network($0)] }
+            ?? after.ui.sessionId.map { [.session($0)] } ?? []
         result.next = !after.windowOpen ? ["ask the user to click Beaver in the Dock: its window is closed"]
             : reveal ? ["ui_state() to check what the user sees"]
             : ["ui_show(reveal: true) when the user asks to see it"]

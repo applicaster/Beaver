@@ -26,7 +26,8 @@ extension AppEnvironment: AgentUI {
                 mcpPort: agentAccessPort ?? 0,
                 ui: uiState,
                 windowOpen: mainWindow != nil,
-                frontmost: NSApp.isActive
+                frontmost: NSApp.isActive,
+                notifications: AgentNotifier.shared.state
             )
         }
     }
@@ -88,9 +89,26 @@ extension AppEnvironment: AgentUI {
 
     /// Shows what a journal link points at, through `ui_show`'s path
     /// (design §7.2). Not journaled: the person clicked, not an agent.
-    /// PR 2's toast "Show" and notification click call it with
-    /// `reveal: true`.
-    func open(_ link: AgentLink, reveal: Bool) async throws {
-        _ = try await UITools.open(link, reveal: reveal, ToolContext(store: store, ui: self))
+    /// Toast "Show", a notification click and a journal link all end here
+    /// (MainWindow, `.beaverShowAgentLink`).
+    func open(_ link: JournalLink, reveal: Bool) async throws {
+        _ = try await UITools.open(link, reveal: reveal, ToolContext(store: store, ui: self, device: server))
+    }
+
+    nonisolated public func didSendCommand(_ command: String) async {
+        await MainActor.run {
+            NotificationCenter.default.post(name: .beaverCommandSent, object: command)
+        }
+    }
+
+    nonisolated public func clearLogView(sessionId: Int64, through eventId: Int64) async {
+        await MainActor.run {
+            NotificationCenter.default.post(name: .beaverClearViewThrough,
+                                            object: ClearViewRequest(sessionId: sessionId, through: eventId))
+        }
+    }
+
+    nonisolated public func notify(_ note: AgentNote) async -> NotifyOutcome {
+        await MainActor.run { AgentNotifier.shared.notify(note) }
     }
 }

@@ -10,6 +10,11 @@ import Foundation
 public struct ToolError: Error, Sendable, Equatable {
     public let message: String
     public init(_ message: String) { self.message = message }
+
+    /// The message without its example call, for a toast a person reads.
+    public var personMessage: String {
+        message.range(of: " Example:").map { String(message[..<$0.lowerBound]) } ?? message
+    }
 }
 
 public struct ToolResult: Sendable {
@@ -22,14 +27,18 @@ public struct ToolResult: Sendable {
     public var next: [String]
     /// The session the call was about, for the journal's link.
     public var sessionId: Int64?
-    /// What the call pointed at (an event, a request), for the journal's
-    /// clickable links. Empty: the row links to `sessionId`.
-    public var links: [AgentLink]
+    /// Journal extras, for notes: `info` / `attention`, what the entry
+    /// links to, and a notice shown under it (why a note wasn't notified).
+    public var level: String?
+    public var links: [JournalLink]
+    public var notice: String?
 
     public init(summary: String, body: String = "", structured: JSON = .object([:]),
-                next: [String] = [], sessionId: Int64? = nil, links: [AgentLink] = []) {
+                next: [String] = [], sessionId: Int64? = nil,
+                level: String? = nil, links: [JournalLink] = [], notice: String? = nil) {
         self.summary = summary; self.body = body; self.structured = structured
-        self.next = next; self.sessionId = sessionId; self.links = links
+        self.next = next; self.sessionId = sessionId
+        self.level = level; self.links = links; self.notice = notice
     }
 
     public var text: String {
@@ -136,6 +145,9 @@ public enum ToolSchema {
     public static let sessionId = integer(
         "Session id. Omit it for the live session, else the one the user is viewing, else the most recent.")
 
+    public static let deviceId = string(
+        "Which connected device. Omit it: Beaver has one device at a time, \"current\".")
+
     public static let range: [String: JSON] = [
         "afterId": integer("Only events with a larger id (a cursor from an earlier result)."),
         "beforeId": integer("Only events with a smaller id."),
@@ -163,14 +175,15 @@ public struct MCPTool: Sendable {
     /// Starts with "Use when…" (design §8).
     public let description: String
     public let kind: AgentActivity.Kind
+    public let idempotent: Bool
     public let inputSchema: JSON
     public let run: @Sendable (ToolArguments, ToolContext) async throws -> ToolResult
 
     public init(name: String, title: String, description: String, kind: AgentActivity.Kind,
-                inputSchema: JSON,
+                idempotent: Bool = false, inputSchema: JSON,
                 run: @escaping @Sendable (ToolArguments, ToolContext) async throws -> ToolResult) {
         self.name = name; self.title = title; self.description = description
-        self.kind = kind; self.inputSchema = inputSchema; self.run = run
+        self.kind = kind; self.idempotent = idempotent; self.inputSchema = inputSchema; self.run = run
     }
 
     /// The `tools/list` entry.
@@ -184,7 +197,7 @@ public struct MCPTool: Sendable {
                 "title": .string(title),
                 "readOnlyHint": .bool(kind == .read),
                 "destructiveHint": .bool(kind == .destructive),
-                "idempotentHint": .bool(kind == .read),
+                "idempotentHint": .bool(kind == .read || idempotent),
                 "openWorldHint": false,
             ],
         ]

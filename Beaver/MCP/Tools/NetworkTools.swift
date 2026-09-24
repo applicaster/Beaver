@@ -166,7 +166,7 @@ enum NetworkTools {
                 "bodiesTruncated": .bool(request.truncated || response.truncated),
             ],
             next: ["network_copy(id: \(id), format: \"curl\") to replay it"],
-            links: [AgentLink(networkId: id)]
+            links: [.network(id)]
         )
     }
 
@@ -210,6 +210,6 @@ enum NetworkTools {
                           structured: ["id": JSON(id), "format": .string(format), "text": .string(capped.text),
                                        "truncated": .bool(capped.truncated)],
                           next: ["network_get(id: \(id)) for headers and bodies", "network_query(status: \"errors\") for other failing requests"],
-                          links: [AgentLink(networkId: id)])
+                          links: [.network(id)])
     }
 }

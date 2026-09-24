@@ -71,6 +71,19 @@ struct MainWindow: View {
         .onChange(of: env.viewingSessionId) { _, _ in
             Task { await env.refreshViewingEventCount() }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .beaverClearViewThrough)) { note in
+            guard let request = note.object as? ClearViewRequest,
+                  let vm = logFeedVM, vm.sessionId == request.sessionId else { return }
+            vm.clearView(through: request.through)
+        }
+        // The menu item, a toast's Journal button, a summary notification.
+        .onChange(of: AgentNotifier.shared.panelRequests) { _, _ in showingAgentPanel = true }
+        // Toast Show and a notification click: the person asked, so through
+        // ui_show's path with reveal (design §7.2).
+        .onReceive(NotificationCenter.default.publisher(for: .beaverShowAgentLink)) { note in
+            guard let link = note.object as? JournalLink else { return }
+            Task { await showAgentLink(link) }
+        }
         .task {
             // Initial fetch so toolbar disabled state is correct on
             // first appearance.
@@ -83,7 +96,7 @@ struct MainWindow: View {
         // was opened while the toggle's write was still in flight.
         // Lifetime tied to MainWindow; one subscription per window.
         .task {
-            if agentActivity == nil { agentActivity = AgentActivityViewModel(store: env.store) }
+            if agentActivity == nil { agentActivity = AgentActivityViewModel(store: env.store, toasts: toasts) }
             let stream = await env.store.changes()
             for await change in stream {
                 if case .bookmarksChanged(let sid) = change,
@@ -507,6 +520,19 @@ struct MainWindow: View {
         showingExporter = true
     }
 
+    /// Brings Beaver forward on what a note points at, the way
+    /// `ui_show(reveal: true)` does (UITools.open).
+    private func showAgentLink(_ link: JournalLink) async {
+        showingAgentPanel = false
+        do {
+            try await env.open(link, reveal: true)
+        } catch let error as ToolError {
+            toasts.error(error.personMessage)
+        } catch {
+            toasts.error(error.localizedDescription)
+        }
+    }
+
     private func handleImport(_ result: Result<[URL], Error>) {
         guard case .success(let urls) = result, let url = urls.first else { return }
         Task {
@@ -514,35 +540,12 @@ struct MainWindow: View {
             let didStart = url.startAccessingSecurityScopedResource()
             defer { if didStart { url.stopAccessingSecurityScopedResource() } }
 
-            guard let data = try? Data(contentsOf: url) else { return }
-            var imported = (try? EventJSON.decodeExport(data)) ?? .init()
-            // Not a Beaver export: maybe a HAR (Beaver's, Chrome's, Charles'…).
-            if imported.events.isEmpty && imported.storage.isEmpty && imported.network.isEmpty {
-                imported.network = HARExport.decode(data)
-            }
-            // A storage-only or network-only file is still worth opening.
-            guard !imported.events.isEmpty || !imported.storage.isEmpty
-                    || !imported.network.isEmpty else { return }
-
-            // Create a new "imported" session per D7 — don't destroy the
-            // current live session.
-            guard let session = try? await env.store.createSession(
-                source: .imported,
-                clientLabel: url.deletingPathExtension().lastPathComponent
-            ) else { return }
-            try? await env.store.appendBulk(imported.events, to: session.id)
-            for (namespace, json) in imported.storage {
-                try? await env.store.recordStorageSnapshot(
-                    sessionId: session.id,
-                    namespace: namespace,
-                    dataJSON: json
-                )
-            }
-            for capture in imported.network {
-                try? await env.store.recordNetworkEntry(capture, sessionId: session.id)
-            }
+            guard let data = try? Data(contentsOf: url),
+                  let imported = try? await SessionImport.run(
+                      data, label: url.deletingPathExtension().lastPathComponent, store: env.store)
+            else { return }
             // Switch the LogFeed to the newly imported session.
-            env.viewingSessionId = session.id
+            env.viewingSessionId = imported.session.id
         }
     }
 }
@@ -772,6 +775,16 @@ extension Notification.Name {
     /// to the active view model, which hides the backlog without
     /// deleting anything.
     static let beaverClearView = Notification.Name("BeaverClearView")
+
+    /// Posted with `object: ClearViewRequest` to hide a session's events up
+    /// to an id. MainWindow applies it to the Log feed's view model even
+    /// while another tab is showing.
+    static let beaverClearViewThrough = Notification.Name("BeaverClearViewThrough")
+}
+
+struct ClearViewRequest {
+    let sessionId: Int64
+    let through: Int64
 }
 
 private struct BookmarksPopover: View {

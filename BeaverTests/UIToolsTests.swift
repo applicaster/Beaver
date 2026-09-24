@@ -61,11 +61,11 @@ struct UIToolsTests {
         let f = try await fixture()
         let (ctx, fake) = makeUIContext(f.store, ui: HostSnapshot(viewingSessionId: f.a))
         let quiet = try await show(["tab": "network"], ctx)
-        #expect(await fake.changes.last?.reveal == false)
+        #expect(fake.changes.last?.reveal == false)
         #expect(quiet.summary.hasPrefix("Changed in the background, nothing took focus: Network, session #\(f.a)"))
         #expect(quiet.next == ["ui_show(reveal: true) when the user asks to see it"])
         let loud = try await show(["reveal": true], ctx)
-        #expect(await fake.changes.last == UIChange(reveal: true))
+        #expect(fake.changes.last == UIChange(reveal: true))
         #expect(loud.summary.hasPrefix("Brought Beaver forward: "))
     }
 
@@ -74,11 +74,11 @@ struct UIToolsTests {
         let f = try await fixture()
         let (ctx, fake) = makeUIContext(f.store, ui: HostSnapshot(viewingSessionId: f.a))
         _ = try await show(["tab": "Requests"], ctx)
-        #expect(await fake.value.ui.tab == .network)
+        #expect(fake.value.ui.tab == .network)
         _ = try await show(["filter": ["minLevel": "error"]], ctx)
-        #expect(await fake.value.ui.tab == .logs)
+        #expect(fake.value.ui.tab == .logs)
         _ = try await show(["storage": ["layer": "keychain", "search": "token"]], ctx)
-        let s = await fake.value.ui
+        let s = fake.value.ui
         #expect(s.tab == .storages)
         #expect(s.storageLayer == .keychain)
         #expect(s.storageSearch == "token")
@@ -100,16 +100,16 @@ struct UIToolsTests {
         let (ctx, fake) = makeUIContext(f.store, ui: HostSnapshot(ui: ui))
 
         let r = try await show(["filter": ["subsystems": ["*AUTH*"]]], ctx)
-        let set = await fake.value.ui.logFilter
+        let set = fake.value.ui.logFilter
         #expect(set.subsystems == ["com.app.auth"])
         #expect(set.hiddenThroughEventId == f.events[0])
         #expect(r.summary.contains("Resolved: subsystems *AUTH* → com.app.auth."))
 
         _ = try await show(["minLevel": "warn"], ctx)            // top level, lifted into filter
-        #expect(await fake.value.ui.logFilter.minLevel == .warning)
+        #expect(fake.value.ui.logFilter.minLevel == .warning)
 
         _ = try await show(["filter": [:]], ctx)
-        #expect(await fake.value.ui.logFilter == .none)
+        #expect(fake.value.ui.logFilter == .none)
     }
 
     @Test("The resolved session is pinned in the change itself, not just read back from the snapshot")
@@ -121,10 +121,10 @@ struct UIToolsTests {
         let (ctx, fake) = makeUIContext(f.store, ui: HostSnapshot(ui: ui))
 
         let r = try await show(["filter": ["minLevel": "error"]], ctx)
-        #expect(await fake.changes.last?.sessionId == f.a)
+        #expect(fake.changes.last?.sessionId == f.a)
         #expect(r.structured["sessionId"]?.int64 == f.a)
         // Same session: the person's Clear watermark survives the call.
-        #expect(await fake.value.ui.logFilter.hiddenThroughEventId == f.events[0])
+        #expect(fake.value.ui.logFilter.hiddenThroughEventId == f.events[0])
     }
 
     @Test("select first / last resolve against the filter being set")
@@ -132,13 +132,13 @@ struct UIToolsTests {
         let f = try await fixture()
         let (ctx, fake) = makeUIContext(f.store, ui: HostSnapshot(viewingSessionId: f.a))
         _ = try await show(["filter": ["minLevel": "error"], "select": "first"], ctx)
-        #expect(await fake.value.ui.selectedEventId == f.events[1])
+        #expect(fake.value.ui.selectedEventId == f.events[1])
         let last = try await show(["select": "last"], ctx)
-        #expect(await fake.value.ui.selectedEventId == f.events[3])
-        #expect(last.links == [AgentLink(eventId: f.events[3])])
+        #expect(fake.value.ui.selectedEventId == f.events[3])
+        #expect(last.links == [JournalLink.event(f.events[3])])
 
         _ = try await show(["networkFilter": ["status": "errors"], "select": "first"], ctx)
-        let s = await fake.value.ui
+        let s = fake.value.ui
         #expect(s.tab == .network)
         #expect(s.selectedNetworkId == f.requests[1])
 
@@ -153,12 +153,12 @@ struct UIToolsTests {
         let f = try await fixture()
         let (ctx, fake) = makeUIContext(f.store, ui: HostSnapshot(viewingSessionId: f.b))
         let r = try await show(["select": ["eventId": JSON(f.events[1])], "filter": ["minLevel": "error"]], ctx)
-        let s = await fake.value.ui
+        let s = fake.value.ui
         #expect(s.sessionId == f.a)
         #expect(s.tab == .logs)
         #expect(s.logFilter.minLevel == .error)
         #expect(s.selectedEventId == f.events[1])
-        #expect(r.links == [AgentLink(eventId: f.events[1])])
+        #expect(r.links == [JournalLink.event(f.events[1])])
 
         do {   // the warning is hidden by level ≥ error
             _ = try await show(["select": ["eventId": JSON(f.events[2])]], ctx)
@@ -178,7 +178,7 @@ struct UIToolsTests {
         let f = try await fixture()
         let (ctx, fake) = makeUIContext(f.store, ui: HostSnapshot(viewingSessionId: f.a))
         _ = try await show(["networkFilter": ["method": ["post"], "status": 401, "host": "*x.io"]], ctx)
-        let s = await fake.value.ui
+        let s = fake.value.ui
         #expect(s.tab == .network)
         #expect(s.networkFilter.method == "POST")
         #expect(s.networkFilter.status == .code(401))
@@ -203,7 +203,7 @@ struct UIToolsTests {
             #expect(e.message.contains("ui_show(networkFilter: {}, select: {networkId: \(f.requests[0])})"))
         }
         _ = try await show(["tab": "network", "select": JSON(f.requests[1])], ctx)   // a bare number on the network tab
-        #expect(await fake.value.ui.selectedNetworkId == f.requests[1])
+        #expect(fake.value.ui.selectedNetworkId == f.requests[1])
     }
 
     @Test("No sessions: tab changes work, a selection says what to do")
@@ -211,7 +211,7 @@ struct UIToolsTests {
         let store = try LogStore(source: .inMemory)
         let (ctx, fake) = makeUIContext(store, ui: HostSnapshot(windowOpen: false))
         let r = try await show(["tab": "network", "reveal": true], ctx)
-        #expect(await fake.value.ui.tab == .network)
+        #expect(fake.value.ui.tab == .network)
         #expect(r.next == ["ask the user to click Beaver in the Dock: its window is closed"])
         do {
             _ = try await show(["select": "first"], ctx)
@@ -230,30 +230,30 @@ struct UIToolsTests {
         ui.networkFilter.status = .errors
         let (ctx, fake) = makeUIContext(f.store, ui: HostSnapshot(ui: ui))
 
-        _ = try await UITools.open(AgentLink(eventId: f.events[2]), reveal: false, ctx)   // hidden by level ≥ error
-        var s = await fake.value.ui
+        _ = try await UITools.open(JournalLink.event(f.events[2]), reveal: false, ctx)   // hidden by level ≥ error
+        var s = fake.value.ui
         #expect(s.tab == .logs)
         #expect(s.selectedEventId == f.events[2])
         #expect(s.logFilter == Filter(hiddenThroughEventId: f.events[0]))   // Clear kept: it doesn't hide the event
-        #expect(await fake.changes.last?.reveal == false)
+        #expect(fake.changes.last?.reveal == false)
 
-        _ = try await UITools.open(AgentLink(networkId: f.requests[0]), reveal: true, ctx)   // hidden by errors
-        s = await fake.value.ui
+        _ = try await UITools.open(JournalLink.network(f.requests[0]), reveal: true, ctx)   // hidden by errors
+        s = fake.value.ui
         #expect(s.tab == .network)
         #expect(s.selectedNetworkId == f.requests[0])
         #expect(s.networkFilter == NetworkFilter())
-        #expect(await fake.changes.last?.reveal == true)
+        #expect(fake.changes.last?.reveal == true)
 
-        _ = try await UITools.open(AgentLink(sessionId: f.b), reveal: false, ctx)
-        s = await fake.value.ui
+        _ = try await UITools.open(JournalLink.session(f.b), reveal: false, ctx)
+        s = fake.value.ui
         #expect(s.sessionId == f.b)
         #expect(s.tab == .logs)
 
         _ = try await f.store.upsertSavedFilter(name: "Auth", filter: Filter(minLevel: .warning, subsystems: ["com.app.auth"]))
-        _ = try await UITools.open(AgentLink(savedFilter: "Auth"), reveal: false, ctx)
-        #expect(await fake.value.ui.logFilter.subsystems == ["com.app.auth"])
+        _ = try await UITools.open(JournalLink.savedFilter("Auth"), reveal: false, ctx)
+        #expect(fake.value.ui.logFilter.subsystems == ["com.app.auth"])
 
-        await #expect(throws: ToolError.self) { try await UITools.open(AgentLink(eventId: 999_999), reveal: false, ctx) }
-        await #expect(throws: ToolError.self) { try await UITools.open(AgentLink(savedFilter: "Gone"), reveal: false, ctx) }
+        await #expect(throws: ToolError.self) { try await UITools.open(JournalLink.event(999_999), reveal: false, ctx) }
+        await #expect(throws: ToolError.self) { try await UITools.open(JournalLink.savedFilter("Gone"), reveal: false, ctx) }
     }
 }
