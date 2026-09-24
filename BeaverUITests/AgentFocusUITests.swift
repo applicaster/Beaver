@@ -31,6 +31,9 @@ final class AgentFocusUITests: XCTestCase {
 
         try await call("ui_show", ["tab": "network"])
         try await Task.sleep(for: .seconds(1))
+        // Meaningful only because reveal() forces activation below: if it
+        // didn't, a declined activation would pass this assertion for the
+        // wrong reason (no one ever asked Beaver forward, reveal or not).
         XCTAssertNotEqual(frontmost, beaver, "ui_show without reveal took focus")
 
         try await call("ui_show", ["tab": "logs", "reveal": true])

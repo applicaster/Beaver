@@ -74,7 +74,10 @@ extension AppEnvironment: AgentUI {
         }
         // Cooperative activation (macOS 14+) may decline a request from an
         // app in the background; AgentFocusUITests checks it lands.
-        NSApp.activate()
+        // `activate()` is cooperative and declines a request made while
+        // another app is active; an explicit ui_show(reveal: true) is the
+        // user asking, so force it.
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     /// The main window while it is open, on screen or in the Dock.
