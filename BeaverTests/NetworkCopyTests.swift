@@ -97,12 +97,13 @@ struct NetworkCopyTests {
 
     @Test
     func prettyPayloadJSONSortsAndIndents() {
-        let entry = e(#"{"url":"https://api.io/x","method":"GET"}"#)
-        #expect(entry.prettyPayloadJSON.contains("\n"))
-        let methodAt = entry.prettyPayloadJSON.range(of: "\"method\"")!.lowerBound
-        let urlAt = entry.prettyPayloadJSON.range(of: "\"url\"")!.lowerBound
+        let pretty = NetworkEntry.prettyPayloadJSON(#"{"url":"https:\/\/api.io\/x","method":"GET"}"#)
+        #expect(pretty.contains("\n"))
+        let methodAt = pretty.range(of: "\"method\"")!.lowerBound
+        let urlAt = pretty.range(of: "\"url\"")!.lowerBound
         #expect(methodAt < urlAt)
-        #expect(!entry.prettyPayloadJSON.contains(#"\/"#))
+        #expect(!pretty.contains(#"\/"#))
+        #expect(NetworkEntry.prettyPayloadJSON("not json") == "not json")
     }
 
     // MARK: Size and status line
@@ -455,5 +456,29 @@ struct NetworkCopyTests {
         let rows = NetworkEntry.sortedHeaders(["x-b": "2", "Content-Type": "j", "Accept": "a", "age": "1"])
         #expect(rows.map(\.name) == ["Accept", "age", "Content-Type", "x-b"])
         #expect(rows.map(\.value) == ["a", "1", "j", "2"])
+    }
+
+    // MARK: Replay warnings
+
+    @Test
+    func copyToastSaysWhyAReplayMayFail() {
+        let plain = e(#"{"url":"https://api.io/x","requestHeaders":{"Accept":"*/*"},"requestBody":"{}"}"#)
+        #expect(plain.copyToast("cURL") == "Copied cURL")
+
+        let redacted = e(#"{"url":"https://api.io/x","requestHeaders":{"Authorization":"[REDACTED]","Accept":"*/*"}}"#)
+        #expect(redacted.copyToast("cURL") == "Copied cURL: Authorization redacted by the SDK")
+
+        let two = e(#"{"url":"https://api.io/x","requestHeaders":{"X-Token":"[REDACTED]","Authorization":"[REDACTED]"}}"#)
+        #expect(two.copyToast("fetch") == "Copied fetch: Authorization, X-Token redacted by the SDK")
+
+        let cut = e(#"{"url":"https://api.io/x","requestBody":"{\"a\":1... [TRUNCATED]"}"#)
+        #expect(cut.copyToast("fetch") == "Copied fetch: body truncated")
+
+        let both = e(#"{"url":"https://api.io/x","requestHeaders":{"Authorization":"[REDACTED]"},"requestBody":"x... [TRUNCATED]"}"#)
+        #expect(both.copyToast("cURL") == "Copied cURL: Authorization redacted by the SDK, body truncated")
+
+        // Only the request matters: a cut response doesn't affect a replay.
+        let response = e(#"{"url":"https://api.io/x","responseBody":"x... [TRUNCATED]"}"#)
+        #expect(response.copyToast("cURL") == "Copied cURL")
     }
 }

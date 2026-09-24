@@ -36,7 +36,7 @@ struct NetworkEntryTests {
         #expect(e.host == "api.example.com")
         #expect(e.path == "/v1/feed?page=2")
         #expect(e.statusClass == .success)
-        #expect(e.payloadJSON == Self.ios)
+        #expect(NetworkCapture(Self.ios, fallbackMillis: 0)?.payloadJSON == Self.ios)
     }
 
     @Test
@@ -139,5 +139,31 @@ struct NetworkEntryTests {
         let e = try #require(NetworkEntry.parse(#"{"url":"u"}"#, fallbackMillis: 0))
         #expect(e.requestBodySize == nil)
         #expect(e.responseBodySize == nil)
+    }
+
+    @Test
+    func nonStringBodiesAreStringifiedNotDropped() throws {
+        let json = #"{"url":"https://a.io/x","requestBody":{"b":[1,2],"a":"x/y"},"responseBody":[true,null]}"#
+        let e = try #require(NetworkEntry.parse(json, fallbackMillis: 0))
+        #expect(e.requestBody == #"{"a":"x/y","b":[1,2]}"#)
+        #expect(e.responseBody == "[true,null]")
+
+        let scalars = try #require(NetworkEntry.parse(
+            #"{"url":"https://a.io/x","requestBody":42,"responseBody":true}"#, fallbackMillis: 0))
+        #expect(scalars.requestBody == "42")
+        #expect(scalars.responseBody == "true")
+
+        let null = try #require(NetworkEntry.parse(#"{"url":"https://a.io/x","responseBody":null}"#, fallbackMillis: 0))
+        #expect(null.responseBody == nil)
+    }
+
+    @Test
+    func negativeDurationBecomesZero() throws {
+        let fromTiming = try #require(NetworkEntry.parse(
+            #"{"url":"https://a.io/x","timing":{"startTime":500,"endTime":200}}"#, fallbackMillis: 0))
+        #expect(fromTiming.durationMillis == 0)
+        let explicit = try #require(NetworkEntry.parse(
+            #"{"url":"https://a.io/x","timing":{"startTime":500,"duration":-3}}"#, fallbackMillis: 0))
+        #expect(explicit.durationMillis == 0)
     }
 }

@@ -210,7 +210,7 @@ struct ZappSupportImportTests {
         let asExport = try EventJSON.decodeExport(har)
         #expect(asExport.events.isEmpty && asExport.storage.isEmpty && asExport.network.isEmpty)
 
-        let entries = HARExport.decode(har)
+        let entries = HARExport.decode(har).map(\.entry)
         #expect(entries.count == 2)
         #expect(entries[0].url == "https://api.example.com/v1/feed?page=2")
         #expect(entries[0].method == "POST")
@@ -261,6 +261,6 @@ struct ZappSupportImportTests {
         #expect(back.events[1].contextJSON == nil)
         #expect(try layer(back.storage[.keychain])["authToken"] as? String == "synthetic")
         #expect(back.storage[.local] == nil)
-        #expect(back.network.map(\.url) == ["https://a.example/one"])
+        #expect(back.network.map(\.entry.url) == ["https://a.example/one"])
     }
 }
