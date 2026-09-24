@@ -241,4 +241,41 @@ struct HARExportTests {
         #expect(entries.map(\.url) == ["https://a.io/"])
         #expect(entries.first?.durationMillis == nil)
     }
+
+    @Test
+    func decodeCapsBodiesLikeTheSDKAndKeepsTheirSize() throws {
+        let big = String(repeating: "a", count: 250_000)
+        let o: [String: Any] = ["log": ["entries": [[
+            "request": ["method": "POST", "url": "https://a.io/", "postData": ["text": big]],
+            "response": ["status": 200, "content": ["text": big]],
+        ]]]]
+        let capture = try #require(HARExport.decode(try JSONSerialization.data(withJSONObject: o)).first)
+        let entry = capture.entry
+        let capped = String(repeating: "a", count: 100_000) + TruncatedJSON.marker
+        #expect(entry.responseBody == capped)
+        #expect(entry.requestBody == capped)
+        #expect(entry.isResponseBodyTruncated && entry.isRequestBodyTruncated)
+        #expect(entry.responseBodySize == 250_000)
+        #expect(entry.requestBodySize == 250_000)
+        // The stored payload is capped too, so a reopened session matches.
+        #expect(capture.payloadJSON.utf8.count < 250_000)
+
+        // A HAR-declared size wins over the captured length.
+        let sized: [String: Any] = ["log": ["entries": [[
+            "request": ["url": "https://a.io/"],
+            "response": ["status": 200, "content": ["text": big, "size": 900_000]],
+        ]]]]
+        let back = try #require(HARExport.decode(try JSONSerialization.data(withJSONObject: sized)).first?.entry)
+        #expect(back.responseBodySize == 900_000)
+        #expect(back.isResponseBodyTruncated)
+
+        // At the limit nothing is cut.
+        let exact = String(repeating: "b", count: 100_000)
+        let small: [String: Any] = ["log": ["entries": [[
+            "request": ["url": "https://a.io/"], "response": ["content": ["text": exact]],
+        ]]]]
+        let kept = try #require(HARExport.decode(try JSONSerialization.data(withJSONObject: small)).first?.entry)
+        #expect(kept.responseBody == exact)
+        #expect(kept.responseBodySize == nil)
+    }
 }
