@@ -60,6 +60,7 @@ or a release):
 | `logs_query` | Log lines by filter, id range or time; cursor paging |
 | `logs_get` | Full events with data and context payloads (256 KB cap) |
 | `logs_wait` | Wait up to 60 s for a matching event |
+| `logs_clear` | Hide the viewed Log feed's events up to now, like Clear (⌘K); deletes nothing |
 | `network_query` | Requests by status, method, host, text |
 | `network_get` | One request with headers and bodies |
 | `network_copy` | A request as cURL, fetch() or JSON, with replay warnings |
@@ -69,7 +70,10 @@ or a release):
 | `commands_list` | Commands the connected app accepts |
 | `commands_send` | Send a command to the app; optionally collect the logs it causes, following a restart |
 | `bookmarks_list` | Events and requests the user bookmarked |
+| `bookmarks_set` | Bookmark an event or request, or remove the bookmark |
 | `filters_list` | The user's saved filters |
+| `filters_save` | Save a named filter (replaces one with the same name) |
+| `filters_delete` | Delete a saved filter |
 | `beaver_guide` | These recipes, by topic |
 
 Conventions: omitting `sessionId` means the live session, else the viewed one,
@@ -148,11 +152,18 @@ wherever ids do. Every result ends with `Next:` suggestions.
 3. `deviceDisconnected: true`: the app hasn't come back — ask the user to
    open it.
 
-### organise — what the user marked
+### organise — bookmarks, saved filters, a clean screen
 
 1. `bookmarks_list()` — events and requests the user bookmarked.
-2. `filters_list()` — their saved filters; reuse one's conditions in
+2. `bookmarks_set(eventId: <id>)` or `bookmarks_set(networkId: <id>)` — mark
+   what you found; `on: false` removes the mark.
+3. `filters_list()` — their saved filters; reuse one's conditions in
    `logs_query`.
+4. `filters_save(name: "Auth problems", filter: {minLevel: "warning", subsystems: ["*auth*"]})`
+   — the user can pick it in the Log feed; `filters_delete(name: "Auth problems")`.
+5. `logs_clear()` — before the user reproduces something: the viewed Log feed
+   hides what's there now. Nothing is deleted; note the `watermark` and use
+   `logs_wait(afterId: <watermark>)`.
 
 ### files — a customer sent a log file
 

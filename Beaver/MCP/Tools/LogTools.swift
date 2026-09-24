@@ -6,7 +6,7 @@
 import Foundation
 
 enum LogTools {
-    static var all: [MCPTool] { [facets, query, get, wait] }
+    static var all: [MCPTool] { [facets, query, get, wait, clear] }
 
     static let maxWaitMillis = 60_000
 
@@ -229,6 +229,34 @@ enum LogTools {
                 ? ["beaver_status() to see the device's new session", "logs_wait(…) without sessionId to follow the device"]
                 : ["logs_wait(afterId: \(start), …) to keep waiting", "logs_query(afterId: \(start)) to see what did arrive"],
             sessionId: w.sessionId
+        )
+    }
+
+    static let clear = MCPTool(
+        name: "logs_clear",
+        title: "Clear the log view",
+        description: "Use when the user wants a clean screen before reproducing something: hides the events up to now in Beaver's Log feed, like its Clear button (⌘K). Deletes nothing — logs_query still sees every event. Acts on the session the user is viewing.",
+        kind: .change,
+        inputSchema: ToolSchema.object([
+            "sessionId": ToolSchema.integer("The session the user is viewing (the default). Clear only acts on that one."),
+        ])
+    ) { args, ctx in
+        let host = await ctx.ui.snapshot()
+        guard let viewing = host.viewingSessionId else {
+            throw ToolError("The user isn't viewing a session, so there's nothing on screen to clear. beaver_status() shows what is connected.")
+        }
+        if let wanted = try args.int64("sessionId"), wanted != viewing {
+            throw ToolError("Clear only acts on the session the user is viewing (#\(viewing)); you passed #\(wanted). Omit sessionId, or ask the user to open session #\(wanted) first.")
+        }
+        guard let watermark = try await ctx.store.latestEventId(sessionId: viewing) else {
+            throw ToolError("Session #\(viewing) has no events; nothing to clear.")
+        }
+        await ctx.ui.clearLogView(sessionId: viewing, through: watermark)
+        return ToolResult(
+            summary: "Cleared the Log feed of session #\(viewing): events up to #\(watermark) are hidden on screen. Nothing was deleted.",
+            structured: ["sessionId": JSON(viewing), "watermark": JSON(watermark)],
+            next: ["logs_wait(afterId: \(watermark), …) for what comes next", "logs_query(afterId: \(watermark))"],
+            sessionId: viewing
         )
     }
 }

@@ -77,6 +77,11 @@ struct MainWindow: View {
         .onChange(of: env.viewingSessionId) { _, _ in
             Task { await env.refreshViewingEventCount() }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .beaverClearViewThrough)) { note in
+            guard let request = note.object as? ClearViewRequest,
+                  let vm = logFeedVM, vm.sessionId == request.sessionId else { return }
+            vm.clearView(through: request.through)
+        }
         .task {
             // Initial fetch so toolbar disabled state is correct on
             // first appearance.
@@ -748,6 +753,16 @@ extension Notification.Name {
     /// to the active view model, which hides the backlog without
     /// deleting anything.
     static let beaverClearView = Notification.Name("BeaverClearView")
+
+    /// Posted with `object: ClearViewRequest` to hide a session's events up
+    /// to an id. MainWindow applies it to the Log feed's view model even
+    /// while another tab is showing.
+    static let beaverClearViewThrough = Notification.Name("BeaverClearViewThrough")
+}
+
+struct ClearViewRequest {
+    let sessionId: Int64
+    let through: Int64
 }
 
 private struct BookmarksPopover: View {

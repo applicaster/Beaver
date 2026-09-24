@@ -33,4 +33,11 @@ extension AppEnvironment: AgentUI {
             NotificationCenter.default.post(name: .beaverCommandSent, object: command)
         }
     }
+
+    nonisolated public func clearLogView(sessionId: Int64, through eventId: Int64) async {
+        await MainActor.run {
+            NotificationCenter.default.post(name: .beaverClearViewThrough,
+                                            object: ClearViewRequest(sessionId: sessionId, through: eventId))
+        }
+    }
 }

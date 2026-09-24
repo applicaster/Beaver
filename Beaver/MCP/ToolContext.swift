@@ -12,6 +12,9 @@ public protocol AgentUI: Sendable {
     /// A command reached the device from outside the command bar; it
     /// joins the command bar's history like a typed one (design §5.6).
     func didSendCommand(_ command: String) async
+    /// Hide the viewed Log feed's events up to `eventId`, like its Clear
+    /// button (⌘K). Nothing is deleted.
+    func clearLogView(sessionId: Int64, through eventId: Int64) async
 }
 
 public struct HostSnapshot: Sendable, Equatable {

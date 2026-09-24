@@ -1185,6 +1185,14 @@ public actor LogStore {
         }
     }
 
+    /// The session a request belongs to — for agent bookmarks and links,
+    /// which get a bare request id.
+    public func networkEntrySessionId(id: Int64) async throws -> Int64? {
+        try await dbQueue.read { db in
+            try Int64.fetchOne(db, sql: "SELECT session_id FROM network_entry WHERE id = ?", arguments: [id])
+        }
+    }
+
     /// One entry's payload as received, for Copy JSON: the in-memory
     /// entries keep only the parsed fields.
     public func networkPayload(id: Int64) async throws -> String? {
