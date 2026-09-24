@@ -5,6 +5,7 @@
 
 import Sparkle
 import SwiftUI
+import os
 
 @main
 struct BeaverApp: App {
@@ -222,10 +223,13 @@ struct BeaverApp: App {
             // Superseded by a later start/stop call; that call owns the
             // final status.
         } catch {
+            Self.log.error("Agent Access failed to bind port \(port): \(error.localizedDescription)")
             env.agentAccessPort = nil
             env.agentAccessStatus = "Port \(port) in use"
         }
     }
+
+    private static let log = Logger(subsystem: "com.applicaster.LoggerNext", category: "AgentAccess")
 
     private static func handleInbound(frame: Data, env: AppEnvironment) async {
         let sessionId = await MainActor.run { env.currentSessionId }
