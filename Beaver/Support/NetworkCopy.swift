@@ -88,7 +88,7 @@ extension NetworkEntry {
     /// bodies at 100 000 chars and doesn't send the real size, so live
     /// traffic tops out at "100 KB+": red means "too big to even capture".
     public var tableSizeTier: Tier {
-        guard let bytes = responseBodySize ?? responseBytes else { return .normal }
+        guard let bytes = tableSizeBytes else { return .normal }
         if bytes >= 100_000 || (isResponseBodyTruncated && responseBodySize == nil) { return .critical }
         if bytes >= 50_000 { return .attention }
         return .normal
@@ -136,6 +136,9 @@ extension NetworkEntry {
         guard let o = try? JSONSerialization.jsonObject(with: Data(payloadJSON.utf8)) else { return payloadJSON }
         return pretty(o)
     }
+
+    /// The Size column's value and sort key: reported size, else captured bytes.
+    public var tableSizeBytes: Int? { responseBodySize ?? responseBytes }
 
     public var responseBytes: Int? {
         guard let responseBody, !responseBody.isEmpty else { return nil }

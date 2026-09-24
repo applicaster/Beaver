@@ -155,6 +155,10 @@ struct NetworkView: View {
                     .lineLimit(1)
             }
             Spacer(minLength: 8)
+            if !vm.sortOrder.isEmpty {
+                Button { vm.sortOrder = [] } label: { Label("Arrival order", systemImage: "arrow.up.arrow.down") }
+                    .help("Drop the column sort and list requests as they arrived")
+            }
             bookmarksButton
             Button { vm.clear() } label: { Label("Clear", systemImage: "xmark.circle") }
                 .help("Hide the requests on screen and start fresh — nothing is deleted")
@@ -224,8 +228,8 @@ struct NetworkView: View {
     /// colour only where it means something (method, non-2xx status, slow,
     /// large or cut).
     private func table(_ rows: [NetworkEntry]) -> some View {
-        Table(rows, selection: $vm.selection, columnCustomization: $columnLayout) {
-            TableColumn("Method") { e in
+        Table(rows, selection: $vm.selection, sortOrder: $vm.sortOrder, columnCustomization: $columnLayout) {
+            TableColumn("Method", value: \.method) { e in
                 HStack(spacing: 4) {
                     if vm.isBookmarked(e.id) {
                         Image(systemName: "bookmark.fill")
@@ -238,25 +242,25 @@ struct NetworkView: View {
             .width(min: 64, ideal: 76, max: 96)
             .customizationID("method")
             // The status is the one pill column; the method beside it is plain text.
-            TableColumn("Status") { StatusBadge(entry: $0) }
+            TableColumn("Status", value: \.status, comparator: NilLastComparator()) { StatusBadge(entry: $0) }
             .width(min: 48, ideal: 56, max: 64)
             .customizationID("status")
-            TableColumn("Host") { Text($0.host).font(Self.rowFont).lineLimit(1) }
+            TableColumn("Host", value: \.host) { Text($0.host).font(Self.rowFont).lineLimit(1) }
                 .width(min: 100, ideal: 170, max: 260)
                 .customizationID("host")
-            TableColumn("Path") { e in
+            TableColumn("Path", value: \.path) { e in
                 Text(e.path).font(Self.rowFont).lineLimit(1).truncationMode(.middle).help(e.path)
             }
             .customizationID("path")
-            TableColumn("Duration") { DurationCell(millis: $0.durationMillis) }
+            TableColumn("Duration", value: \.durationMillis, comparator: NilLastComparator()) { DurationCell(millis: $0.durationMillis) }
                 .width(min: 60, ideal: 72, max: 90)
                 .customizationID("duration")
                 .alignment(.trailing)
-            TableColumn("Size") { SizeCell(entry: $0) }
+            TableColumn("Size", value: \.tableSizeBytes, comparator: NilLastComparator()) { SizeCell(entry: $0) }
                 .width(min: 56, ideal: 70, max: 90)
                 .customizationID("size")
                 .alignment(.trailing)
-            TableColumn("Time") { e in
+            TableColumn("Time", value: \.startMillis) { e in
                 Text(Self.time(e.startMillis))
                     .font(Self.rowFont)
                     .foregroundStyle(.secondary)
@@ -336,6 +340,22 @@ struct NetworkView: View {
     static func time(_ ms: UInt64) -> String {
         Date(timeIntervalSince1970: Double(ms) / 1000)
             .formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute().second().secondFraction(.fractional(3)))
+    }
+}
+
+/// Lets an optional column drive `Table(sortOrder:)`. The VM sorts with
+/// `NetworkEntry.sorted`, which reads only the key path and order.
+private struct NilLastComparator: SortComparator {
+    var order = SortOrder.forward
+
+    func compare(_ a: Int?, _ b: Int?) -> ComparisonResult {
+        switch (a, b) {
+        case (nil, nil): .orderedSame
+        case (nil, _): .orderedDescending
+        case (_, nil): .orderedAscending
+        case let (a?, b?):
+            a == b ? .orderedSame : (a < b) == (order == .forward) ? .orderedAscending : .orderedDescending
+        }
     }
 }
 

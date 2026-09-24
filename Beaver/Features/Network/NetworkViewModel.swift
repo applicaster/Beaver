@@ -40,7 +40,13 @@ final class NetworkViewModel {
     private(set) var bookmarkCount = 0
     var showOnlyBookmarked = false { didSet { if showOnlyBookmarked != oldValue { recompute() } } }
 
-    /// What the table shows, and its results bar. Stored, not computed:
+    /// The table's column sort; empty keeps arrival order. In memory
+    /// only: a `KeyPathComparator` isn't Codable for `@AppStorage`.
+    var sortOrder: [KeyPathComparator<NetworkEntry>] = [] {
+        didSet { if sortOrder != oldValue { recompute() } }
+    }
+
+    /// What the table shows (filtered, then sorted), and its results bar. Stored, not computed:
     /// rebuilt only when the filter, bookmarks or entries change, and on
     /// append only the new rows are filtered — never on a render.
     private(set) var filtered: [NetworkEntry] = []
@@ -153,7 +159,7 @@ final class NetworkViewModel {
         maxLoadedId = max(maxLoadedId, newOnes.map(\.id).max() ?? 0)
         let shown = newOnes.filter(isShown)
         guard !shown.isEmpty else { return }
-        filtered.append(contentsOf: shown)
+        filtered = sortOrder.isEmpty ? filtered + shown : NetworkEntry.sorted(filtered + shown, using: sortOrder)
         stats = NetworkStats(filtered)
     }
 
@@ -163,7 +169,8 @@ final class NetworkViewModel {
 
     private func recompute() {
         searchTask?.cancel()
-        filtered = filter.isEmpty && !showOnlyBookmarked ? entries : entries.filter(isShown)
+        let shown = filter.isEmpty && !showOnlyBookmarked ? entries : entries.filter(isShown)
+        filtered = NetworkEntry.sorted(shown, using: sortOrder)
         stats = NetworkStats(filtered)
     }
 
