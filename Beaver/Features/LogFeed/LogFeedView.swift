@@ -763,6 +763,12 @@ private struct FacetMenuButton: View {
 
     private func rows(_ values: [FacetCount]) -> some View {
         VStack(alignment: .leading, spacing: 0) {
+            // No count: facet counts skip events with an empty value, so
+            // their sum would undercount what "Show all" shows.
+            FacetMenuRow(text: "Show all", icon: activeCount == 0 ? "checkmark" : nil, tint: .primary) {
+                if activeCount > 0 { vm.filter.clearChips(in: facet) }
+            }
+            Divider().padding(.vertical, 2)
             if values.isEmpty {
                 Text(vm.unfilteredCount == 0 ? "No values yet" : "No matching values")
                     .font(.caption)
@@ -771,25 +777,16 @@ private struct FacetMenuButton: View {
                     .padding(.vertical, 6)
             }
             ForEach(values, id: \.value) { option in
+                let state = vm.filter.state(of: option.value, in: facet)
                 FacetMenuRow(
-                    value: option.value,
                     text: facet.displayName(option.value),
                     count: option.count,
-                    state: vm.filter.state(of: option.value, in: facet)
+                    icon: state.icon,
+                    tint: state.tint,
+                    help: option.value
                 ) {
                     vm.cycleChip(option.value, in: facet)
                 }
-            }
-            if activeCount > 0 {
-                Divider().padding(.vertical, 2)
-                Button("Clear \(title) filters") {
-                    vm.filter.clearChips(in: facet)
-                }
-                .buttonStyle(.plain)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
             }
         }
         .padding(.vertical, 4)
@@ -797,30 +794,35 @@ private struct FacetMenuButton: View {
     }
 }
 
-/// One value in a facet popover: tri-state icon, name, right-aligned count.
-/// Clicking cycles include → exclude → off and leaves the popover open.
+/// One row in a facet popover: icon, name, right-aligned count. On a value
+/// row, clicking cycles include → exclude → off and leaves the popover open.
 private struct FacetMenuRow: View {
-    let value: String
     let text: String
-    let count: Int
-    let state: Filter.ChipState
+    var count: Int?
+    /// nil keeps the icon's space empty.
+    let icon: String?
+    let tint: Color
+    var help: String?
     let onTap: () -> Void
     @State private var isHovered = false
 
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: 8) {
-                Image(systemName: icon)
+                Image(systemName: icon ?? "checkmark")
                     .font(.caption)
                     .foregroundStyle(tint)
+                    .opacity(icon == nil ? 0 : 1)
                     .frame(width: 14)
                 Text(text)
                     .font(.caption.weight(.semibold))
                     .lineLimit(1)
                 Spacer(minLength: 12)
-                Text("\(count)")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
+                if let count {
+                    Text("\(count)")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
@@ -829,20 +831,22 @@ private struct FacetMenuRow: View {
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
-        .help(value)
+        .help(help ?? "")
     }
+}
 
+private extension Filter.ChipState {
     /// Mirrors the web's ✅ / ⛔ / nothing.
-    private var icon: String {
-        switch state {
+    var icon: String {
+        switch self {
         case .off:     "circle"
         case .include: "checkmark.circle.fill"
         case .exclude: "minus.circle.fill"
         }
     }
 
-    private var tint: Color {
-        switch state {
+    var tint: Color {
+        switch self {
         case .off:     .secondary
         case .include: .green
         case .exclude: .red
