@@ -65,4 +65,10 @@ struct NetworkToolsTests {
         let (ctx, _) = try await fixture()
         await #expect(throws: ToolError.self) { try await NetworkTools.query.run(ToolArguments(["status": "weird"]), ctx) }
     }
+
+    @Test("Unknown host throws and names closest")
+    func badHost() async throws {
+        let (ctx, _) = try await fixture()
+        await #expect(throws: ToolError.self) { try await NetworkTools.query.run(ToolArguments(["host": ["totallywrong.tld"]]), ctx) }
+    }
 }

@@ -59,6 +59,20 @@ enum NetworkTools {
         let limit = try args.limit(default: 100, max: 500)
         var entries = try await ctx.store.networkEntries(sessionId: s.id, afterId: afterId ?? 0)
         var notes: [String] = []
+
+        // Resolve host filter against all hosts in the session, before other filters narrow them
+        var resolvedHosts: Set<String>? = nil
+        if let hosts = try args.strings("host"), !hosts.isEmpty {
+            let allEntries = try await ctx.store.networkEntries(sessionId: s.id)
+            let available = Array(Set(allEntries.map(\.host))).sorted()
+            let r = ToolInput.resolveNames(hosts, among: available)
+            if let miss = r.misses.first {
+                throw ToolError("No host matches \"\(miss.pattern)\" in session #\(s.id). Closest: \(miss.closest.joined(separator: ", ")). Example: network_query() lists them all.")
+            }
+            resolvedHosts = Set(r.resolved)
+            if r.resolved.sorted() != hosts.sorted() { notes.append("host \(hosts.joined(separator: ", ")) → \(r.resolved.joined(separator: ", "))") }
+        }
+
         if let picks = try args.strings("status"), !picks.isEmpty {
             let matches = try statusMatcher(picks)
             entries = entries.filter(matches)
@@ -67,12 +81,8 @@ enum NetworkTools {
             let set = Set(methods.map { $0.uppercased() })
             entries = entries.filter { set.contains($0.method) }
         }
-        if let hosts = try args.strings("host"), !hosts.isEmpty {
-            let available = Array(Set(entries.map(\.host))).sorted()
-            let r = ToolInput.resolveNames(hosts, among: available)
-            if r.resolved.sorted() != hosts.sorted() { notes.append("host \(hosts.joined(separator: ", ")) → \(r.resolved.joined(separator: ", "))") }
-            let set = Set(r.resolved)
-            entries = entries.filter { set.contains($0.host) }
+        if let hosts = resolvedHosts {
+            entries = entries.filter { hosts.contains($0.host) }
         }
         if let search = try args.string("search"), !search.isEmpty {
             var f = NetworkFilter()
@@ -190,6 +200,7 @@ enum NetworkTools {
         // Same warnings as the Copy menu's toast: "Copied cURL: Authorization redacted by the SDK".
         let warnings = e.copyToast(label).dropFirst("Copied \(label)".count)
         return ToolResult(summary: "\(label) for request #\(id)\(warnings).", body: text,
-                          structured: ["id": JSON(id), "format": .string(format), "text": .string(text)])
+                          structured: ["id": JSON(id), "format": .string(format), "text": .string(text)],
+                          next: ["network_get(id: \(id)) for headers and bodies", "network_query(status: \"errors\") for other failing requests"])
     }
 }
