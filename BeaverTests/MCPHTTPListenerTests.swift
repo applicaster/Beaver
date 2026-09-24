@@ -130,33 +130,32 @@ struct MCPHTTPListenerTests {
         }
     }
 
-    @Test("Review focus: stop() never hangs racing a start() that's failing", .timeLimit(.minutes(1)))
-    func stopNeverHangsOnAnAlreadyCancelledListener() async throws {
+    @Test("Review focus: stop() stays responsive racing a start() that's failing", .timeLimit(.minutes(1)))
+    func stopStaysResponsiveRacingAFailingStart() async throws {
         // Occupies a real port so every `contender.start(port:)` below is
         // guaranteed to fail with EADDRINUSE: its handler cancels the
         // listener itself (case .failed/.waiting), independently of
         // `stop()`. Racing `stop()` against that failing `start()` many
         // times — with and without a tiny head start for the failure —
-        // exercises `stop()`/`wait()` under contention with a listener
-        // that's in the middle of failing on its own; if it ever hangs,
-        // `.timeLimit` turns that into a failure instead of blocking the
-        // suite forever.
+        // exercises `stop()`/`wait()` under general contention with a
+        // listener that's in the middle of failing on its own; if it ever
+        // hangs, `.timeLimit` turns that into a failure instead of
+        // blocking the suite forever.
         //
-        // This does not, by construction, reach the single narrowest
-        // ordering finding 1 named (`.cancelled` fully recorded *before*
-        // `stop()` is even called): in this actor, `self.listener` is
-        // always cleared either by `start()`'s own `catch` right after its
-        // continuation resumes, or by `stop()` immediately before it calls
-        // `cancel()` — both of which race ahead of the network stack
-        // actually delivering `.cancelled`. That exact ordering needs a
+        // This does NOT reach the specific ordering finding 1 named
+        // (`.cancelled` fully recorded *before* `wait()` is ever called):
+        // in this actor, whatever clears `self.listener` — `start()`'s own
+        // `catch` right after its continuation resumes, or `stop()` itself
+        // right before it calls `cancel()` — always runs, and `wait()` is
+        // always reached, before the network stack actually delivers
+        // `.cancelled` for that listener, because delivering it needs a
+        // real queue hop slower than the handful of synchronous
+        // actor-isolated statements in between. That ordering needs a
         // listener that reaches `.ready`, returns successfully, and only
-        // *later* fails on its own with nothing racing it — not
-        // reproducible here without forcing a real network failure or
-        // reaching into private actor state. `CancelState.wait()`'s
-        // "already cancelled" check is verified correct by inspection
-        // instead (see its doc comment) and was confirmed, by temporarily
-        // deleting that check, to hang this test's sibling scenarios were
-        // it ever exercised.
+        // *later* fails with nothing racing it — not reproducible here
+        // without forcing a real network fault. `CancelState`'s
+        // "already cancelled" short-circuit is exercised directly instead,
+        // below (`cancelStateMarkedBeforeWaitResolvesImmediately`).
         let occupied = MCPHTTPListener { body, _ in body }
         let port = try await occupied.start(port: 0)
         defer { Task { await occupied.stop() } }
@@ -167,6 +166,30 @@ struct MCPHTTPListenerTests {
             await contender.stop()
             #expect(await attempt == nil)
         }
+    }
+
+    @Test("Review focus: CancelState — marked before wait() resolves immediately", .timeLimit(.minutes(1)))
+    func cancelStateMarkedBeforeWaitResolvesImmediately() async throws {
+        // The exact ordering finding 1 was about: cancellation is already
+        // recorded by the time anyone asks. Network.framework won't
+        // redeliver `.cancelled` to a handler attached afterwards, so
+        // `wait()` must already know rather than depend on ever being told
+        // again — this is the "already cancelled" short-circuit in
+        // `CancelState.wait()`. If that short-circuit is missing, this
+        // hangs (verified in the report by temporarily removing it).
+        let state = MCPHTTPListener.CancelState()
+        state.markCancelled()
+        await state.wait()
+    }
+
+    @Test("Review focus: CancelState — wait() first, then marked, still resolves", .timeLimit(.minutes(1)))
+    func cancelStateWaitFirstThenMarkedResolves() async throws {
+        let state = MCPHTTPListener.CancelState()
+        async let waited: Void = state.wait()
+        // Give wait() a chance to register itself as the waiter first.
+        try await Task.sleep(for: .milliseconds(10))
+        state.markCancelled()
+        await waited
     }
 
     /// Sends raw bytes and reads until the server closes.

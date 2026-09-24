@@ -249,7 +249,7 @@ public actor MCPHTTPListener {
     /// handler, and read by any later `wait()`, so cancellation is
     /// recorded exactly once no matter when it happens relative to who's
     /// asking.
-    private final class CancelState: @unchecked Sendable {
+    final class CancelState: Sendable {
         private struct Box {
             var cancelled = false
             var waiter: CheckedContinuation<Void, Never>?
