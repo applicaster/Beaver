@@ -1835,8 +1835,18 @@ can be quick. `LIKE` costs nothing until the toggle is on, and then
 only for the query that asked.
 
 **Dropping `event_fts`.** The drop took 11 ms on the same store copy (the
-old index covered only short text columns, 24 MB), so v7 is safe to
-run at launch. Inserts and session deletes no longer pay the trigger.
+old index covered only short text columns, 24 MB). Inserts and
+session deletes no longer pay the trigger.
+
+**Launch cost.** v7 + v8 on a copy of the real store brought to v6,
+opened through `LogStore` in release: **0.16 s**
+(`BEAVER_MIGRATION_DB=… swift test -c release -Xswiftc -enable-testing
+--filter MigrationBenchmark`). The first run took 7.65 s. The time
+wasn't the SQL: GRDB's default `foreignKeyChecks: .deferred` re-checks
+every foreign key in the database after each migration, a full scan of
+about 3.8 s here. Both migrations are registered `.immediate`, since
+neither touches a keyed row. Future migrations on big tables should
+consider doing the same.
 
 **Also in this change (D14 follow-ups).**
 - `LIKE` escapes `%`, `_` and `\` (`ESCAPE '\'`): typing `100%`
