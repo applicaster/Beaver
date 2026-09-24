@@ -109,6 +109,12 @@ struct BeaverApp: App {
                     toasts.success("Copied: \(command)")
                 }
                 .disabled(env.agentAccessPort == nil)
+                // Design M28: always the one action that works — opens the
+                // Agent panel, whose strip asks or points at System Settings.
+                Button(AgentNotifications.menuTitle(for: AgentNotifier.shared.state)) {
+                    NSApp.activate()
+                    AgentNotifier.shared.openPanel()
+                }
             }
         }
     }

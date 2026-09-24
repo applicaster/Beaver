@@ -26,6 +26,9 @@ struct MainWindow: View {
     /// A request's start time waiting for the Log feed to mount, from
     /// Network's "Show in Log feed". See `detail`.
     @State private var pendingLogFeedJump: Date?
+    /// An event an agent's note points at, waiting for the Log feed of its
+    /// session to mount. See `showAgentLink`.
+    @State private var pendingEventJump: PendingEventJump?
 
     /// Per-session view-models, owned here so their state (filter,
     /// sort, exclude, expanded namespaces, search term, etc.)
@@ -82,6 +85,13 @@ struct MainWindow: View {
                   let vm = logFeedVM, vm.sessionId == request.sessionId else { return }
             vm.clearView(through: request.through)
         }
+        // The menu item, a toast's Journal button, a summary notification.
+        .onChange(of: AgentNotifier.shared.panelRequests) { _, _ in showingAgentPanel = true }
+        // Toast Show, a notification click, a journal link. PR 3 routes these through ui_show.
+        .onReceive(NotificationCenter.default.publisher(for: .beaverShowAgentLink)) { note in
+            guard let link = note.object as? JournalLink else { return }
+            Task { await showAgentLink(link) }
+        }
         .task {
             // Initial fetch so toolbar disabled state is correct on
             // first appearance.
@@ -94,7 +104,7 @@ struct MainWindow: View {
         // was opened while the toggle's write was still in flight.
         // Lifetime tied to MainWindow; one subscription per window.
         .task {
-            if agentActivity == nil { agentActivity = AgentActivityViewModel(store: env.store) }
+            if agentActivity == nil { agentActivity = AgentActivityViewModel(store: env.store, toasts: toasts) }
             let stream = await env.store.changes()
             for await change in stream {
                 if case .bookmarksChanged(let sid) = change,
@@ -210,6 +220,12 @@ struct MainWindow: View {
                             guard let date = pendingLogFeedJump else { return }
                             pendingLogFeedJump = nil
                             NotificationCenter.default.post(name: .beaverJumpToTime, object: date)
+                        }
+                        // Fires once the Log feed shows the event's session.
+                        .task(id: [pendingEventJump?.eventId ?? 0, vm.sessionId]) {
+                            guard let jump = pendingEventJump, jump.sessionId == vm.sessionId else { return }
+                            pendingEventJump = nil
+                            NotificationCenter.default.post(name: .beaverJumpToBookmark, object: jump.eventId)
                         }
                 } else {
                     ConnectionPlaceholder(state: env.serverState)
@@ -511,6 +527,33 @@ struct MainWindow: View {
         showingExporter = true
     }
 
+    /// The smallest navigation Beaver already has: the session, the tab,
+    /// and the bookmark jump for an event.
+    private func showAgentLink(_ link: JournalLink) async {
+        switch link {
+        case .session(let id):
+            env.viewingSessionId = id
+            selectedTab = .logFeed
+        case .event(let id):
+            guard let event = try? await env.store.events(ids: [id]).first else {
+                toasts.error("Event #\(id) is no longer stored")
+                return
+            }
+            env.viewingSessionId = event.sessionId
+            selectedTab = .logFeed
+            pendingEventJump = PendingEventJump(eventId: id, sessionId: event.sessionId)
+        case .network(let id):
+            guard let sessionId = try? await env.store.networkEntrySessionId(id: id) else {
+                toasts.error("Request #\(id) is no longer stored")
+                return
+            }
+            env.viewingSessionId = sessionId
+            selectedTab = .network
+        case .savedFilter:
+            showingAgentPanel = true
+        }
+    }
+
     private func handleImport(_ result: Result<[URL], Error>) {
         guard case .success(let urls) = result, let url = urls.first else { return }
         Task {
@@ -763,6 +806,11 @@ extension Notification.Name {
 struct ClearViewRequest {
     let sessionId: Int64
     let through: Int64
+}
+
+struct PendingEventJump: Equatable {
+    let eventId: Int64
+    let sessionId: Int64
 }
 
 private struct BookmarksPopover: View {
