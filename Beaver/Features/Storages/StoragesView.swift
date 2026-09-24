@@ -46,13 +46,62 @@ struct StoragesView: View {
     }
 }
 
+// MARK: - Editing
+
+/// `@AppStorage` key for the storage-only export's redaction toggle.
+private let storageExportRedactKey = "storageExportRedactKeychain"
+
+extension AppEnvironment {
+    /// Whether the connected device lists `storage.<layer>.<action>` in
+    /// its `cmdlist` reply (anything goes before a reply arrives).
+    func supportsStorage(_ action: StorageCommand.Action,
+                         in layer: StorageSnapshot.Namespace) -> Bool {
+        StorageCommand.isSupported(action, in: layer, by: availableCommands.map(\.name))
+    }
+}
+
+/// Send an edit, then say whether the device really applied it — the
+/// SDK only logs the result. A successful edit offers Undo.
+@MainActor
+private func sendStorageEdit(_ edit: StoragesViewModel.Edit,
+                             vm: StoragesViewModel,
+                             server: WSServer,
+                             toasts: ToastCenter,
+                             isUndo: Bool = false) {
+    Task {
+        switch await vm.apply(edit, via: server) {
+        case .applied(let undo):
+            if isUndo {
+                toasts.success("Undone")
+            } else if let undo {
+                toasts.show("Applied", duration: 6, action: ToastAction(title: "Undo") {
+                    // Undoing a Keychain edit is a Keychain write too.
+                    if undo.namespace == .keychain {
+                        vm.pendingKeychainWrite = .init(edit: undo, isUndo: true)
+                    } else {
+                        sendStorageEdit(undo, vm: vm, server: server, toasts: toasts, isUndo: true)
+                    }
+                })
+            } else {
+                toasts.success("Applied — no Undo: the old value has spaces")
+            }
+        case .notApplied:
+            toasts.error("Device didn't apply this — see the log")
+        case .noAnswer:
+            toasts.error("No reply from the device — see the log")
+        }
+    }
+}
+
 // MARK: - Content
 
 private struct StoragesContent: View {
     @Bindable var vm: StoragesViewModel
     @Environment(AppEnvironment.self) private var env
+    @Environment(ToastCenter.self) private var toasts
     @State private var showingExporter = false
     @State private var exportDocument: JSONExportDocument?
+    @AppStorage(storageExportRedactKey) private var redactKeychain = true
 
     // Add / delete sheet state. Each row in the outline owns its
     // namespace, so we carry that along — the action sheet picks the
@@ -98,6 +147,9 @@ private struct StoragesContent: View {
     @State private var pendingInnerDelete: InnerDeleteTarget?
     @State private var pendingAdd: AddKeyContext?
     @State private var pendingFieldDelete: StorageFieldTarget?
+    private func send(_ edit: StoragesViewModel.Edit, isUndo: Bool = false) {
+        sendStorageEdit(edit, vm: vm, server: env.server, toasts: toasts, isUndo: isUndo)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -108,6 +160,7 @@ private struct StoragesContent: View {
             StoragesTopBar(
                 vm: vm,
                 onExport: { scope in Task { await prepareExport(scope: scope) } },
+                onExportStorage: prepareStorageExport,
                 onAddKey: {
                     pendingAdd = AddKeyContext(
                         namespace: vm.selectedNamespace,
@@ -118,6 +171,7 @@ private struct StoragesContent: View {
             Divider()
             StoragesSearchBar(vm: vm)
             Divider()
+            StaleStorageBanner(vm: vm)
             // D31: no more right-side detail pane. Every value is
             // visible by expanding the namespace row inline; deeper
             // structures can be inspected by the row's copy-as-JSON
@@ -183,14 +237,13 @@ private struct StoragesContent: View {
             presenting: pendingDelete
         ) { target in
             Button("Delete", role: .destructive) {
-                let key = target.record.key
-                let ns  = target.namespace
                 pendingDelete = nil
-                vm.deleteValue(in: ns, key: key, via: env.server)
+                send(.init(namespace: target.namespace, parent: nil,
+                           key: target.record.key, value: nil))
             }
             Button("Cancel", role: .cancel) { pendingDelete = nil }
         } message: { _ in
-            Text("The value is removed on the device immediately. Other devices won't see the change until they reconnect.")
+            Text("Removes the key from the device's storage right away. Undo is offered once the device confirms.")
         }
         // Inner-row delete confirmation. SDK contract:
         //   storage.<wireKey>.delete <childKey> <parentKey>
@@ -205,20 +258,13 @@ private struct StoragesContent: View {
             presenting: pendingInnerDelete
         ) { target in
             Button("Delete", role: .destructive) {
-                let ns      = target.namespace
-                let parent  = target.parentKey
-                let child   = target.childKey
                 pendingInnerDelete = nil
-                vm.deleteValue(
-                    in: ns,
-                    parent: parent,
-                    key: child,
-                    via: env.server
-                )
+                send(.init(namespace: target.namespace, parent: target.parentKey,
+                           key: target.childKey, value: nil))
             }
             Button("Cancel", role: .cancel) { pendingInnerDelete = nil }
         } message: { _ in
-            Text("Removes one key inside the namespace on the device. The namespace itself stays.")
+            Text("Removes one key inside the namespace on the device. The namespace itself stays. Undo is offered once the device confirms.")
         }
         // Field delete: the SDK can't remove part of a value, so this
         // rewrites the whole stored JSON without the field.
@@ -230,18 +276,50 @@ private struct StoragesContent: View {
             ),
             presenting: pendingFieldDelete
         ) { target in
-            Button("Delete", role: .destructive) {
-                pendingFieldDelete = nil
-                guard let json = JSONFieldPatch.removing(target.field.id, in: target.storedJSON) else { return }
-                vm.setValue(in: target.namespace, parent: target.parentKey,
-                            key: target.key, value: json, via: env.server)
+            // Sending a value with spaces would write the wrong key, so
+            // then the dialog only explains.
+            if let json = fieldDeleteValue(target),
+               StorageCommand.valueProblem(json, parent: target.parentKey) == nil {
+                Button("Delete", role: .destructive) {
+                    pendingFieldDelete = nil
+                    send(.init(namespace: target.namespace, parent: target.parentKey,
+                               key: target.key, value: json))
+                }
+                Button("Cancel", role: .cancel) { pendingFieldDelete = nil }
+            } else {
+                Button("OK", role: .cancel) { pendingFieldDelete = nil }
             }
-            Button("Cancel", role: .cancel) { pendingFieldDelete = nil }
         } message: { target in
-            let json = JSONFieldPatch.removing(target.field.id, in: target.storedJSON) ?? ""
-            Text(json.contains(where: \.isWhitespace)
-                 ? "Rewrites \(target.key) on the device without this field. The new value contains spaces, which the device splits on — it may store only part of it."
-                 : "Rewrites \(target.key) on the device without this field.")
+            let problem = fieldDeleteValue(target).flatMap {
+                StorageCommand.valueProblem($0, parent: target.parentKey)
+            }
+            Text(problem.map { "Can't delete this field: \($0)" }
+                 ?? (target.namespace == .keychain
+                     ? "Rewrites \(target.key) in the Keychain without this field. The Keychain holds sign-in tokens; a wrong value can sign the app out."
+                     : "Rewrites \(target.key) on the device without this field."))
+        }
+        // The Keychain holds sign-in tokens; a slip there can log the
+        // app out, so writes to it are confirmed.
+        .confirmationDialog(
+            vm.pendingKeychainWrite.map { write in
+                write.edit.value == nil
+                    ? "Delete \"\(write.edit.key)\" from the Keychain?"
+                    : "Write \"\(write.edit.key)\" to the Keychain?"
+            } ?? "",
+            isPresented: Binding(
+                get: { vm.pendingKeychainWrite != nil },
+                set: { if !$0 { vm.pendingKeychainWrite = nil } }
+            ),
+            presenting: vm.pendingKeychainWrite
+        ) { write in
+            Button(write.isUndo ? "Undo" : "Write to Keychain", role: .destructive) {
+                vm.pendingKeychainWrite = nil
+                send(write.edit, isUndo: write.isUndo)
+            }
+            Button("Cancel", role: .cancel) { vm.pendingKeychainWrite = nil }
+        } message: { write in
+            Text("The Keychain holds sign-in tokens and credentials. A wrong value can sign the app out."
+                 + (write.isUndo ? "" : " Undo is offered once the device confirms."))
         }
         // Add-key sheet. Identifiable trigger so the same view powers
         // both top-bar "+ Add key" (parentKey = nil → top-level) and
@@ -253,18 +331,24 @@ private struct StoragesContent: View {
                 editKey: ctx.editKey,
                 initialValue: ctx.editValue,
                 fieldLabel: ctx.field?.fieldLabel,
+                // A string field takes any text; other fields and whole
+                // values must parse when they look like JSON.
+                validatesJSON: ctx.field.map { f in
+                    if case .string = f.field.kind { return false }
+                    return true
+                } ?? true,
                 transform: ctx.field.map { f in
                     { JSONFieldPatch.setting(f.field.id, to: $0, in: f.storedJSON) }
                 },
                 onSave: { namespace, parent, key, value in
-                    vm.setValue(
-                        in: namespace,
-                        parent: parent,
-                        key: key,
-                        value: value,
-                        via: env.server
-                    )
                     pendingAdd = nil
+                    let edit = StoragesViewModel.Edit(namespace: namespace, parent: parent,
+                                                      key: key, value: value)
+                    if namespace == .keychain {
+                        vm.pendingKeychainWrite = .init(edit: edit, isUndo: false)
+                    } else {
+                        send(edit)
+                    }
                 },
                 onCancel: { pendingAdd = nil }
             )
@@ -294,6 +378,21 @@ private struct StoragesContent: View {
         return "loggernext_storages_\(formatter.string(from: Date()))"
     }
 
+    private func fieldDeleteValue(_ target: StorageFieldTarget) -> String? {
+        JSONFieldPatch.removing(target.field.id, in: target.storedJSON)
+    }
+
+    /// Just the storage, in zapp-support's shape. Keychain values are
+    /// redacted unless the user turned that off in the Export menu.
+    private func prepareStorageExport() {
+        let storage = vm.snapshots.mapValues(\.dataJSON)
+        guard !storage.isEmpty,
+              let data = try? EventJSON.encodeStorage(storage, redactKeychain: redactKeychain)
+        else { return }
+        exportDocument = JSONExportDocument(data: data)
+        showingExporter = true
+    }
+
     private func prepareExport(scope: SessionExport.Scope) async {
         guard let data = await SessionExport.make(
             store: env.store,
@@ -311,7 +410,10 @@ private struct StoragesTopBar: View {
     @Bindable var vm: StoragesViewModel
     @Environment(AppEnvironment.self) private var env
     let onExport: (SessionExport.Scope) -> Void
+    let onExportStorage: () -> Void
     let onAddKey: () -> Void
+
+    @AppStorage(storageExportRedactKey) private var redactKeychain = true
 
     var body: some View {
         HStack(spacing: 10) {
@@ -323,9 +425,10 @@ private struct StoragesTopBar: View {
                     NamespaceTab(
                         namespace: ns,
                         isSelected: vm.selectedNamespace == ns,
-                        count: vm.recordCount(in: ns)
+                        count: vm.recordCount(in: ns),
+                        matchCount: vm.layerMatchCounts[ns]
                     ) {
-                        vm.selectedNamespace = ns
+                        vm.showMatches(in: ns)
                     }
                 }
             }
@@ -336,7 +439,7 @@ private struct StoragesTopBar: View {
             // device that recorded it is gone, so add / reload /
             // auto-refresh are no-ops. Hide them entirely rather
             // than presenting them as disabled-tease.
-            if isViewingLiveSession {
+            if isViewingLiveSession && env.supportsStorage(.set, in: vm.selectedNamespace) {
                 // Green ➕ tile — adds a top-level key in the current layer.
                 Button(action: onAddKey) {
                     Image(systemName: "plus")
@@ -374,9 +477,10 @@ private struct StoragesTopBar: View {
                 } label: {
                     Label("Reload", systemImage: "arrow.clockwise")
                 }
+                .keyboardShortcut("r", modifiers: .command)
                 .disabled(!isClientConnected)
                 .help(isClientConnected
-                      ? "Re-fetch the device's storage snapshot now"
+                      ? "Re-fetch the device's storage snapshot now (⌘R)"
                       : "Reconnect the device to refresh")
             }
 
@@ -392,13 +496,18 @@ private struct StoragesTopBar: View {
                 Button("Export all") {
                     onExport(.everything)
                 }
+                Divider()
+                Button("Export storage only") {
+                    onExportStorage()
+                }
+                Toggle("Redact Keychain values", isOn: $redactKeychain)
             } label: {
                 Label("Export", systemImage: "square.and.arrow.up")
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
             .disabled(!vm.hasAnyData)
-            .help("Save the session to a JSON file — the device storage plus its events")
+            .help("Save the session to a JSON file — the device storage plus its events — or the storage alone")
 
             Button(role: .destructive) {
                 vm.clearLocalCache()
@@ -449,8 +558,13 @@ private struct StoragesSearchBar: View {
 
     private var searchField: some View {
         HStack(spacing: 6) {
-            Image(systemName: "magnifyingglass")
-                .foregroundStyle(.secondary)
+            Button { isFocused = true } label: {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .keyboardShortcut("f", modifiers: .command)
+            .help("Search (⌘F)")
 
             TextField("Discover keys and values…", text: $vm.searchTerm)
                 .textFieldStyle(.plain)
@@ -510,6 +624,63 @@ private struct StoragesSearchBar: View {
         .labelsHidden()
         .frame(maxWidth: 220)
         .help("Show only one group")
+    }
+}
+
+/// When the layer on screen was last reported, and a warning strip when
+/// it can't be live — no device connected, or a past session.
+private struct StaleStorageBanner: View {
+    @Bindable var vm: StoragesViewModel
+    @Environment(AppEnvironment.self) private var env
+
+    private static let timeOnly: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm:ss"
+        return f
+    }()
+
+    private static let dateAndTime: DateFormatter = {
+        let f = DateFormatter()
+        f.setLocalizedDateFormatFromTemplate("MMMd")
+        f.dateFormat += ", HH:mm:ss"
+        return f
+    }()
+
+    private var staleReason: String? {
+        guard case .clientConnected = env.serverState else { return "Disconnected" }
+        return env.currentSessionId == vm.sessionId ? nil : "Past session"
+    }
+
+    var body: some View {
+        let taken = vm.takenAt[vm.selectedNamespace]
+        let reason = staleReason
+        if reason != nil || taken != nil {
+            VStack(spacing: 0) {
+                HStack(spacing: 6) {
+                    if let reason {
+                        Image(systemName: "bolt.horizontal.circle")
+                        Text("\(reason) — cached").fontWeight(.semibold)
+                    }
+                    if let taken {
+                        Text("as of \(Self.format(taken))")
+                    }
+                    Spacer()
+                }
+                .font(.caption)
+                .foregroundStyle(reason == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(Color.orange))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 4)
+                .background(reason == nil ? Color.clear : Color.orange.opacity(0.12))
+                Divider()
+            }
+            .help(reason == nil
+                  ? "When the device last reported this storage"
+                  : "Not live: this is the last storage Beaver received")
+        }
+    }
+
+    private static func format(_ date: Date) -> String {
+        (Calendar.current.isDateInToday(date) ? timeOnly : dateAndTime).string(from: date)
     }
 }
 
@@ -750,6 +921,8 @@ private struct NamespaceTab: View {
     let namespace: StorageSnapshot.Namespace
     let isSelected: Bool
     let count: Int
+    /// Discover hits in this layer; nil when not searching.
+    let matchCount: Int?
     let action: () -> Void
 
     @State private var isHovered = false
@@ -777,6 +950,11 @@ private struct NamespaceTab: View {
                     .font(.system(size: 12, weight: .medium))
                 Text(namespace.displayName)
                     .font(.subheadline.weight(.semibold))
+                if let matchCount {
+                    Label("\(matchCount)", systemImage: "magnifyingglass")
+                        .labelStyle(.titleAndIcon)
+                        .font(.caption.monospacedDigit().weight(.semibold))
+                }
                 Text("\(count)")
                     .font(.caption.monospacedDigit().weight(.semibold))
                     .padding(.horizontal, 7)
@@ -791,7 +969,7 @@ private struct NamespaceTab: View {
             // Same 30pt as the green ＋ tile beside the tabs.
             .frame(height: 30)
             .foregroundStyle(isSelected ? Color.white : color)
-            .opacity(count == 0 && !isSelected ? 0.6 : 1)
+            .opacity((matchCount ?? count) == 0 && !isSelected ? 0.6 : 1)
             .background(
                 RoundedRectangle(cornerRadius: 8)
                     .fill(isSelected
@@ -805,7 +983,8 @@ private struct NamespaceTab: View {
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
-        .help("\(count) \(count == 1 ? "namespace" : "namespaces") in \(namespace.displayName) storage")
+        .help(matchCount.map { "\($0) \($0 == 1 ? "match" : "matches") in \(namespace.displayName) storage — click to jump to the first" }
+              ?? "\(count) \(count == 1 ? "namespace" : "namespaces") in \(namespace.displayName) storage")
     }
 }
 
@@ -878,6 +1057,16 @@ private struct NamespaceRow: View {
         env.currentSessionId == vm.sessionId
     }
 
+    /// Write affordances also hide when the device's `cmdlist` doesn't
+    /// list the command — the SDK would ignore it silently.
+    private var canSet: Bool {
+        isViewingLiveSession && env.supportsStorage(.set, in: namespace)
+    }
+
+    private var canDelete: Bool {
+        isViewingLiveSession && env.supportsStorage(.delete, in: namespace)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
@@ -892,7 +1081,8 @@ private struct NamespaceRow: View {
                         parent: record,
                         child: child,
                         isClientConnected: isClientConnected,
-                        isLiveSession: isViewingLiveSession,
+                        canSet: canSet,
+                        canDelete: canDelete,
                         rowIndex: idx,
                         onCopy: { copyValue(of: child) },
                         onDelete: {
@@ -935,7 +1125,7 @@ private struct NamespaceRow: View {
                         target: StorageFieldTarget(namespace: namespace, parentKey: nil,
                                                    key: record.key, storedJSON: record.valueText ?? "",
                                                    field: tree),
-                        live: isViewingLiveSession, connected: isClientConnected, onField: onField
+                        live: canSet, connected: isClientConnected, onField: onField
                     ))
                 } else if let text = decode.text {
                     RawValueBlock(text: text)
@@ -1000,11 +1190,39 @@ private struct NamespaceRow: View {
                 } label: {
                     Label("Copy as JSON", systemImage: "curlybraces")
                 }
+                if canSet {
+                    Divider()
+                    Button {
+                        onAddInside(record, namespace)
+                    } label: {
+                        Label("Add key inside…", systemImage: "plus")
+                    }
+                    .disabled(!isClientConnected)
+                }
             } else {
                 Button {
                     copyScalarValue()
                 } label: {
                     Label("Copy value", systemImage: "doc.on.doc")
+                }
+                if canSet || canDelete {
+                    Divider()
+                }
+                if canSet {
+                    Button {
+                        onEdit(namespace, nil, record.key, record.valueText ?? "")
+                    } label: {
+                        Label("Edit…", systemImage: "pencil")
+                    }
+                    .disabled(!isClientConnected)
+                }
+                if canDelete {
+                    Button(role: .destructive) {
+                        onDelete(record, namespace)
+                    } label: {
+                        Label("Delete…", systemImage: "trash")
+                    }
+                    .disabled(!isClientConnected)
                 }
             }
         }
@@ -1083,12 +1301,11 @@ private struct NamespaceRow: View {
         // Editing affordances hidden for past sessions — the device
         // that recorded the session is gone, so writes would silently
         // fail. Copy always works, device or not.
-        let canWrite = isViewingLiveSession
         HStack(spacing: 4) {
             if record.isContainer {
                 // Namespace: [+] [copy as JSON]. No delete — the SDK
                 // has no command to remove a whole namespace.
-                if canWrite {
+                if canSet {
                     RowIconButton(
                         systemImage: "plus",
                         help: isClientConnected
@@ -1109,12 +1326,14 @@ private struct NamespaceRow: View {
                 RowIconButton(systemImage: "doc.on.doc",
                               help: "Copy this value",
                               action: copyNamespaceContents)
-                if canWrite {
+                if canSet {
                     RowIconButton(
                         systemImage: "pencil",
                         help: isClientConnected ? "Edit this value" : "Reconnect the device to edit"
                     ) { onEdit(namespace, nil, record.key, record.valueText ?? "") }
                     .disabled(!isClientConnected)
+                }
+                if canDelete {
                     RowIconButton(
                         systemImage: "trash",
                         help: isClientConnected ? "Delete this top-level key" : "Reconnect the device to delete"
@@ -1195,10 +1414,11 @@ private struct InnerKeyRow: View {
     let parent: StorageRecord
     let child: StorageRecord
     let isClientConnected: Bool
-    /// True only when the session being viewed is the live one.
-    /// Hides the delete button for past sessions where writes
-    /// to the device aren't possible.
-    let isLiveSession: Bool
+    /// Live session and the device lists the command. Hides edit /
+    /// delete for past sessions, where writes to the device aren't
+    /// possible, and for SDKs without the command.
+    let canSet: Bool
+    let canDelete: Bool
     /// 0-based index inside the parent's children, used to draw
     /// zebra-stripe backgrounds. Doesn't affect functionality.
     let rowIndex: Int
@@ -1335,9 +1555,9 @@ private struct InnerKeyRow: View {
                         StorageValuePopover(
                             record: child,
                             onCopyKey: copyKeyName,
-                            onEdit: isLiveSession && !child.isContainer
+                            onEdit: canSet && !child.isContainer
                                 ? { showingFullValue = false; onEdit(rawText) } : nil,
-                            onDelete: isLiveSession
+                            onDelete: canDelete
                                 ? { showingFullValue = false; onDelete() } : nil,
                             canWrite: isClientConnected
                         )
@@ -1347,18 +1567,17 @@ private struct InnerKeyRow: View {
                 RowIconButton(systemImage: "key", help: "Copy key name", action: copyKeyName)
                 RowIconButton(systemImage: "doc.on.doc", help: "Copy this value", action: onCopy)
 
-                // Hidden entirely for past sessions — see comments
-                // above on isLiveSession.
-                if isLiveSession {
-                    // Native objects/arrays have no single stored string
-                    // to edit; edit their leaves instead.
-                    if !child.isContainer {
-                        RowIconButton(
-                            systemImage: "pencil",
-                            help: isClientConnected ? "Edit this value" : "Reconnect the device to edit"
-                        ) { onEdit(rawText) }
-                        .disabled(!isClientConnected)
-                    }
+                // Hidden entirely for past sessions — see canSet / canDelete.
+                // Native objects/arrays have no single stored string to
+                // edit; edit their leaves instead.
+                if canSet && !child.isContainer {
+                    RowIconButton(
+                        systemImage: "pencil",
+                        help: isClientConnected ? "Edit this value" : "Reconnect the device to edit"
+                    ) { onEdit(rawText) }
+                    .disabled(!isClientConnected)
+                }
+                if canDelete {
                     RowIconButton(
                         systemImage: "trash",
                         help: isClientConnected
@@ -1409,6 +1628,21 @@ private struct InnerKeyRow: View {
             } label: {
                 Label("Copy \"key\": value", systemImage: "text.alignleft")
             }
+            if (canSet && !child.isContainer) || canDelete {
+                Divider()
+            }
+            if canSet && !child.isContainer {
+                Button { onEdit(rawText) } label: {
+                    Label("Edit…", systemImage: "pencil")
+                }
+                .disabled(!isClientConnected)
+            }
+            if canDelete {
+                Button(role: .destructive, action: onDelete) {
+                    Label("Delete…", systemImage: "trash")
+                }
+                .disabled(!isClientConnected)
+            }
         }
     }
 
@@ -1448,7 +1682,7 @@ private struct InnerKeyRow: View {
                             target: StorageFieldTarget(namespace: namespace, parentKey: parent.key,
                                                        key: child.key, storedJSON: rawText,
                                                        field: tree),
-                            live: isLiveSession, connected: isClientConnected, onField: onField
+                            live: canSet, connected: isClientConnected, onField: onField
                         ))
                 } else if let text = decode.text {
                     RawValueBlock(text: text)
@@ -1821,12 +2055,17 @@ private struct AddStorageKeySheet: View {
     /// Field mode: the value typed is one field's; `transform` turns it
     /// into the whole stored value (nil = can't).
     let fieldLabel: String?
+    /// Text that opens with `{` or `[` must parse. Off for a string
+    /// field, which stores any text as-is.
+    let validatesJSON: Bool
     let transform: ((String) -> String?)?
 
-    /// What actually gets sent as the key's value.
+    /// What actually gets sent as the key's value: the patched document
+    /// in field mode, and JSON compacted either way (the editor shows it
+    /// pretty-printed).
     private var outgoingValue: String? {
-        guard let transform else { return value }
-        return transform(value)
+        guard let transform else { return StorageCommand.wireValue(value) }
+        return transform(value).map(StorageCommand.wireValue)
     }
     let onSave: (StorageSnapshot.Namespace, String?, String, String) -> Void
     let onCancel: () -> Void
@@ -1839,6 +2078,7 @@ private struct AddStorageKeySheet: View {
          editKey: String? = nil,
          initialValue: String = "",
          fieldLabel: String? = nil,
+         validatesJSON: Bool = true,
          transform: ((String) -> String?)? = nil,
          onSave: @escaping (StorageSnapshot.Namespace, String?, String, String) -> Void,
          onCancel: @escaping () -> Void) {
@@ -1846,30 +2086,50 @@ private struct AddStorageKeySheet: View {
         self.initialParent = initialParent
         self.editKey = editKey
         self.fieldLabel = fieldLabel
+        self.validatesJSON = validatesJSON
         self.transform = transform
         self.onSave = onSave
         self.onCancel = onCancel
         _key = State(initialValue: editKey ?? "")
-        _value = State(initialValue: initialValue)
+        // Stored JSON is usually one long line; show it indented. A
+        // string field keeps its text exactly — reformatting it would
+        // change what gets stored.
+        let pretty = validatesJSON ? JSONText.pretty(initialValue) : nil
+        _value = State(initialValue: pretty ?? initialValue)
+        isTallEditor = pretty != nil || initialValue.count > 80
     }
+
+    /// Room for a pretty-printed document or a long token; one line's
+    /// worth otherwise.
+    private let isTallEditor: Bool
     /// User-typed subscope for top-level mode. Trimmed and folded
     /// to `nil` on save when empty.
     @State private var manualParent: String = ""
 
-    // The SDK splits commands on spaces with no quoting. A space in the
-    // key or namespace shifts every argument and writes the wrong key,
-    // so it blocks Save; a space in the value only truncates it, so
-    // that one just warns.
+    // The SDK splits commands on spaces with no quoting, so a space in
+    // the key, namespace or value shifts every later argument and
+    // writes the wrong place. Each blocks Save.
     private static func hasInnerSpace(_ s: String) -> Bool {
         s.trimmingCharacters(in: .whitespaces).contains(where: \.isWhitespace)
     }
     private var keyHasSpaces: Bool { Self.hasInnerSpace(key) }
     private var parentHasSpaces: Bool { Self.hasInnerSpace(manualParent) }
-    private var valueHasSpaces: Bool { (outgoingValue ?? value).contains(where: \.isWhitespace) }
+
+    private var isInvalidJSON: Bool {
+        validatesJSON && JSONText.looksLikeJSON(value) && !JSONText.isValid(value)
+    }
+
+    /// Why the value can't be sent, in terms of what the device would do.
+    private var valueWarning: String? {
+        if isInvalidJSON { return "Not valid JSON. Fix it, or remove the opening { or [ to store plain text." }
+        guard let outgoingValue else { return nil }
+        return StorageCommand.valueProblem(outgoingValue, parent: resolvedParent)
+    }
 
     private var canSave: Bool {
         !key.trimmingCharacters(in: .whitespaces).isEmpty
             && !keyHasSpaces && !parentHasSpaces && outgoingValue != nil
+            && valueWarning == nil
     }
 
     private var isInside: Bool { initialParent != nil }
@@ -1884,11 +2144,8 @@ private struct AddStorageKeySheet: View {
     }
 
     private var commandPreview: String {
-        var cmd = "storage.\(initialNamespace.wireKey).set \(key) \(outgoingValue ?? "…")"
-        if let parent = resolvedParent {
-            cmd += " \(parent)"
-        }
-        return cmd
+        StorageCommand.set(initialNamespace, key: key,
+                           value: outgoingValue ?? "…", parent: resolvedParent)
     }
 
     /// Colour cue per storage layer — matches the NamespaceTab
@@ -1952,10 +2209,9 @@ private struct AddStorageKeySheet: View {
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("Value").font(.caption).foregroundStyle(.secondary)
-                TextField("e.g. true", text: $value)
-                    .textFieldStyle(.roundedBorder)
-                    .spaceWarning(valueHasSpaces,
-                                  "The device splits on spaces — only the first word may be stored.")
+                PlainTextEditor(text: $value)
+                    .frame(height: isTallEditor ? 240 : 56)
+                    .spaceWarning(valueWarning != nil, valueWarning ?? "")
             }
 
             // Optional subscope — only shown in top-level mode.
@@ -1991,11 +2247,12 @@ private struct AddStorageKeySheet: View {
                 Button("Cancel", role: .cancel, action: onCancel)
                     .keyboardShortcut(.cancelAction)
                 Button("Save") {
+                    guard let outgoingValue else { return }
                     onSave(
                         initialNamespace,
                         resolvedParent,
                         key.trimmingCharacters(in: .whitespaces),
-                        outgoingValue ?? value
+                        outgoingValue
                     )
                 }
                 .keyboardShortcut(.defaultAction)
@@ -2003,6 +2260,6 @@ private struct AddStorageKeySheet: View {
             }
         }
         .padding(20)
-        .frame(width: 460)
+        .frame(width: 560)
     }
 }

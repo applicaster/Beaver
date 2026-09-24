@@ -277,6 +277,57 @@ struct LogStoreTests {
         #expect(snapshot?.namespace == .local)
     }
 
+    /// Auto-refresh re-reports unchanged storage every 2 s; storing each
+    /// copy grew the table by thousands of rows an hour.
+    @Test
+    func unchangedStorageSnapshotIsNotStoredAgain() async throws {
+        let store = try LogStore(source: .inMemory)
+        let session = try await store.createSession(source: .live)
+        let stream = await store.changes()
+
+        try await store.recordStorageSnapshot(sessionId: session.id, namespace: .local, dataJSON: "{\"k\":\"v\"}")
+        let first = try #require(try await store.latestStorageSnapshot(sessionId: session.id, namespace: .local))
+        try await Task.sleep(for: .milliseconds(5))
+        try await store.recordStorageSnapshot(sessionId: session.id, namespace: .local, dataJSON: "{\"k\":\"v\"}")
+        let second = try #require(try await store.latestStorageSnapshot(sessionId: session.id, namespace: .local))
+
+        #expect(second.id == first.id)
+        // Still "as of now": the device just confirmed it.
+        #expect(second.takenAt > first.takenAt)
+        #expect(try await store.storageSnapshotCount(sessionId: session.id) == 1)
+
+        // Both frames still broadcast, so an open Storages screen refreshes.
+        let updates = await race(timeout: .seconds(1)) {
+            var n = 0
+            for await change in stream {
+                if case .storageUpdated(let sid, .local) = change, sid == session.id { n += 1 }
+                if n == 2 { return 2 }
+            }
+            return n
+        }
+        #expect(updates == 2)
+    }
+
+    @Test
+    func changedStorageSnapshotIsStored() async throws {
+        let store = try LogStore(source: .inMemory)
+        let a = try await store.createSession(source: .live)
+        let b = try await store.createSession(source: .live)
+
+        try await store.recordStorageSnapshot(sessionId: a.id, namespace: .local, dataJSON: "{\"k\":\"v\"}")
+        try await store.recordStorageSnapshot(sessionId: a.id, namespace: .local, dataJSON: "{\"k\":\"w\"}")
+        // Back to the first value: it differs from the latest row, so it's new.
+        try await store.recordStorageSnapshot(sessionId: a.id, namespace: .local, dataJSON: "{\"k\":\"v\"}")
+        // Same text in another layer or session is not a duplicate.
+        try await store.recordStorageSnapshot(sessionId: a.id, namespace: .session, dataJSON: "{\"k\":\"v\"}")
+        try await store.recordStorageSnapshot(sessionId: b.id, namespace: .local, dataJSON: "{\"k\":\"v\"}")
+
+        #expect(try await store.storageSnapshotCount(sessionId: a.id) == 4)
+        #expect(try await store.storageSnapshotCount(sessionId: b.id) == 1)
+        let latest = try await store.latestStorageSnapshot(sessionId: a.id, namespace: .local)
+        #expect(latest?.dataJSON == "{\"k\":\"v\"}")
+    }
+
     // MARK: - Session lifecycle
 
     @Test

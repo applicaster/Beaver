@@ -57,6 +57,10 @@ enum EventJSON {
         }
 
         guard let object = json as? [String: Any] else { return Export() }
+        // A storage-only export is the storage object itself.
+        if object["events"] == nil && object["storage"] == nil && object["network"] == nil {
+            return Export(storage: decodeStorage(object))
+        }
         return Export(
             events: decodeEvents(object["events"]),
             storage: decodeStorage(object["storage"]),
@@ -195,14 +199,7 @@ enum EventJSON {
         }
         var root: [String: Any] = ["events": eventObjects(events)]
         if !storage.isEmpty {
-            var storageObject: [String: Any] = [:]
-            for (namespace, json) in storage {
-                guard let parsed = try? JSONSerialization.jsonObject(
-                    with: Data(json.utf8)
-                ) else { continue }
-                storageObject[namespace.wireKey] = parsed
-            }
-            root["storage"] = storageObject
+            root["storage"] = storageObject(storage)
         }
         if !network.isEmpty {
             root["network"] = network.compactMap { entry in
@@ -211,6 +208,38 @@ enum EventJSON {
         }
         let options: JSONSerialization.WritingOptions = pretty ? [.prettyPrinted] : []
         return try JSONSerialization.data(withJSONObject: root, options: options)
+    }
+
+    /// Storage alone, as `{storageType: {namespace: {key: value}}}` —
+    /// zapp-support's storage export shape, and what `decodeExport`
+    /// reads back. Keychain values become `"[REDACTED]"` (keys kept) so
+    /// the file can go on a ticket without the user's tokens.
+    static func encodeStorage(
+        _ storage: [StorageSnapshot.Namespace: String],
+        redactKeychain: Bool
+    ) throws -> Data {
+        var object = storageObject(storage)
+        if redactKeychain, let secure = object[StorageSnapshot.Namespace.keychain.wireKey] {
+            object[StorageSnapshot.Namespace.keychain.wireKey] = redacted(secure)
+        }
+        return try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
+    }
+
+    private static func storageObject(_ storage: [StorageSnapshot.Namespace: String]) -> [String: Any] {
+        var object: [String: Any] = [:]
+        for (namespace, json) in storage {
+            guard let parsed = try? JSONSerialization.jsonObject(with: Data(json.utf8)) else { continue }
+            object[namespace.wireKey] = parsed
+        }
+        return object
+    }
+
+    private static func redacted(_ value: Any) -> Any {
+        switch value {
+        case let dict as [String: Any]: dict.mapValues(redacted)
+        case let array as [Any]:        array.map(redacted)
+        default:                        "[REDACTED]"
+        }
     }
 
     // MARK: - Helpers

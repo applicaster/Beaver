@@ -37,6 +37,11 @@ final class StoragesViewModel {
     /// any `.storageUpdated` broadcast for this session.
     private(set) var snapshots: [StorageSnapshot.Namespace: StorageSnapshot] = [:]
 
+    /// When the device last reported each layer, changed or not. Kept
+    /// apart from `snapshots` so an unchanged report moves the "as of"
+    /// time without re-rendering every row.
+    private(set) var takenAt: [StorageSnapshot.Namespace: Date] = [:]
+
     /// Per-record expansion state inside the current storage layer.
     /// Keyed by `"<wireKey>:<recordId>"` so the set survives tab
     /// switches without leaking expand state across layers.
@@ -174,6 +179,17 @@ final class StoragesViewModel {
 
     var matchCount: Int { matchIds.count }
 
+    /// Discover hits per layer, so a tab can say where the matches are.
+    /// Empty when not searching. Only the selected layer honours the
+    /// group picker — group names mean nothing on the other tabs.
+    private(set) var layerMatchCounts: [StorageSnapshot.Namespace: Int] = [:]
+
+    /// Switch to a layer's tab and land on its first match.
+    func showMatches(in namespace: StorageSnapshot.Namespace) {
+        selectedNamespace = namespace
+        if !matchIds.isEmpty { jump(to: 0) }
+    }
+
     /// True when `.*` is on and the pattern doesn't compile. The box
     /// turns red and nothing matches, but the list stays visible so the
     /// user doesn't lose their place.
@@ -195,8 +211,10 @@ final class StoragesViewModel {
         guard !matchIds.isEmpty else { return }
         let current = currentMatchIndex ?? (delta > 0 ? -1 : 0)
         let count = matchIds.count
-        let next = ((current + delta) % count + count) % count
+        jump(to: ((current + delta) % count + count) % count)
+    }
 
+    private func jump(to next: Int) {
         currentMatchIndex = next
         let id = matchIds[next]
         currentMatchId = id
@@ -223,6 +241,17 @@ final class StoragesViewModel {
         )
         currentMatchIndex = matchIds.isEmpty ? nil : 0
         currentMatchId = matchIds.first
+
+        let matcher = self.matcher
+        var counts: [StorageSnapshot.Namespace: Int] = [:]
+        if matcher.isFiltering {
+            for ns in StorageSnapshot.Namespace.allCases {
+                counts[ns] = ns == selectedNamespace
+                    ? matchIds.count
+                    : StorageSearch.collectMatches(in: records(in: ns), with: matcher).count
+            }
+        }
+        if counts != layerMatchCounts { layerMatchCounts = counts }
     }
 
 
@@ -397,76 +426,90 @@ final class StoragesViewModel {
 
     // MARK: - Actions
 
-    /// Send `storage.list` to the device. The response will come back
-    /// as a `storage` message and refresh `snapshots` via the change
-    /// subscription. No-op if no client is connected (WSServer.send
-    /// silently drops in that case).
-    ///
-    /// Belt-and-braces: in addition to relying on the subscription,
-    /// we also reload from the store ourselves a short delay after
-    /// sending. The subscription is the primary path (it picks up
-    /// updates from ANY source, including auto-refresh from other VMs);
-    /// this delayed reload covers the edge case where the broadcast
-    /// arrives before the consumer Task has woken up.
-    /// Push a new value into the device's storage. SDK contract
-    /// (CommandRegistry):
-    ///   storage.<wireKey>.set <key> <value> [namespace]
-    /// The trailing `[namespace]` is the SDK's per-storage SUBSCOPE —
-    /// e.g., `storage.local.set foo bar applicaster.v2` writes
-    /// `foo: bar` inside the `applicaster.v2` subscope. Passing
-    /// `parent = nil` writes at the top level.
-    ///
-    /// After the SDK applies the write it emits a log event back; we
-    /// also fire a `storage.list` refresh so the UI picks up the new
-    /// state without the user clicking Reload.
-    func setValue(
-        in namespace: StorageSnapshot.Namespace,
-        parent: String? = nil,
-        key: String,
-        value: String,
-        via server: WSServer
-    ) {
-        let trimmedKey = key.trimmingCharacters(in: .whitespaces)
-        guard !trimmedKey.isEmpty else { return }
-        let trimmedParentRaw = parent?.trimmingCharacters(in: .whitespaces) ?? ""
-        let trimmedParent: String? = trimmedParentRaw.isEmpty ? nil : trimmedParentRaw
-        // The SDK's parser is space-separated. Spaces inside `value`
-        // get split apart with no quoting — UI surfaces a warning.
-        var cmd = "storage.\(namespace.wireKey).set \(trimmedKey) \(value)"
-        if let trimmedParent {
-            cmd += " \(trimmedParent)"
-        }
-        Task { [weak self] in
-            await server.send(command: cmd)
-            try? await Task.sleep(for: .milliseconds(400))
-            self?.requestRefresh(via: server)
+    /// One write to the device's storage: `value == nil` deletes the key.
+    /// `parent` is the SDK's namespace (subscope) — nil lets the SDK use
+    /// its default, `applicaster.v2`.
+    struct Edit: Sendable {
+        let namespace: StorageSnapshot.Namespace
+        let parent: String?
+        let key: String
+        /// Already in wire form (`StorageCommand.wireValue`).
+        let value: String?
+
+        var command: String {
+            if let value {
+                return StorageCommand.set(namespace, key: key, value: value, parent: parent)
+            }
+            return StorageCommand.delete(namespace, key: key, parent: parent)
         }
     }
 
-    /// Remove a key from the device's storage. SDK contract:
-    /// `storage.<wireKey>.delete <key> [namespace]`. `parent` maps
-    /// to the trailing subscope (nil = top-level).
-    func deleteValue(
-        in namespace: StorageSnapshot.Namespace,
-        parent: String? = nil,
-        key: String,
-        via server: WSServer
-    ) {
-        let trimmedKey = key.trimmingCharacters(in: .whitespaces)
-        guard !trimmedKey.isEmpty else { return }
-        let trimmedParentRaw = parent?.trimmingCharacters(in: .whitespaces) ?? ""
-        let trimmedParent: String? = trimmedParentRaw.isEmpty ? nil : trimmedParentRaw
-        var cmd = "storage.\(namespace.wireKey).delete \(trimmedKey)"
-        if let trimmedParent {
-            cmd += " \(trimmedParent)"
-        }
-        Task { [weak self] in
-            await server.send(command: cmd)
-            try? await Task.sleep(for: .milliseconds(400))
-            self?.requestRefresh(via: server)
-        }
+    /// A Keychain write (or its Undo) waiting for the user to confirm.
+    /// Lives here, not in view state, so the toast's Undo can ask too.
+    struct PendingKeychainWrite: Identifiable {
+        let id = UUID()
+        let edit: Edit
+        let isUndo: Bool
     }
 
+    var pendingKeychainWrite: PendingKeychainWrite?
+
+    enum EditResult {
+        /// The next snapshot holds what was sent. `undo` restores the
+        /// previous value; nil when that value can't be sent back (it
+        /// has spaces).
+        case applied(undo: Edit?)
+        /// The device reported back, still holding something else.
+        case notApplied
+        /// No snapshot arrived — disconnected or the SDK is stuck.
+        case noAnswer
+    }
+
+    /// Send an edit and read it back. The SDK reports set / delete only
+    /// as a log line, so the proof is the next `storage.list` reply.
+    ///
+    /// A reply to a `storage.list` sent just before the edit can still
+    /// arrive after it and show the old value, so a mismatch only counts
+    /// once no matching snapshot has shown up within ~3 s.
+    func apply(_ edit: Edit, via server: WSServer) async -> EditResult {
+        let previous = StorageCommand.storedValue(
+            in: records(in: edit.namespace), parent: edit.parent, key: edit.key
+        )
+        let undo: Edit? = {
+            guard let previous else {
+                return Edit(namespace: edit.namespace, parent: edit.parent, key: edit.key, value: nil)
+            }
+            let wire = StorageCommand.wireValue(previous)
+            guard StorageCommand.valueProblem(wire, parent: edit.parent) == nil else { return nil }
+            return Edit(namespace: edit.namespace, parent: edit.parent, key: edit.key, value: wire)
+        }()
+
+        // Snapshot times are stored in whole milliseconds.
+        let sentAt = Date(timeIntervalSince1970: (Date().timeIntervalSince1970 * 1000).rounded(.down) / 1000)
+        await server.send(command: edit.command)
+        await server.send(command: "storage.list")
+
+        var heardBack = false
+        for _ in 0..<12 {
+            try? await Task.sleep(for: .milliseconds(250))
+            await reloadFromStore()
+            guard let taken = takenAt[edit.namespace], taken >= sentAt else { continue }
+            heardBack = true
+            let now = StorageCommand.storedValue(
+                in: records(in: edit.namespace), parent: edit.parent, key: edit.key
+            )
+            if StorageCommand.matches(stored: now, sent: edit.value) {
+                return .applied(undo: undo)
+            }
+        }
+        return heardBack ? .notApplied : .noAnswer
+    }
+
+    /// Send `storage.list` to the device. The response comes back as a
+    /// `storage` message and refreshes `snapshots` via the change
+    /// subscription; the delayed reload below covers a broadcast that
+    /// lands before the subscription Task has woken up. No-op if no
+    /// client is connected (WSServer.send silently drops).
     func requestRefresh(via server: WSServer) {
         Task { [weak self] in
             await server.send(command: "storage.list")
@@ -483,6 +526,7 @@ final class StoragesViewModel {
     func clearLocalCache() {
         parsedCache.removeAll()
         snapshots.removeAll()
+        takenAt.removeAll()
         expandedRecordKeys.removeAll()
         rawModeKeys.removeAll()
         recomputeMatches()
@@ -490,7 +534,16 @@ final class StoragesViewModel {
 
     // MARK: - Loading
 
+    /// Bumped by every reload. One storage frame broadcasts once per
+    /// layer, and Reload / edits reload too, so several reloads overlap;
+    /// one that started earlier read older rows and must not land last
+    /// (stale values, and a false change-flash when the newer one lands).
+    @ObservationIgnored
+    private var reloadGeneration = 0
+
     private func reloadFromStore() async {
+        reloadGeneration += 1
+        let generation = reloadGeneration
         var fresh: [StorageSnapshot.Namespace: StorageSnapshot] = [:]
         for ns in StorageSnapshot.Namespace.allCases {
             if let snap = try? await store.latestStorageSnapshot(
@@ -500,6 +553,9 @@ final class StoragesViewModel {
                 fresh[ns] = snap
             }
         }
+        guard generation == reloadGeneration else { return }
+        let times = fresh.mapValues(\.takenAt)
+        if times != takenAt { takenAt = times }
         // The device re-reports storage about once a second, mostly
         // unchanged (one real session: 6 132 snapshots, 6 distinct).
         // Assigning anyway would re-render every row for nothing.
