@@ -230,19 +230,13 @@ struct NetworkView: View {
                             .font(.caption2)
                             .foregroundStyle(.yellow)
                     }
-                    MethodBadge(method: e.method)
+                    MethodText(method: e.method)
                 }
             }
             .width(min: 64, ideal: 76, max: 96)
             .customizationID("method")
-            TableColumn("Status") { e in
-                if e.statusClass == .success, let status = e.status {
-                    // 2xx is the norm: light green text, no pill, centred where the pills' digits sit.
-                    SuccessStatusText(status: status)
-                } else {
-                    StatusBadge(entry: e)
-                }
-            }
+            // The status is the one pill column; the method beside it is plain text.
+            TableColumn("Status") { StatusBadge(entry: $0) }
             .width(min: 48, ideal: 56, max: 64)
             .customizationID("status")
             TableColumn("Host") { Text($0.host).font(Self.rowFont).lineLimit(1) }
@@ -378,18 +372,22 @@ private struct SizeCell: View {
     }
 }
 
-/// 2xx in the table: quiet green text instead of a pill.
-private struct SuccessStatusText: View {
-    let status: Int
+/// The table's method: bold coloured text, no fill. A pale fill at 11 pt on
+/// every row smeared; text alone stays crisp and leaves the status as the
+/// only pill column.
+private struct MethodText: View {
+    let method: String
     @Environment(\.backgroundProminence) private var prominence
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        Text(String(status))
-            .font(NetworkView.rowFont)
+        let tint = MethodBadge.tint(method)
+        Text(method)
+            .font(.system(size: 11, weight: .bold, design: .monospaced))
             .foregroundStyle(prominence == .increased ? .white
-                             : scheme == .dark ? Color.green.mix(with: .white, by: 0.2) : Color.green.mix(with: .black, by: 0.25))
-            .frame(minWidth: StatusBadge.minWidth)
+                             : scheme == .dark ? tint.mix(with: .white, by: 0.25) : tint.mix(with: .black, by: 0.35))
+            .lineLimit(1)
+            .frame(minWidth: 44, alignment: .leading)
     }
 }
 
