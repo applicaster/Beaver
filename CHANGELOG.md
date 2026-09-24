@@ -15,6 +15,9 @@ When releasing:
 ## [Unreleased]
 
 ### Added
+- **Log feed: search event data.** The `{}` chip on Filter / Exclude
+  also matches each event's JSON payload. It's off by default, since
+  it's slower on big sessions, and saved filters keep it.
 - **Storages: edit and copy-key on every key row.** Hover a key for
   **copy key / copy value / edit / delete**; edit reuses the Add-key
   sheet with the key locked. Namespace rows show **＋ / copy** right
@@ -42,6 +45,16 @@ When releasing:
   layers are dimmed.
 
 ### Fixed
+- **Log feed: live streaming no longer refetches the session.** Each
+  append fetches only the new rows and merges them in place, including
+  events that arrive late with an earlier timestamp. On a 100k-event
+  session an append drops from ~150 ms to under a millisecond. Past
+  the 1M-row cap the feed now keeps the newest rows, not the oldest.
+- **Log feed: `%` and `_` in Filter / Exclude are literal**, regex
+  terms ignore case like plain ones, and an invalid regex outlines its
+  pill in red instead of silently showing no rows.
+- **A failed write shows an error toast** instead of dropping events
+  silently.
 - **Storages: the list could stop updating.** After a new snapshot
   arrived the key list could keep showing old values until the tab was
   reopened. It now refreshes as soon as the device reports new storage.
@@ -85,6 +98,8 @@ When releasing:
   write at the layer's root.
 
 ### Removed
+- The unused full-text index (`event_fts`) and its triggers — inserts
+  and session deletes no longer pay for them (D40).
 - **Inline edit on storage values.** Changing a value now means
   delete + add. The common case (flip a feature flag) is binary
   anyway; keeping edit would re-introduce a sheet for a flow that

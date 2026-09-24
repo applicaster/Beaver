@@ -478,7 +478,8 @@ controls whether its term is treated as regex or substring (D4).
 ## D15. Filter substring uses `LIKE`, not FTS5
 
 **Status:** Accepted (2026-05-16). **Reverses the original intent of
-D1 and ARCHITECTURE.md §4.**
+D1 and ARCHITECTURE.md §4.** The kept-for-later `event_fts` table and
+triggers were dropped by migration v7 — see D40.
 
 **Decision.** Substring filter / exclude / highlight queries use plain
 `LIKE '%term%'` across message, subsystem, and category. The FTS5
@@ -1803,3 +1804,86 @@ in header joining and `startTime` derivation).
 - `LogStore.Change.networkAppended(sessionId:)` is a new broadcast
   case; `NetworkViewModel` subscribes to it the same way
   `StoragesViewModel` subscribes to `.storageUpdated`.
+
+---
+
+## D40. Payload search is `LIKE` behind a toggle; the FTS table goes
+
+**Status:** Accepted (2026-09-23). Amends D15.
+
+**Decision.** Search and Exclude can also match an event's `data`
+payload, opt-in via a `{}` chip in either pill (`Filter.searchPayloads`,
+saved with presets from migration v8). It's `LIKE` / `REGEXP` over
+`COALESCE(data_json, '')`. Migration v7 drops `event_fts` and its two
+triggers, which D15 had kept unused.
+
+**Why not a trigram FTS5 index.** Measured on a copy of a real 2.8 GB
+store (261k events, 1.79 GB of `data_json` when capped at 64 KB per
+row):
+
+| | trigram FTS5 (largest session, 67k events, 610 MB of payload) |
+|---|---|
+| build | 82 s |
+| disk | +1.55 GB (≈2.5× the indexed text) |
+| query `"player"` | 36 ms, vs ~600 ms for `LIKE` over `data_json` |
+
+Queries were fast, but extrapolated to the whole store the migration
+would take ~4 minutes and add ~4.5 GB. Every live insert would
+tokenize up to 64 KB of payload, and deleting a session would
+re-tokenize every row it held. That's too much to pay just so a toggle
+can be quick. `LIKE` costs nothing until the toggle is on, and then
+only for the query that asked.
+
+**Dropping `event_fts`.** The drop took 11 ms on the same store copy (the
+old index covered only short text columns, 24 MB), so v7 is safe to
+run at launch. Inserts and session deletes no longer pay the trigger.
+
+**Also in this change (D14 follow-ups).**
+- `LIKE` escapes `%`, `_` and `\` (`ESCAPE '\'`): typing `100%`
+  finds `100%`.
+- `REGEXP` terms run with `(?i)`, like `LIKE` and the highlighter.
+- A regex that doesn't compile adds no constraint and outlines its
+  pill in red, instead of silently showing zero rows (D14's "produces
+  zero rows" no longer holds).
+
+**Alternatives considered.**
+- *Trigram FTS5 for terms ≥ 3 chars, `LIKE` below.* Measured above.
+- *Payloads always searched.* ~600 ms per keystroke on a big session.
+
+---
+
+## D41. The Log feed appends instead of refetching
+
+**Status:** Accepted (2026-09-23). Amends D16.
+
+**Decision.** A live append no longer runs `reload()`. The feed keeps
+a watermark: the highest event id at the time of its last read.
+`.appended` then fetches only `id > watermark`, with the loaded
+filter (`LogStore.feedTail`). Rows are read by rowid range under
+`NOT INDEXED`, so the session indexes never walk the whole session.
+Counts are incremented. `FeedRows` merges the new rows into the
+loaded ones and regroups only from the insertion point. A full
+`feedSnapshot` still runs on filter change, Clear, and when the feed
+grows a tenth past its cap.
+
+The snapshot now reads the *newest* rows (`ORDER BY … DESC LIMIT`),
+so a session past the 1M cap drops its oldest rows, not the arriving
+ones. It counts only when the cap was hit.
+
+**Why merge rather than append.** Arrival order isn't timestamp order:
+on the reference store 20,808 of 67,035 events in one session arrived
+after an event with a later timestamp, up to 21 s late. Appending
+would misorder them, and a reload per late event would undo the win.
+
+**Measured** (`BEAVER_BENCH=1 swift test -c release -Xswiftc
+-enable-testing --filter FeedBenchmark`, 100k synthetic events,
+20 per append, median of 10):
+
+| | before (2×COUNT + SELECT all + regroup) | after (tail + merge) |
+|---|---|---|
+| unfiltered | 149 ms | 0.30 ms |
+| search "player" | 44 ms | 0.21 ms |
+
+"Before" counts the regroup once. It used to run on every `body`
+pass as a computed property.
+
