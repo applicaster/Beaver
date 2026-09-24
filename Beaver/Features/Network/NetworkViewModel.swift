@@ -125,6 +125,12 @@ final class NetworkViewModel {
         Task { await loadNew() }
     }
 
+    /// The payload as received, for Copy JSON; entries keep only the
+    /// parsed fields.
+    func payloadJSON(_ id: NetworkEntry.ID) async -> String? {
+        try? await store.networkPayload(id: id)
+    }
+
     func isBookmarked(_ id: NetworkEntry.ID) -> Bool { bookmarkedIds.contains(id) }
 
     /// The store broadcasts `.networkBookmarksChanged`, which reloads the set.

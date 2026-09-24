@@ -130,10 +130,11 @@ extension NetworkEntry {
         return Self.pretty(o)
     }
 
-    /// The payload as received, pretty-printed; raw when it won't re-parse.
-    public var prettyPayloadJSON: String {
+    /// A payload as received (`LogStore.networkPayload(id:)`),
+    /// pretty-printed; raw when it won't re-parse.
+    public static func prettyPayloadJSON(_ payloadJSON: String) -> String {
         guard let o = try? JSONSerialization.jsonObject(with: Data(payloadJSON.utf8)) else { return payloadJSON }
-        return Self.pretty(o)
+        return pretty(o)
     }
 
     public var responseBytes: Int? {

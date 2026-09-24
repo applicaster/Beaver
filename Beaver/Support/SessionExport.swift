@@ -53,7 +53,7 @@ public enum SessionExport {
         }
 
         // Whole, not filtered — same reasoning as storage above.
-        let network = (try? await store.networkEntries(sessionId: sessionId)) ?? []
+        let network = (try? await store.networkPayloads(sessionId: sessionId)) ?? []
 
         // Nothing to say at all — don't hand the user an empty file.
         guard !events.isEmpty || !storage.isEmpty || !network.isEmpty else { return nil }

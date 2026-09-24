@@ -13,7 +13,7 @@ public enum ProtocolDecoder {
     public enum InboundPacket: Sendable {
         case event(DecodedEvent)
         case storage(namespaces: [StorageSnapshot.Namespace: String])
-        case network(NetworkEntry)
+        case network(NetworkCapture)
         case unknown(typeRaw: String)
     }
 
@@ -135,10 +135,10 @@ public enum ProtocolDecoder {
             return .failure(.malformedNetwork("missing 'event' string field"))
         }
         let now = UInt64(Date().timeIntervalSince1970 * 1000)
-        guard let entry = NetworkEntry.parse(payload, fallbackMillis: now) else {
+        guard let capture = NetworkCapture(payload, fallbackMillis: now) else {
             return .failure(.malformedNetwork("payload is not a JSON object with a string 'url'"))
         }
-        return .success(.network(entry))
+        return .success(.network(capture))
     }
 
     // MARK: - Helpers

@@ -27,14 +27,14 @@ public enum HARExport {
     /// that isn't a HAR decodes to `[]`. A base64-encoded `content.text`
     /// (`content.encoding == "base64"`) is decoded when it's valid UTF-8
     /// text; otherwise (binary, or bad base64) the raw text is kept as is.
-    public static func decode(_ data: Data) -> [NetworkEntry] {
+    public static func decode(_ data: Data) -> [NetworkCapture] {
         guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
               let entries = (root["log"] as? [String: Any])?["entries"] as? [[String: Any]]
         else { return [] }
         return entries.compactMap(payload)
     }
 
-    private static func payload(_ h: [String: Any]) -> NetworkEntry? {
+    private static func payload(_ h: [String: Any]) -> NetworkCapture? {
         guard let request = h["request"] as? [String: Any],
               let url = request["url"] as? String else { return nil }
         let response = h["response"] as? [String: Any] ?? [:]
@@ -77,7 +77,7 @@ public enum HARExport {
         if !timing.isEmpty { o["timing"] = timing }
 
         guard let json = try? JSONSerialization.data(withJSONObject: o) else { return nil }
-        return NetworkEntry.parse(String(decoding: json, as: UTF8.self), fallbackMillis: start ?? 0)
+        return NetworkCapture(String(decoding: json, as: UTF8.self), fallbackMillis: start ?? 0)
     }
 
     /// Decodes a base64 `content.text` when it decodes to valid UTF-8 text;

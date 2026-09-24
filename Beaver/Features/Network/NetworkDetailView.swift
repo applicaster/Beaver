@@ -14,13 +14,15 @@ import AppKit
 struct NetworkDetailView: View {
     let entry: NetworkEntry?
     var isBookmarked = false
+    /// Reads the payload as received from the store, for Copy JSON.
+    let payloadJSON: (NetworkEntry.ID) async -> String?
     var onToggleBookmark: ((NetworkEntry) -> Void)?
     /// Opens the entry in the large sheet. `nil` inside the sheet itself.
     var onExpand: ((NetworkEntry) -> Void)?
 
     var body: some View {
         if let entry {
-            NetworkDetailContent(entry: entry, isBookmarked: isBookmarked,
+            NetworkDetailContent(entry: entry, isBookmarked: isBookmarked, payloadJSON: payloadJSON,
                                  onToggleBookmark: onToggleBookmark, onExpand: onExpand)
         } else {
             ContentUnavailableView("No request selected", systemImage: "network")
@@ -64,6 +66,7 @@ private struct ParsedEntry {
 private struct NetworkDetailContent: View {
     let entry: NetworkEntry
     let isBookmarked: Bool
+    let payloadJSON: (NetworkEntry.ID) async -> String?
     let onToggleBookmark: ((NetworkEntry) -> Void)?
     let onExpand: ((NetworkEntry) -> Void)?
 
@@ -194,7 +197,15 @@ private struct NetworkDetailContent: View {
                 }
                 .help("Open in a larger window")
             }
-            Button("Copy JSON") { toasts.copy(entry.prettyPayloadJSON, "Copied JSON") }
+            Button("Copy JSON") {
+                Task {
+                    guard let payload = await payloadJSON(entry.id) else {
+                        toasts.error("Couldn't read this request")
+                        return
+                    }
+                    toasts.copy(NetworkEntry.prettyPayloadJSON(payload), "Copied JSON")
+                }
+            }
                 .help("Copy the whole payload as received")
             Button("cURL") { toasts.copy(entry.curlCommand, "Copied cURL") }
                 .help("Copy as a cURL command")

@@ -33,6 +33,7 @@ struct NetworkView: View {
                 table(rows)
                     .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
                 NetworkDetailView(entry: vm.selected, isBookmarked: vm.selection.map(vm.isBookmarked) ?? false,
+                                  payloadJSON: vm.payloadJSON,
                                   onToggleBookmark: { vm.toggleBookmark($0.id) },
                                   onExpand: { expanded = $0 })
                     .frame(minWidth: 320, idealWidth: 360, maxHeight: .infinity)
@@ -43,6 +44,7 @@ struct NetworkView: View {
         .sheet(item: $expanded) { e in
             VStack(spacing: 0) {
                 NetworkDetailView(entry: e, isBookmarked: vm.isBookmarked(e.id),
+                                  payloadJSON: vm.payloadJSON,
                                   onToggleBookmark: { vm.toggleBookmark($0.id) })
                 Divider()
                 HStack {

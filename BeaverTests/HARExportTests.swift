@@ -145,7 +145,7 @@ struct HARExportTests {
         let failed = e(#"{"url":"https://api.io/x","method":"GET","timing":{"startTime":1700000001000,"duration":5},"error":"offline"}"#)
         let data = try HARExport.encode([get, post, failed], creatorVersion: "1")
 
-        let back = HARExport.decode(data)
+        let back = HARExport.decode(data).map(\.entry)
 
         #expect(back.map(\.url) == [get.url, post.url, failed.url])
         #expect(back.map(\.method) == ["GET", "POST", "GET"])
@@ -169,7 +169,7 @@ struct HARExportTests {
          "responseBodySize":312450,"responseBody":"short... [TRUNCATED]"}
         """#)
         let data = try HARExport.encode([entry], creatorVersion: "1")
-        let back = try #require(HARExport.decode(data).first)
+        let back = try #require(HARExport.decode(data).map(\.entry).first)
         #expect(back.requestBodySize == 9)
         #expect(back.responseBodySize == 312450)
     }
@@ -188,7 +188,7 @@ struct HARExportTests {
           "cache":{},"timings":{"send":0.1,"wait":120,"receive":3.3}},
           {"startedDateTime":"not a date","request":{"method":"GET"},"response":{}}]}}
         """#
-        let entries = HARExport.decode(Data(har.utf8))
+        let entries = HARExport.decode(Data(har.utf8)).map(\.entry)
         #expect(entries.count == 1)
         let entry = entries[0]
         #expect(entry.url == "https://cdn.io/a.js")
@@ -209,7 +209,7 @@ struct HARExportTests {
         {"log":{"entries":[{"request":{"method":"GET","url":"https://a.io/"},
          "response":{"content":{"text":"aGVsbG8gd29ybGQ=","encoding":"base64"}}}]}}
         """#
-        let entries = HARExport.decode(Data(har.utf8))
+        let entries = HARExport.decode(Data(har.utf8)).map(\.entry)
         #expect(entries.first?.responseBody == "hello world")
     }
 
@@ -220,7 +220,7 @@ struct HARExportTests {
         {"log":{"entries":[{"request":{"method":"GET","url":"https://a.io/"},
          "response":{"content":{"text":"not base64 !!","encoding":"base64"}}}]}}
         """#
-        #expect(HARExport.decode(Data(notBase64.utf8)).first?.responseBody == "not base64 !!")
+        #expect(HARExport.decode(Data(notBase64.utf8)).map(\.entry).first?.responseBody == "not base64 !!")
 
         // Valid base64 but binary (invalid UTF-8) — kept as the raw base64
         // text rather than turned into mojibake.
@@ -228,16 +228,16 @@ struct HARExportTests {
         {"log":{"entries":[{"request":{"method":"GET","url":"https://a.io/"},
          "response":{"content":{"text":"/////w==","encoding":"base64"}}}]}}
         """#
-        #expect(HARExport.decode(Data(binary.utf8)).first?.responseBody == "/////w==")
+        #expect(HARExport.decode(Data(binary.utf8)).map(\.entry).first?.responseBody == "/////w==")
     }
 
     @Test
     func decodeRejectsNonHAR() {
-        #expect(HARExport.decode(Data(#"{"events":[]}"#.utf8)).isEmpty)
-        #expect(HARExport.decode(Data("nope".utf8)).isEmpty)
+        #expect(HARExport.decode(Data(#"{"events":[]}"#.utf8)).map(\.entry).isEmpty)
+        #expect(HARExport.decode(Data("nope".utf8)).map(\.entry).isEmpty)
         // Out-of-range values don't trap; the entry keeps its URL.
         let odd = #"{"log":{"entries":[{"startedDateTime":"1900-01-01T00:00:00Z","time":1e300,"request":{"url":"https://a.io/"}}]}}"#
-        let entries = HARExport.decode(Data(odd.utf8))
+        let entries = HARExport.decode(Data(odd.utf8)).map(\.entry)
         #expect(entries.map(\.url) == ["https://a.io/"])
         #expect(entries.first?.durationMillis == nil)
     }

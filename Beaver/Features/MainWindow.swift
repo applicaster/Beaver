@@ -493,8 +493,8 @@ struct MainWindow: View {
                     dataJSON: json
                 )
             }
-            for entry in imported.network {
-                try? await env.store.recordNetworkEntry(entry, sessionId: session.id)
+            for capture in imported.network {
+                try? await env.store.recordNetworkEntry(capture, sessionId: session.id)
             }
             // Switch the LogFeed to the newly imported session.
             env.viewingSessionId = session.id

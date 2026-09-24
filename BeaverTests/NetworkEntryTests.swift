@@ -36,7 +36,7 @@ struct NetworkEntryTests {
         #expect(e.host == "api.example.com")
         #expect(e.path == "/v1/feed?page=2")
         #expect(e.statusClass == .success)
-        #expect(e.payloadJSON == Self.ios)
+        #expect(NetworkCapture(Self.ios, fallbackMillis: 0)?.payloadJSON == Self.ios)
     }
 
     @Test

@@ -97,12 +97,13 @@ struct NetworkCopyTests {
 
     @Test
     func prettyPayloadJSONSortsAndIndents() {
-        let entry = e(#"{"url":"https://api.io/x","method":"GET"}"#)
-        #expect(entry.prettyPayloadJSON.contains("\n"))
-        let methodAt = entry.prettyPayloadJSON.range(of: "\"method\"")!.lowerBound
-        let urlAt = entry.prettyPayloadJSON.range(of: "\"url\"")!.lowerBound
+        let pretty = NetworkEntry.prettyPayloadJSON(#"{"url":"https:\/\/api.io\/x","method":"GET"}"#)
+        #expect(pretty.contains("\n"))
+        let methodAt = pretty.range(of: "\"method\"")!.lowerBound
+        let urlAt = pretty.range(of: "\"url\"")!.lowerBound
         #expect(methodAt < urlAt)
-        #expect(!entry.prettyPayloadJSON.contains(#"\/"#))
+        #expect(!pretty.contains(#"\/"#))
+        #expect(NetworkEntry.prettyPayloadJSON("not json") == "not json")
     }
 
     // MARK: Size and status line

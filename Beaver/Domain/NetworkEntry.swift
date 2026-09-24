@@ -9,9 +9,10 @@ import Foundation
 /// frame (PROTOCOL.md §4.3). One frame is one finished request; there is no
 /// request/response pairing on the wire.
 ///
-/// `payloadJSON` is the payload as received. The store saves it and reads
-/// it back through `parse`, so live and reopened sessions go through the
-/// same code.
+/// Parsed fields only. The payload as received travels as a
+/// `NetworkCapture` into the store, which reads it back through `parse`,
+/// so live and reopened sessions go through the same code. The Network
+/// tab's list never holds it: bodies would sit in memory twice.
 public struct NetworkEntry: Identifiable, Hashable, Sendable {
 
     public enum StatusClass: String, CaseIterable, Sendable {
@@ -66,7 +67,6 @@ public struct NetworkEntry: Identifiable, Hashable, Sendable {
     public let startMillis: UInt64
     public let durationMillis: Int?
     public let error: String?
-    public let payloadJSON: String
 
     public var statusClass: StatusClass { StatusClass(status: status) }
 
@@ -112,8 +112,7 @@ public struct NetworkEntry: Identifiable, Hashable, Sendable {
             responseBodySize: nonNegativeInt(o["responseBodySize"]),
             startMillis: start,
             durationMillis: duration,
-            error: o["error"] as? String,
-            payloadJSON: payloadJSON
+            error: o["error"] as? String
         )
     }
 
@@ -137,5 +136,20 @@ public struct NetworkEntry: Identifiable, Hashable, Sendable {
     private static func headers(_ value: Any?) -> [String: String] {
         guard let dict = value as? [String: Any] else { return [:] }
         return dict.mapValues { ($0 as? String) ?? "\($0)" }
+    }
+}
+
+/// A request as received: the parsed entry plus the payload verbatim.
+/// Decoders hand these to `LogStore.recordNetworkEntry`, which keeps the
+/// payload; everything after that reads bare entries and fetches the
+/// payload by id (`LogStore.networkPayload(id:)`) when it needs it.
+public struct NetworkCapture: Sendable {
+    public let entry: NetworkEntry
+    public let payloadJSON: String
+
+    public init?(_ payloadJSON: String, fallbackMillis: UInt64) {
+        guard let entry = NetworkEntry.parse(payloadJSON, fallbackMillis: fallbackMillis) else { return nil }
+        self.entry = entry
+        self.payloadJSON = payloadJSON
     }
 }
