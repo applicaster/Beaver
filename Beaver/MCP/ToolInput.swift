@@ -304,11 +304,19 @@ public enum ToolText {
 
     /// At most `maxBytes` of UTF-8, cut on a character boundary.
     public static func capped(_ text: String, maxBytes: Int) -> (text: String, truncated: Bool) {
-        guard text.utf8.count > maxBytes else { return (text, false) }
-        var end = text.utf8.index(text.utf8.startIndex, offsetBy: maxBytes)
-        while !text.indices.contains(end) && end > text.startIndex {
-            end = text.utf8.index(before: end)
+        let utf8 = text.utf8
+        guard utf8.count > maxBytes else { return (text, false) }
+        var end = utf8.index(utf8.startIndex, offsetBy: maxBytes)
+        // Step back off any UTF-8 continuation byte (`10xxxxxx`) so `end`
+        // lands on a scalar boundary: one byte-mask check per step, versus
+        // `text.indices.contains(end)`, which had to walk every grapheme
+        // from the start of the string to answer.
+        while end > utf8.startIndex, utf8[end] & 0b1100_0000 == 0b1000_0000 {
+            end = utf8.index(before: end)
         }
-        return (String(text[..<end]), true)
+        // Always succeeds once `end` is scalar-aligned, which the loop
+        // above guarantees.
+        let cut = String.Index(end, within: text) ?? text.startIndex
+        return (String(text[..<cut]), true)
     }
 }

@@ -129,6 +129,11 @@ struct ToolInputTests {
         let capped = ToolText.capped(String(repeating: "é", count: 10), maxBytes: 5)
         #expect(capped.truncated)
         #expect(capped.text.utf8.count <= 5)
+        // "🔥" is 4 UTF-8 bytes (F0 9F 94 A5); cutting inside it needs two
+        // continuation-byte step-backs to reach the lead byte.
+        let emoji = ToolText.capped("ab🔥", maxBytes: 4)
+        #expect(emoji.truncated)
+        #expect(emoji.text == "ab")
     }
 
     @Test("resolveSession picks the same session as sessions_list lists first")
