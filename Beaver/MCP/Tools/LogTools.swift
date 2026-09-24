@@ -210,7 +210,8 @@ enum LogTools {
                     summary: "\(page.total) new event(s) matched in session \(s.label) after #\(start) (\(ToolText.describe(f.filter))).",
                     body: page.events.map(ToolText.eventLine).joined(separator: "\n"),
                     structured: ["sessionId": JSON(s.id), "timedOut": false, "afterId": JSON(start),
-                                 "timeoutMs": JSON(timeout), "lastId": JSON(last.id),
+                                 "timeoutMs": JSON(timeout), "lastId": JSON(last.id), "total": JSON(page.total),
+                                 "hasMore": .bool(page.total > page.events.count),
                                  "events": .array(page.events.map { ["id": JSON($0.id), "line": .string(ToolText.eventLine($0))] })],
                     next: ["logs_get(ids: [\(page.events[0].id)])", "logs_wait(afterId: \(last.id), …) for the next one"],
                     sessionId: s.id
@@ -224,7 +225,7 @@ enum LogTools {
         return ToolResult(
             summary: "Nothing matched in \(timeout / 1000) s (session \(s.label), after #\(start), \(ToolText.describe(f.filter))).",
             structured: ["sessionId": JSON(s.id), "timedOut": true, "afterId": JSON(start),
-                         "timeoutMs": JSON(timeout), "events": []],
+                         "timeoutMs": JSON(timeout), "total": 0, "hasMore": false, "events": []],
             next: ["logs_wait(afterId: \(start), …) to keep waiting", "logs_query(afterId: \(start)) to see what did arrive"],
             sessionId: s.id
         )

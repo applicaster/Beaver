@@ -200,4 +200,33 @@ struct LogToolsTests {
         #expect(r.structured["timeoutMs"] == 0)
         #expect(LogTools.maxWaitMillis == 60_000)
     }
+
+    @Test("Wait clamps timeout to max 60 s even when larger value provided")
+    func waitClampUpper() async throws {
+        let store = try LogStore(source: .inMemory)
+        let s = try await store.createSession(source: .live)
+        try await seed(store, session: s.id, [(.info, "a", "", "match")])
+        let id = try #require(try await store.latestEventId(sessionId: s.id))
+        let r = try await LogTools.wait.run(ToolArguments(["timeoutMs": .number(100_000), "afterId": .number(Double(id - 1))]), makeContext(store))
+        #expect(r.structured["timeoutMs"] == 60_000)
+        #expect(r.structured["timedOut"] == false)
+    }
+
+    @Test("Wait reports hasMore when more matches exist than limit")
+    func waitHasMore() async throws {
+        let store = try LogStore(source: .inMemory)
+        let s = try await store.createSession(source: .live)
+        // Seed 60 matching events
+        var events: [(LogLevel, String, String, String)] = []
+        for i in 0..<60 {
+            events.append((.info, "a", "", "match \(i)"))
+        }
+        try await seed(store, session: s.id, events)
+        let ctx = makeContext(store, ui: HostSnapshot(liveSessionId: s.id))
+        let r = try await LogTools.wait.run(ToolArguments(["afterId": .number(0), "limit": 50]), ctx)
+        #expect(r.structured["timedOut"] == false)
+        #expect(r.structured["total"] == 60)
+        #expect(r.structured["hasMore"] == true)
+        #expect(r.structured["events"]?.array?.count == 50)
+    }
 }
