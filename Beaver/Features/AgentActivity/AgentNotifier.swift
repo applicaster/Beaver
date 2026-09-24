@@ -24,6 +24,12 @@ final class AgentNotifier {
     /// What macOS allows: `.allowed`, `.denied` or `.notDetermined`.
     private(set) var authorization: AgentNotifications.State = .notDetermined
 
+    /// Set when `requestAuthorization` itself threw (seen on an
+    /// unsigned/ad-hoc build launched from DerivedData) — so the strip and
+    /// `notify()` can say so instead of silently doing nothing. Cleared by
+    /// any request that completes without throwing.
+    private(set) var lastRequestError: String?
+
     /// "Notifications from the agent" off in the Agent panel.
     var muted: Bool {
         get { storedMuted }
@@ -80,6 +86,25 @@ final class AgentNotifier {
         await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
     }
 
+    /// The one place that calls `requestAuthorization`: never swallows the
+    /// result (a `try?` here previously hid both a thrown error and a
+    /// silent `false` on an unsigned/ad-hoc build launched from
+    /// DerivedData). Refreshes `authorization` either way.
+    @discardableResult
+    private func requestAuthorization() async -> Bool {
+        do {
+            let granted = try await UNUserNotificationCenter.current()
+                .requestAuthorization(options: [.alert, .sound, .badge])
+            lastRequestError = nil
+            await refresh()
+            return granted
+        } catch {
+            lastRequestError = error.localizedDescription
+            await refresh()
+            return false
+        }
+    }
+
     /// An attention note: post it, hold it for the summary, or say why not.
     func notify(_ note: AgentNote) -> NotifyOutcome {
         let frontmost = NSApp.isActive
@@ -88,6 +113,12 @@ final class AgentNotifier {
         case .allowed:
             return deliver(note)
         case .notDetermined:
+            // A request already failed: don't retry silently on every
+            // attention note — say so, with howToEnable, until the person
+            // acts (the strip's button, or System Settings directly).
+            guard lastRequestError == nil else {
+                return AgentNotifications.outcome(state: .notDetermined, frontmost: false, held: false, requestFailed: true)
+            }
             // Asked in context, on the first attention note — not at launch.
             // Only one request in flight: a note that arrives while it's
             // pending replaces the last one, still delivered through the
@@ -95,13 +126,11 @@ final class AgentNotifier {
             pendingNote = note
             if pendingAuth == nil {
                 pendingAuth = Task {
-                    let granted = (try? await UNUserNotificationCenter.current()
-                        .requestAuthorization(options: [.alert, .sound, .badge])) ?? false
-                    await refresh()
+                    await requestAuthorization()
                     pendingAuth = nil
                     let toDeliver = pendingNote
                     pendingNote = nil
-                    if granted, state == .allowed, let toDeliver { _ = deliver(toDeliver) }
+                    if state == .allowed, let toDeliver { _ = deliver(toDeliver) }
                 }
             }
             return AgentNotifications.outcome(state: .notDetermined, frontmost: false, held: false)
@@ -121,13 +150,16 @@ final class AgentNotifier {
         return AgentNotifications.outcome(state: .allowed, frontmost: false, held: true)
     }
 
-    /// The strip's button.
+    /// The strip's button: always ends in something visible, even when
+    /// macOS itself refuses to show a prompt (an unsigned/ad-hoc build).
     func perform(_ action: AgentNotifications.Strip.Action) {
         switch action {
         case .askPermission:
             Task {
-                _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])
-                await refresh()
+                await requestAuthorization()
+                if state != .allowed {
+                    NSWorkspace.shared.open(AgentNotifications.settingsURL)
+                }
             }
         case .openSettings:
             NSWorkspace.shared.open(AgentNotifications.settingsURL)

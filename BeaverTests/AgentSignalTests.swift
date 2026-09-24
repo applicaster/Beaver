@@ -74,6 +74,21 @@ struct AgentSignalTests {
         #expect(muted.howToEnable == nil)
     }
 
+    @Test("notDetermined: a request that already failed says so, not \"just asked\" (round 2 finding)")
+    func outcomeRequestFailed() {
+        let askedOnly = AgentNotifications.outcome(state: .notDetermined, frontmost: false, held: false)
+        #expect(askedOnly.reason?.contains("just asked") == true)
+
+        let failed = AgentNotifications.outcome(state: .notDetermined, frontmost: false, held: false, requestFailed: true)
+        #expect(!failed.notified)
+        #expect(failed.reason?.contains("just asked") == false)
+        #expect(failed.reason?.contains("refused the permission request") == true)
+        #expect(failed.howToEnable == AgentNotifications.howToEnable)
+
+        // In front, the toast is enough regardless — requestFailed doesn't matter.
+        #expect(AgentNotifications.outcome(state: .notDetermined, frontmost: true, held: false, requestFailed: true).notified)
+    }
+
     @Test("Review focus: at most one notification per 30 s; the rest become one summary")
     func throttle() {
         let t0 = Date(timeIntervalSince1970: 1_000)

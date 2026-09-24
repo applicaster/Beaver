@@ -56,7 +56,10 @@ public enum AgentNotifications {
 
     /// What `journal_note(level: attention)` tells the agent (design §7.2).
     /// `held`: the throttle kept this note for the next summary.
-    public static func outcome(state: State, frontmost: Bool, held: Bool) -> NotifyOutcome {
+    /// `requestFailed`: an earlier permission request already errored (or
+    /// macOS otherwise never showed a prompt) — `notify()` doesn't retry it
+    /// on every note, so say that plainly instead of "just asked".
+    public static func outcome(state: State, frontmost: Bool, held: Bool, requestFailed: Bool = false) -> NotifyOutcome {
         if frontmost {
             return NotifyOutcome(notified: true, reason: "Beaver is in front: the note shows as a toast in its window.")
         }
@@ -70,7 +73,9 @@ public enum AgentNotifications {
             return NotifyOutcome(notified: false, reason: "Notifications are off for Beaver.", howToEnable: howToEnable)
         case .notDetermined:
             return NotifyOutcome(notified: false,
-                                 reason: "Beaver just asked the user to allow notifications; if they allow, this note is delivered. It is in the Agent panel either way.",
+                                 reason: requestFailed
+                                     ? "macOS refused the permission request; it never asked the user. Ask them to turn it on directly."
+                                     : "Beaver just asked the user to allow notifications; if they allow, this note is delivered. It is in the Agent panel either way.",
                                  howToEnable: howToEnable)
         }
     }

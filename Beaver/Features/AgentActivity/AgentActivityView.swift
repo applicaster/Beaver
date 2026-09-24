@@ -227,6 +227,10 @@ private struct NotificationStrip: View {
     var body: some View {
         let notifier = AgentNotifier.shared
         if let strip = AgentNotifications.strip(for: notifier.state) {
+            // A failed request (round 2 finding): macOS never showed a
+            // prompt, so the button stops offering to ask again and goes
+            // straight to System Settings instead.
+            let failed = notifier.lastRequestError != nil
             VStack(alignment: .leading, spacing: 6) {
                 Label(strip.title, systemImage: "bell.slash")
                     .font(.callout.weight(.medium))
@@ -235,9 +239,17 @@ private struct NotificationStrip: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
+                if let error = notifier.lastRequestError {
+                    Text("macOS refused: \(error). Turn it on in System Settings.")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .textSelection(.enabled)
+                }
                 HStack {
                     Spacer()
-                    Button(strip.button) { notifier.perform(strip.action) }
+                    Button(failed ? "Open System Settings" : strip.button) {
+                        notifier.perform(failed ? .openSettings : strip.action)
+                    }
                 }
             }
             .padding(10)
