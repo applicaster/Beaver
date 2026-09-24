@@ -702,7 +702,7 @@ Each decision: what, why, alternatives, and what changing it touches.
 
 ### M2. Transport: stateless Streamable HTTP, POST only
 - **Why:** every mainstream client supports HTTP servers directly
-  (`claude mcp add --transport http …`). Stateless POST is a small amount of
+  (`claude mcp add --scope user --transport http …`). Stateless POST is a small amount of
   code on `NWListener`, which the project already uses, and matches what the
   SDK ships on the device.
 - **Alternatives:** full Streamable HTTP with an SSE stream and sessions (needed

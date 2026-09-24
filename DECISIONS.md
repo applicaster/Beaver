@@ -1970,7 +1970,7 @@ won't decode, and the feed starts unfiltered once.
 **Status:** Accepted (2026-09-23). Spec: plans/2026-09-23-mcp-design.md (M2).
 
 - **Why:** every mainstream client supports HTTP servers directly
-  (`claude mcp add --transport http …`). Stateless POST is a small
+  (`claude mcp add --scope user --transport http …`). Stateless POST is a small
   amount of code on `NWListener`, which the project already uses, and
   matches what the SDK ships on the device.
 - **Alternatives:** full Streamable HTTP with an SSE stream and
@@ -2292,7 +2292,7 @@ won't decode, and the feed starts unfiltered once.
 
 - **Why:** Beaver has no Settings scene. Two items cover it: "Agent
   Access (MCP)" (toggle, with the port and state in the title) and
-  "Copy MCP Setup Command" (copies the `claude mcp add …` line).
+  "Copy MCP Setup Command" (copies the `claude mcp add --scope user …` line).
 - **To change:** move to a `Settings` scene if more settings appear.
 
 ---

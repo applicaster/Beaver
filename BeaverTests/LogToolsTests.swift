@@ -63,6 +63,21 @@ struct LogToolsTests {
         #expect(!r.summary.contains("minLevel → filter.minLevel"))
     }
 
+    @Test("Query accepts a JSON-encoded string filter")
+    func queryStringEncodedFilter() async throws {
+        let (ctx, _, _) = try await fixture()
+        let r = try await LogTools.query.run(ToolArguments(["filter": #"{"minLevel":"warning"}"#]), ctx)
+        #expect(r.structured["total"] == 3)
+    }
+
+    @Test("A filter that's neither an object nor a JSON-encoded object throws")
+    func queryFilterMustBeObject() async throws {
+        let (ctx, _, _) = try await fixture()
+        await #expect(throws: ToolError.self) {
+            try await LogTools.query.run(ToolArguments(["filter": "error"]), ctx)
+        }
+    }
+
     @Test("Query oldest first after a cursor, no more pages")
     func queryAfter() async throws {
         let (ctx, _, ids) = try await fixture()

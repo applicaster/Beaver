@@ -173,7 +173,7 @@ extension ToolContext {
     /// `logs_facets`, `logs_query` and `logs_wait`, the three tools that take
     /// both a top-level argument set and a `filter` object.
     public func resolveFilter(_ args: ToolArguments, sessionId: Int64) async throws -> ResolvedFilter {
-        var object = args["filter"]?.object ?? [:]
+        var object = try Self.filterObject(args["filter"])
         var lifted: [String] = []
         for key in Self.filterKeys {
             guard object[key] == nil, let value = args[key] else { continue }
@@ -188,6 +188,21 @@ extension ToolContext {
         "minLevel", "search", "searchIsRegex", "exclude", "excludeIsRegex",
         "searchPayloads", "subsystems", "excludeSubsystems", "categories", "excludeCategories",
     ]
+
+    /// `filter` is normally an object, but a weak client sometimes sends it
+    /// JSON-encoded as a string (like `MCPServer.argumentsObject`'s
+    /// `arguments`) — parse that case too. Anything else, including a
+    /// string that doesn't parse into an object, is the same error the
+    /// `JSON?` overload below throws for a non-object filter: silently
+    /// treating it as "no filter" would hide a mistake the agent should see.
+    private static func filterObject(_ value: JSON?) throws -> [String: JSON] {
+        guard let value, value != .null else { return [:] }
+        if let object = value.object { return object }
+        if let text = value.string, let parsed = try? JSON.parse(Data(text.utf8)), let object = parsed.object {
+            return object
+        }
+        throw ToolError("filter must be an object. Example: filter: {minLevel: \"warning\", subsystems: [\"*auth*\"]}.")
+    }
 
     public func resolveFilter(_ json: JSON?, sessionId: Int64) async throws -> ResolvedFilter {
         guard let json, json != .null else { return ResolvedFilter(filter: .none, notes: []) }
@@ -314,9 +329,14 @@ public enum ToolText {
         while end > utf8.startIndex, utf8[end] & 0b1100_0000 == 0b1000_0000 {
             end = utf8.index(before: end)
         }
-        // Always succeeds once `end` is scalar-aligned, which the loop
-        // above guarantees.
-        let cut = String.Index(end, within: text) ?? text.startIndex
-        return (String(text[..<cut]), true)
+        // `end` is scalar-aligned but not necessarily a Character (grapheme
+        // cluster) boundary — it can land between "e" and a combining
+        // acute, or between a flag emoji's two regional-indicator scalars.
+        // Cutting mid-grapheme there is fine; String.Index(_:within:) is
+        // not the right tool for it, though — it only succeeds at a full
+        // Character boundary and returns nil otherwise, which previously
+        // fell back to `text.startIndex` and silently emptied the result.
+        // Slicing by Unicode scalar only needs scalar alignment.
+        return (String(text.unicodeScalars[..<end]), true)
     }
 }

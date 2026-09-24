@@ -136,6 +136,34 @@ struct ToolInputTests {
         #expect(emoji.text == "ab")
     }
 
+    @Test("Cutting inside a multi-scalar Character keeps the prefix, doesn't empty it")
+    func cappedMidGrapheme() {
+        // "e" + combining acute (U+0301, 2 UTF-8 bytes) form one Character;
+        // byte 11 lands exactly between them — scalar-aligned, but not a
+        // Character boundary, which used to make String.Index(_:within:)
+        // return nil and fall back to an empty result.
+        let combining = ToolText.capped("xxxxxxxxxxe\u{301}tail", maxBytes: 11)
+        #expect(combining.truncated)
+        #expect(combining.text == "xxxxxxxxxxe")
+        #expect(combining.text.utf8.count <= 11)
+
+        // A flag emoji is two regional-indicator scalars (4 UTF-8 bytes
+        // each) forming one Character; byte 7 lands between them.
+        let flag = ToolText.capped("abc🇺🇦zzz", maxBytes: 7)
+        #expect(flag.truncated)
+        #expect(flag.text.hasPrefix("abc"))
+        #expect(!flag.text.isEmpty)
+        #expect(flag.text.utf8.count <= 7)
+
+        // "\r\n" is one Character; byte 1 lands between "\r" and "\n". A
+        // whole scalar ("\r") does fit in 1 byte, so the result must not be
+        // empty.
+        let crlf = ToolText.capped("\r\n\r\n", maxBytes: 1)
+        #expect(crlf.truncated)
+        #expect(crlf.text == "\r")
+        #expect(crlf.text.utf8.count <= 1)
+    }
+
     @Test("resolveSession picks the same session as sessions_list lists first")
     func resolveSessionConsistency() async throws {
         let store = try LogStore(source: .inMemory)
