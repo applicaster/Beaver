@@ -14,6 +14,27 @@ When releasing:
 
 ## [Unreleased]
 
+## [4.0.1] - 2026-09-24
+
+### Changed
+- **Release notes in order.** The changes of 2.0.2, 3.0.0 and 4.0.0 are
+  now listed under their own versions. 3.0.0 and 4.0.0 continue Agent
+  Access (2.0.0); nothing in them breaks what 2.0.0 does — the major
+  versions came from how they were merged, not from the changes.
+
+## [4.0.0] - 2026-09-24
+
+### Added
+- **Agent Access: the agent can point Beaver at something.** Asked to show
+  the failed requests or the auth errors, it switches the tab, session,
+  filters, storage layer and selected row while Beaver stays in the
+  background. Beaver comes forward only when the agent passes
+  `reveal: true`, which agents are told to do only when you ask to see it.
+  In the **Agent** panel, a call that touched a session, event or request
+  links to it — click to open it.
+
+## [3.0.0] - 2026-09-24
+
 ### Added
 - **Agent Access: agents can act, not just read.** Through Beaver's MCP
   server an agent can send commands to the app (and collect the logs they
@@ -26,13 +47,8 @@ When releasing:
   also raise a macOS notification when Beaver is in the background, and a
   Dock badge. The Agent panel and the app menu (**Agent Notifications**)
   say where to turn notifications on, and the panel can mute them.
-- **Agent Access: the agent can point Beaver at something.** Asked to show
-  the failed requests or the auth errors, it switches the tab, session,
-  filters, storage layer and selected row while Beaver stays in the
-  background. Beaver comes forward only when the agent passes
-  `reveal: true`, which agents are told to do only when you ask to see it.
-  In the **Agent** panel, a call that touched a session, event or request
-  links to it — click to open it.
+
+## [2.0.2] - 2026-09-24
 
 ### Fixed
 - **Events sent right after a device connects are no longer lost.** What

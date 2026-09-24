@@ -7,6 +7,10 @@ snapshots and network requests from the mobile SDK over WebSocket.
 - **Merging to `main` releases automatically** (CircleCI builds, signs,
   notarizes and publishes). Add user-facing changes to `CHANGELOG.md`
   `[Unreleased]`.
+- The version comes from commit messages since the last tag, the merge
+  title included (D23): `release:` → major, `feat:` → minor, anything
+  else → patch. A feature PR merges as `feat: …`, even one step of a
+  larger feature; `release:` only when a major version is intended.
 - Docs: `DECISIONS.md` (numbered decisions, source of truth),
   `ARCHITECTURE.md`, `PROTOCOL.md` (wire protocol with the SDK).
 
