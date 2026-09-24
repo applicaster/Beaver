@@ -14,22 +14,32 @@ public actor AgentAccess {
 
     private let server: MCPServer
     private var listener: MCPHTTPListener?
-    /// Bumped by every `start()`/`stop()`; the value a `start()` bumped it
-    /// to is its ticket — if it's no longer current when checked, a later
-    /// call has already decided the outcome and this one backs off. See
-    /// `start()`.
+    /// Bumped by every `start()`/`stop()`; the value a call bumped it to
+    /// is its ticket. Checked against the current value at every point
+    /// where that call is about to touch `self.listener` after an
+    /// `await` — including inside `drain()`'s loop, not just before and
+    /// after it — so a call whose ticket is no longer current backs off
+    /// instead of undoing or redoing a later call's work. See `start()`.
     private var generation: UInt64 = 0
     /// Test seam only (production callers pass nothing): invoked once a
     /// `start()` has claimed its listener, before that listener is bound,
     /// so a test can pause a `start()` there and race a `stop()` against
     /// it deterministically.
     private let beforeBind: (@Sendable () async -> Void)?
+    /// Test seam only (production callers pass nothing): invoked from
+    /// `drain()` right after it clears `self.listener`, before it awaits
+    /// that listener's `stop()`, so a test can pause a drain mid-flight
+    /// and race another call against it deterministically.
+    private let duringDrain: (@Sendable () async -> Void)?
 
-    public init(store: LogStore, ui: any AgentUI, beforeBind: (@Sendable () async -> Void)? = nil) {
+    public init(store: LogStore, ui: any AgentUI,
+                beforeBind: (@Sendable () async -> Void)? = nil,
+                duringDrain: (@Sendable () async -> Void)? = nil) {
         server = MCPServer(tools: BeaverTools.all,
                            context: ToolContext(store: store, ui: ui),
                            journal: AgentJournal(store: store))
         self.beforeBind = beforeBind
+        self.duringDrain = duringDrain
     }
 
     /// Starts (or restarts) the listener; returns the bound port.
@@ -38,10 +48,12 @@ public actor AgentAccess {
     /// one level up, via a generation counter rather than a raw identity
     /// check alone: a `stop()` (or a later `start()`) that lands anywhere
     /// during this call — including while it is draining the previous
-    /// listener — bumps `generation` and wins; this call notices the
-    /// mismatch (checked right after draining, and again after the bind)
-    /// and throws `CancellationError` instead of publishing, or leaving
-    /// bound, a listener nobody asked for. Overlapping `start()`s are
+    /// listener, or while a *previous* call's drain is itself suspended
+    /// mid-stop — bumps `generation` and wins. This call, and `drain()`
+    /// on its behalf, notice the mismatch (checked after draining, inside
+    /// `drain()`'s own loop, and again after the bind) and throw
+    /// `CancellationError` instead of publishing, or leaving bound, a
+    /// listener nobody asked for. Overlapping `start()`s are
     /// last-call-wins. Callers that only care about the latest
     /// `start()`/`stop()` should ignore a `CancellationError` thrown by a
     /// superseded `start()`.
@@ -49,7 +61,7 @@ public actor AgentAccess {
     public func start(port: UInt16) async throws -> UInt16 {
         generation &+= 1
         let mine = generation
-        await drain()
+        await drain(mine)
         guard generation == mine else { throw CancellationError() }
         let server = self.server
         let listener = MCPHTTPListener { body, headers in
@@ -72,15 +84,21 @@ public actor AgentAccess {
 
     public func stop() async {
         generation &+= 1
-        await drain()
+        await drain(generation)
     }
 
-    /// Stops and clears whatever listener is currently claimed. Looped
-    /// because a listener that shows up while we're awaiting a stop
-    /// (another call raced in) must be stopped too before we're done.
-    private func drain() async {
-        while let listener {
+    /// Stops and clears whatever listener is currently claimed, as long
+    /// as `mine` is still the current generation. Looped because a
+    /// listener that shows up while we're awaiting a stop (another call
+    /// raced in, saw the same generation as `mine`, and claimed one) must
+    /// be stopped too before we're done — but gated on `generation` so
+    /// that once a *later* call has moved the generation on, this loop
+    /// stops touching `self.listener` and leaves it for that later call
+    /// to manage, rather than tearing down a listener it never drained.
+    private func drain(_ mine: UInt64) async {
+        while generation == mine, let listener {
             self.listener = nil
+            await duringDrain?()
             await listener.stop()
         }
     }

@@ -76,7 +76,7 @@ struct AgentAccessTests {
         do { return .success(try await body()) } catch { return .failure(error) }
     }
 
-    @Test("Review focus: stop() racing an in-flight start() wins")
+    @Test("Review focus: stop() racing an in-flight start() wins", .timeLimit(.minutes(1)))
     func stopWhileStartInFlightWins() async throws {
         // Deterministic handshake instead of a sleep: `beforeBind` pauses
         // start() right after it has claimed its listener (so `stop()`
@@ -109,7 +109,7 @@ struct AgentAccessTests {
         }
     }
 
-    @Test("Review focus: stop() racing a second start()'s in-flight prelude wins")
+    @Test("Review focus: stop() racing a second start()'s in-flight prelude wins", .timeLimit(.minutes(1)))
     func stopDuringSecondStartWins() async throws {
         // Finding 1's exact shape: a listener is already serving, and a
         // second start() — mid-flight, past the point where it has
@@ -146,6 +146,92 @@ struct AgentAccessTests {
             Issue.record("the second start() should have lost the race to the concurrent stop()")
             await #expect(throws: (any Error).self) { try await post(port, "{}") }
         }
+        await #expect(throws: (any Error).self) { try await post(firstPort, "{}") }
+    }
+
+    @Test("Review focus: stop() racing a second start()'s drain (not just its prelude-claim) wins",
+          .timeLimit(.minutes(1)))
+    func stopDuringSecondStartsDrainWins() async throws {
+        // The precise "finding 1" trace: a listener is already serving,
+        // and the second start() is paused inside drain() itself — right
+        // after it has cleared `self.listener` for the first listener but
+        // before that listener is actually told to stop — not merely
+        // after it has gone on to claim a replacement (as
+        // `stopDuringSecondStartWins` above exercises via `beforeBind`).
+        // A concurrent stop() lands in that exact window.
+        let store = try LogStore(source: .inMemory)
+        let (reached, reachedContinuation) = AsyncStream<Void>.makeStream()
+        let (gate, gateContinuation) = AsyncStream<Void>.makeStream()
+        let calls = Counter()
+        let access = AgentAccess(store: store, ui: FakeUI(value: HostSnapshot()), duringDrain: {
+            guard await calls.increment() == 1 else { return }
+            reachedContinuation.yield(())
+            var iterator = gate.makeAsyncIterator()
+            _ = await iterator.next()
+        })
+
+        let firstPort = try await access.start(port: 0)
+        _ = try await post(firstPort, "{}")
+
+        async let secondOutcome = attempt { try await access.start(port: 0) }
+        var reachedIterator = reached.makeAsyncIterator()
+        _ = await reachedIterator.next()
+
+        await access.stop()
+        gateContinuation.yield(())
+
+        switch await secondOutcome {
+        case .failure(let error):
+            #expect(error is CancellationError)
+        case .success(let port):
+            Issue.record("the second start() should have lost the race to the concurrent stop()")
+            await #expect(throws: (any Error).self) { try await post(port, "{}") }
+        }
+        await #expect(throws: (any Error).self) { try await post(firstPort, "{}") }
+    }
+
+    @Test("Review focus: a stop() suspended mid-drain does not undo a later start() (last call wins)",
+          .timeLimit(.minutes(1)))
+    func staleDrainDoesNotUndoLaterStart() async throws {
+        // The "stale-drain" shape finding 1 named: stop() is the one that
+        // gets paused mid-drain (after clearing `self.listener` for the
+        // first listener, before telling it to stop) — not start(). A
+        // start() then runs to completion and starts serving while the
+        // stop() is still parked. Releasing the stop() must not let it
+        // resume, find the *new* listener now sitting in `self.listener`,
+        // and tear that down too: last call was start(), so it must still
+        // be serving once everything has settled.
+        let store = try LogStore(source: .inMemory)
+        let (reached, reachedContinuation) = AsyncStream<Void>.makeStream()
+        let (gate, gateContinuation) = AsyncStream<Void>.makeStream()
+        let calls = Counter()
+        let access = AgentAccess(store: store, ui: FakeUI(value: HostSnapshot()), duringDrain: {
+            guard await calls.increment() == 1 else { return }
+            reachedContinuation.yield(())
+            var iterator = gate.makeAsyncIterator()
+            _ = await iterator.next()
+        })
+
+        let firstPort = try await access.start(port: 0)
+        _ = try await post(firstPort, "{}")
+
+        async let stopTask: Void = access.stop()
+        var reachedIterator = reached.makeAsyncIterator()
+        _ = await reachedIterator.next()
+
+        // The stop() above is now parked mid-drain, holding only a local
+        // reference to the first listener. A start() run to completion
+        // here does not race it at all (its own drain finds nothing,
+        // `self.listener` already having been cleared) — it just binds.
+        let secondPort = try await access.start(port: 0)
+        _ = try await post(secondPort, "{}")
+
+        gateContinuation.yield(())
+        await stopTask
+
+        // Last call was the second start(): it must still be serving.
+        _ = try await post(secondPort, "{}")
+        // And the stop() must still have retired the first listener.
         await #expect(throws: (any Error).self) { try await post(firstPort, "{}") }
     }
 }
