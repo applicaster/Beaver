@@ -113,8 +113,6 @@ public enum StorageCommand {
         }
     }
 
-    // MARK: - Internals
-
     // MARK: - Send and read back (D58)
 
     public enum Outcome: String, Sendable {
@@ -179,6 +177,8 @@ public enum StorageCommand {
     private static func wholeMillisecondNow() -> Date {
         Date(timeIntervalSince1970: (Date().timeIntervalSince1970 * 1000).rounded(.down) / 1000)
     }
+
+    // MARK: - Internals
 
     private static func command(_ action: Action, _ layer: StorageSnapshot.Namespace,
                                 _ args: [String], _ parent: String?) -> String {

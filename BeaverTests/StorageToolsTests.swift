@@ -84,6 +84,18 @@ struct StorageToolsTests {
         #expect(device.sent.isEmpty)
     }
 
+    @Test("An unknown layer is refused with the calling tool's own example")
+    func unknownLayer() async throws {
+        let (_, ctx, device) = try await fixture()
+        do {
+            _ = try await StorageTools.set.run(ToolArguments(["layer": "cookies", "key": "k", "value": "v"]), ctx)
+            Issue.record("expected an error")
+        } catch let error as ToolError {
+            #expect(error.message.contains("storage_set(layer:"))
+        }
+        #expect(device.sent.isEmpty)
+    }
+
     @Test("The app answered without the change: not applied")
     func notApplied() async throws {
         let (_, ctx, _) = try await fixture(applies: false)

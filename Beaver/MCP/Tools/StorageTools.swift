@@ -147,7 +147,12 @@ enum StorageTools {
         guard let raw = try args.string("layer") else {
             throw ToolError("layer is required: session, local or secure. \(example)")
         }
-        let found = try layers(raw)
+        let found: [StorageSnapshot.Namespace]
+        do {
+            found = try layers(raw)
+        } catch {
+            throw ToolError("Unknown layer \"\(raw)\": use session, local or secure. \(example)")
+        }
         guard found.count == 1 else { throw ToolError("Pick one layer: session, local or secure. \(example)") }
         return found[0]
     }
