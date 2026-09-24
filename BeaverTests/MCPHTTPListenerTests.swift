@@ -73,6 +73,33 @@ struct MCPHTTPListenerTests {
         await #expect(throws: (any Error).self) { try await post(port, "{}") }
     }
 
+    @Test("Review focus: stop() releases the port before returning", .timeLimit(.minutes(1)))
+    func restartSamePortRepeatedly() async throws {
+        let listener = MCPHTTPListener { body, _ in body }
+        var port = try await listener.start(port: 0)
+        await listener.stop()
+        for _ in 0..<50 {
+            port = try await listener.start(port: port)
+            await listener.stop()
+        }
+    }
+
+    @Test("Review focus: two overlapping starts leave only one listener alive")
+    func overlappingStarts() async throws {
+        let listener = MCPHTTPListener { body, _ in body }
+        // Both calls race the same actor: whichever finishes first claims
+        // `self.listener`; the other must be told it lost (throw) rather
+        // than silently leaving its own listener alive with nothing
+        // referencing it (the actor-reentrancy bug under test).
+        async let first: UInt16? = try? await listener.start(port: 0)
+        async let second: UInt16? = try? await listener.start(port: 0)
+        let ports = [await first, await second].compactMap { $0 }
+        defer { Task { await listener.stop() } }
+        #expect(ports.count == 1)
+        let (status, _) = try await post(ports[0], "{}")
+        #expect(status == 200)
+    }
+
     /// Sends raw bytes and reads until the server closes.
     private func rawExchange(_ port: UInt16, _ text: String) async throws -> String {
         let connection = NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: port)!, using: .tcp)

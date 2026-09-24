@@ -139,7 +139,7 @@ public actor MCPHTTPListener {
     /// Binds 127.0.0.1:`port` (0 = any free port) and returns the bound
     /// port once listening. Throws if the port is taken.
     public func start(port: UInt16) async throws -> UInt16 {
-        stop()
+        await stop()
         let parameters = NWParameters.tcp
         parameters.acceptLocalOnly = true
         // Off on purpose: with reuse, a second Beaver could bind the same
@@ -155,35 +155,76 @@ public actor MCPHTTPListener {
         listener.newConnectionHandler = { connection in
             Self.serve(connection, queue: queue, handler: handler)
         }
-        let resumed = OSAllocatedUnfairLock(initialState: false)
-        let bound: UInt16 = try await withCheckedThrowingContinuation { continuation in
-            listener.stateUpdateHandler = { state in
-                let outcome: Result<UInt16, Error>?
-                switch state {
-                case .ready:
-                    outcome = .success(listener.port?.rawValue ?? port)
-                case .failed(let error), .waiting(let error):
-                    // A taken port can show up as .waiting(EADDRINUSE) rather than .failed.
-                    listener.cancel()
-                    outcome = .failure(error)
-                case .cancelled:
-                    outcome = .failure(CancellationError())
-                default:
-                    outcome = nil
-                }
-                // Resume exactly once: the first of ready / failed / waiting / cancelled.
-                guard let outcome, resumed.withLock({ done in defer { done = true }; return !done }) else { return }
-                continuation.resume(with: outcome)
-            }
-            listener.start(queue: queue)
-        }
+        // Claim the listener before it starts: a `stop()` (or another
+        // overlapping `start()`) that runs while we're suspended below
+        // must see this one and act on it — otherwise it would keep
+        // listening with nothing left holding a reference to it.
         self.listener = listener
-        return bound
+        let resumed = OSAllocatedUnfairLock(initialState: false)
+        do {
+            let bound: UInt16 = try await withCheckedThrowingContinuation { continuation in
+                listener.stateUpdateHandler = { state in
+                    let outcome: Result<UInt16, Error>?
+                    switch state {
+                    case .ready:
+                        outcome = .success(listener.port?.rawValue ?? port)
+                    case .failed(let error), .waiting(let error):
+                        // A taken port can show up as .waiting(EADDRINUSE) rather than .failed.
+                        listener.cancel()
+                        outcome = .failure(error)
+                    case .cancelled:
+                        outcome = .failure(CancellationError())
+                    default:
+                        outcome = nil
+                    }
+                    // Resume exactly once: the first of ready / failed / waiting / cancelled.
+                    guard let outcome, resumed.withLock({ done in defer { done = true }; return !done }) else { return }
+                    continuation.resume(with: outcome)
+                }
+                listener.start(queue: queue)
+            }
+            // Another call may have superseded this listener while we were
+            // suspended above (it reached `.ready` but nobody wants it any
+            // more) — back out rather than keep it or hand out its port.
+            guard self.listener === listener else {
+                listener.cancel()
+                throw CancellationError()
+            }
+            return bound
+        } catch {
+            if self.listener === listener { self.listener = nil }
+            listener.cancel()
+            throw error
+        }
     }
 
-    public func stop() {
-        listener?.cancel()
-        listener = nil
+    /// Cancels the listener and waits for it to actually reach
+    /// `.cancelled` before returning. `NWListener.cancel()` is
+    /// asynchronous; a caller that rebinds the same port immediately
+    /// (including our own `start()`) can otherwise race the OS and see
+    /// `EADDRINUSE` even though it *just* stopped the previous listener.
+    public func stop() async {
+        guard let listener else { return }
+        self.listener = nil
+        await Self.cancelAndWait(listener)
+    }
+
+    /// Chains onto whatever handler is already on `listener` — typically
+    /// `start()`'s own, if this listener is still mid-bind — so that
+    /// handler still gets to resolve its own continuation instead of
+    /// being silently replaced and left hanging forever.
+    private nonisolated static func cancelAndWait(_ listener: NWListener) async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let resumed = OSAllocatedUnfairLock(initialState: false)
+            let previous = listener.stateUpdateHandler
+            listener.stateUpdateHandler = { state in
+                previous?(state)
+                guard case .cancelled = state else { return }
+                guard resumed.withLock({ done in defer { done = true }; return !done }) else { return }
+                continuation.resume()
+            }
+            listener.cancel()
+        }
     }
 
     // MARK: - One connection = one request
