@@ -46,7 +46,7 @@ struct MCPServerTests {
         #expect(reply?["result"]?["tools"]?.array?.first?["name"] == "echo")
     }
 
-    @Test("tools/call: text, structuredContent only for 2025-06-18, journaled")
+    @Test("tools/call: text, structuredContent from 2025-06-18 on, journaled")
     func callTool() async throws {
         let (s, store) = try server()
         let body = #"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"echo","arguments":{"x":"hi 🔥"}}}"#
@@ -56,9 +56,13 @@ struct MCPServerTests {
         #expect(new?["result"]?["structuredContent"]?["x"] == "hi 🔥")
         let old = try await call(s, body, version: nil)
         #expect(old?["result"]?["structuredContent"] == nil)
+        // A later protocol version than the newest Beaver knows still gets
+        // structuredContent: it's a `>=` comparison, not an exact match.
+        let newer = try await call(s, body, version: "2025-11-25")
+        #expect(newer?["result"]?["structuredContent"]?["x"] == "hi 🔥")
 
         let journal = try await store.agentActivity()
-        #expect(journal.count == 2)
+        #expect(journal.count == 3)
         #expect(journal.first?.tool == "echo")
         #expect(journal.first?.client == "claude-code")
         #expect(journal.first?.summary == "echo hi 🔥")
@@ -71,6 +75,24 @@ struct MCPServerTests {
         #expect(reply?["result"]?["isError"] == true)
         #expect(reply?["result"]?["content"]?.array?.first?["text"]?.string?.contains("Example") == true)
         #expect(try await store.agentActivity().first?.isError == true)
+    }
+
+    @Test("A JSON-encoded string in params.arguments is parsed into an object")
+    func stringEncodedArguments() async throws {
+        let (s, _) = try server()
+        let body = #"{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"echo","arguments":"{\"x\":\"hi\"}"}}"#
+        let reply = try await call(s, body)
+        #expect(reply?["result"]?["isError"] == false)
+        #expect(reply?["result"]?["content"]?.array?.first?["text"]?.string?.hasPrefix("echo hi") == true)
+    }
+
+    @Test("An arguments string that doesn't parse as JSON falls back to no arguments")
+    func unparsableStringArguments() async throws {
+        let (s, _) = try server()
+        let body = #"{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"echo","arguments":"not json"}}"#
+        let reply = try await call(s, body)
+        #expect(reply?["result"]?["isError"] == false)
+        #expect(reply?["result"]?["content"]?.array?.first?["text"]?.string?.hasPrefix("echo ") == true)
     }
 
     @Test("Unknown tool is an isError result that points at tools/list")

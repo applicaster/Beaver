@@ -73,10 +73,12 @@ public struct MCPServer: Sendable {
             guard let name = params["name"]?.string else {
                 return Self.error(id: id, code: -32602, "Invalid params: tools/call needs a tool name.")
             }
-            let arguments = ToolArguments(params["arguments"]?.object ?? [:])
-            // structuredContent exists from 2025-06-18; a client that doesn't
-            // send the header is 2025-03-26 by the spec's rule.
-            let structured = protocolVersion == "2025-06-18"
+            let arguments = ToolArguments(Self.argumentsObject(params["arguments"]))
+            // structuredContent exists from 2025-06-18 on — a `>=` compare
+            // on the YYYY-MM-DD form, so a later version we don't know by
+            // name yet still gets it; a client that sends no header is
+            // 2025-03-26 by the spec's rule.
+            let structured = protocolVersion.map { $0 >= "2025-06-18" } ?? false
             return Self.result(id: id, await call(name, arguments, client: client, structured: structured))
         default:
             return Self.error(id: id, code: -32601, "Method not found: \(method). Beaver serves tools only.")
@@ -102,6 +104,15 @@ public struct MCPServer: Sendable {
             await journal.record(toolName: tool.name, kind: tool.kind, client: client, result: nil, error: message)
             return Self.content(message, structured: nil, isError: true)
         }
+    }
+
+    /// A weak client sometimes double-encodes `arguments` as a JSON string
+    /// rather than an object. Parse it in that case; fall back to no
+    /// arguments only when it isn't an object either way.
+    private static func argumentsObject(_ value: JSON?) -> [String: JSON] {
+        if let object = value?.object { return object }
+        if let text = value?.string, let parsed = try? JSON.parse(Data(text.utf8)) { return parsed.object ?? [:] }
+        return [:]
     }
 
     private static func content(_ text: String, structured: JSON?, isError: Bool) -> JSON {
