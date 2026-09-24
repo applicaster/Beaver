@@ -10,7 +10,7 @@ import AppKit
 /// `DetailPaneView` — header, divider, metadata grid, then uppercase
 /// sections with `JSONTreeView` — with the zapp-support header on top:
 /// method and status badges, duration, time, and copy buttons, then the
-/// request and the response as two separate panels.
+/// request and the response as two titled sections under a divider each.
 struct NetworkDetailView: View {
     let entry: NetworkEntry?
     var isBookmarked = false
@@ -110,7 +110,7 @@ private struct NetworkDetailContent: View {
             }
             urlLine
             Text(entry.statusLine)
-                .font(.title2.weight(.semibold))
+                .font(.title3.weight(.semibold))
                 .foregroundStyle(entry.statusClass.color)
                 .textSelection(.enabled)
             // statusLine already carries the error when there is no HTTP status.
@@ -135,7 +135,7 @@ private struct NetworkDetailContent: View {
             // tap gesture below on macOS. The copy button and the
             // expanded block (which stays selectable) cover selection.
             Text(short)
-                .font(.title3)
+                .font(.system(size: 12, design: .monospaced))
                 .lineLimit(2)
                 .truncationMode(.middle)
                 .fixedSize(horizontal: false, vertical: true)
@@ -155,7 +155,7 @@ private struct NetworkDetailContent: View {
         if isCut && showsFullURL {
             // No tap gesture here, so the text stays selectable.
             Text(entry.url)
-                .font(.callout.monospaced())
+                .font(.system(size: 12, design: .monospaced))
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(8)
@@ -224,7 +224,7 @@ private struct NetworkDetailContent: View {
             // No "Error" row here — the red line under the status above
             // already shows it (see `header`).
         }
-        .font(.caption)
+        .font(.system(size: 11))
     }
 
     /// The size row, plus a second "Captured" row when the shown size is
@@ -273,14 +273,16 @@ private struct NetworkDetailContent: View {
         GridRow {
             Text(label)
                 .foregroundStyle(.secondary)
-                .frame(minWidth: 70, alignment: .leading)
+                .frame(width: 96, alignment: .leading)
             if help.isEmpty {
                 Text(value)
                     .foregroundStyle(color ?? .primary)
+                    .monospacedDigit()
                     .textSelection(.enabled)
             } else {
                 Text(value)
                     .foregroundStyle(color ?? .primary)
+                    .monospacedDigit()
                     .textSelection(.enabled)
                     .help(help)
             }
@@ -291,7 +293,10 @@ private struct NetworkDetailContent: View {
 
     @ViewBuilder
     private func groups(_ trees: ParsedEntry) -> some View {
-        VStack(alignment: .leading, spacing: 20) {
+        // No cards: a divider and a headline per group, Xcode-inspector
+        // style, so nothing grey sits on the grey pane.
+        VStack(alignment: .leading, spacing: 16) {
+            Divider()
             group("Request", copy: { toasts.copy(entry.requestJSON, "Copied request") }) {
                 // Not `rawQuery != nil`: a URL ending in a bare "?" has an
                 // empty (non-nil) query component, which would otherwise
@@ -304,6 +309,7 @@ private struct NetworkDetailContent: View {
                 bodySection(entry.requestBody, tree: trees.requestBody, truncated: entry.isRequestBodyTruncated,
                             name: "request body", reportedSize: entry.requestBodySize)
             }
+            Divider()
             group("Response", copy: { toasts.copy(entry.responseJSON, "Copied response") }) {
                 headers(entry.responseHeaders, tree: trees.responseHeaders, name: "response headers")
                 bodySection(entry.responseBody, tree: trees.responseBody, truncated: entry.isResponseBodyTruncated,
@@ -312,7 +318,7 @@ private struct NetworkDetailContent: View {
         }
     }
 
-    /// A rounded panel with a title whose copy icon shows on hover.
+    /// A section with a title whose copy icon shows on hover.
     private func group(
         _ title: String, copy: @escaping () -> Void, @ViewBuilder content: () -> some View
     ) -> some View {
@@ -324,9 +330,7 @@ private struct NetworkDetailContent: View {
             }
             content()
         }
-        .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
     }
 
     private func headers(_ h: [String: String], tree: StorageRecord?, name: String) -> some View {
@@ -391,14 +395,7 @@ private struct Subsection: View {
                 .foregroundStyle(.secondary)
             } trailing: {
                 if tree != nil {
-                    Picker("View", selection: $showRaw) {
-                        Text("Parsed").tag(false)
-                        Text("Raw").tag(true)
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .controlSize(.small)
-                    .fixedSize()
+                    ParsedRawToggle(showRaw: $showRaw)
                 }
             }
             if let tree, showsTree {
@@ -422,6 +419,32 @@ private struct Subsection: View {
     /// Copies what is on screen: the tree as JSON, or the raw text.
     private func copy() {
         toasts.copy(tree.flatMap { showsTree ? StorageRecord.serializeJSON($0) : nil } ?? raw, "Copied \(name)")
+    }
+}
+
+/// `Parsed | Raw` as two small borderless words — lighter than a blue
+/// segmented control repeated in every subsection.
+private struct ParsedRawToggle: View {
+    @Binding var showRaw: Bool
+
+    var body: some View {
+        HStack(spacing: 4) {
+            option("Parsed", raw: false)
+            Text("|").foregroundStyle(.tertiary)
+            option("Raw", raw: true)
+        }
+        .font(.caption)
+        .fixedSize()
+    }
+
+    private func option(_ title: String, raw: Bool) -> some View {
+        let isOn = showRaw == raw
+        return Button { showRaw = raw } label: {
+            Text(title).foregroundStyle(isOn ? .primary : .secondary)
+        }
+        .buttonStyle(.plain)
+        .help(raw ? "Show as received" : "Show parsed")
+        .accessibilityAddTraits(isOn ? .isSelected : [])
     }
 }
 

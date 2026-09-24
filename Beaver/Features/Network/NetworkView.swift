@@ -81,10 +81,13 @@ struct NetworkView: View {
                         options: { vm.filter.availableHosts(in: vm.base) })
             if !vm.filter.isEmpty || vm.filter.searchIsRegex {
                 Button("Clear filters") { vm.filter = NetworkFilter() }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
             }
             Spacer()
         }
-        .padding(8)
+        .padding(.horizontal, 12)
+        .frame(height: 44)
     }
 
     // MARK: Chips
@@ -119,7 +122,7 @@ struct NetworkView: View {
                 .help("Clear every chip")
             }
             .padding(.horizontal, 12)
-            .padding(.bottom, 6)
+            .padding(.bottom, 4)
         }
     }
 
@@ -139,13 +142,16 @@ struct NetworkView: View {
         let s = NetworkStats(rows)
         return HStack(spacing: 12) {
             Text("Results (\(s.count)/\(vm.entries.count))").font(.headline)
-            Group {
-                if let rate = s.successRate {
-                    Text("Success \(Int((rate * 100).rounded()))% (\(s.successCount)/\(s.httpCount))")
-                }
-                if let avg = s.averageDurationMillis { Text("Avg \(avg) ms") }
+            let stats = [
+                s.successRate.map { "Success \(Int(($0 * 100).rounded()))% (\(s.successCount)/\(s.httpCount))" },
+                s.averageDurationMillis.map { "Avg \($0) ms" },
+            ].compactMap { $0 }
+            if !stats.isEmpty {
+                Text(stats.joined(separator: " · "))
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
-            .foregroundStyle(.secondary)
             Spacer(minLength: 8)
             bookmarksButton
             Button { vm.clear() } label: { Label("Clear", systemImage: "xmark.circle") }
@@ -164,8 +170,9 @@ struct NetworkView: View {
         }
         .monospacedDigit()
         .buttonStyle(.bordered)
-        .controlSize(.regular)
-        .padding(.horizontal, 8)
+        .controlSize(.small)
+        .padding(.horizontal, 12)
+        .padding(.top, 2)
         .padding(.bottom, 8)
     }
 
@@ -432,13 +439,20 @@ struct Pill: View {
     // they sit near 2:1 contrast and read as blurry. Darken (light mode) or
     // lighten (dark mode) the text, and go white on a selected row.
     private var textColor: Color {
-        if prominence == .increased { return .white }
-        return scheme == .dark ? tint.mix(with: .white, by: 0.25) : tint.mix(with: .black, by: 0.4)
+        prominence == .increased ? .white : tint.readableText(in: scheme)
     }
 
     private var fill: Color {
         if prominence == .increased { return .white.opacity(0.22) }
         return tint.opacity(scheme == .dark ? 0.25 : 0.18)
+    }
+}
+
+extension Color {
+    /// This tint darkened (light mode) or lightened (dark mode) enough to
+    /// read as text on its own pale fill.
+    func readableText(in scheme: ColorScheme) -> Color {
+        scheme == .dark ? mix(with: .white, by: 0.25) : mix(with: .black, by: 0.4)
     }
 }
 
@@ -448,6 +462,7 @@ private struct NetworkChip: View {
     let title: String
     let excluded: Bool
     let onRemove: () -> Void
+    @Environment(\.colorScheme) private var scheme
 
     private var tint: Color { excluded ? .red : .green }
 
@@ -466,9 +481,9 @@ private struct NetworkChip: View {
         }
         .font(.caption)
         .padding(.horizontal, 8)
-        .padding(.vertical, 3)
-        .background(Capsule().fill(tint.opacity(0.18)))
-        .foregroundStyle(tint)
+        .padding(.vertical, 2)
+        .background(Capsule().fill(tint.opacity(scheme == .dark ? 0.25 : 0.15)))
+        .foregroundStyle(tint.readableText(in: scheme))
     }
 }
 
@@ -493,8 +508,8 @@ struct StatusBadge: View {
     }
 }
 
-/// Single-choice facet dropdown, styled like the Log feed's level pill:
-/// neutral on All, tinted once a value is picked. Options come from
+/// Single-choice facet dropdown: a native bordered button as tall as the
+/// search field, neutral on All, tinted once a value is picked. Options come from
 /// `NetworkFilter.available…`, so they only list values that can match.
 private struct FacetPicker<Value: Hashable & Sendable>: View {
     let title: String
@@ -509,28 +524,25 @@ private struct FacetPicker<Value: Hashable & Sendable>: View {
     /// divider follows it and "All" doesn't count it.
     var summary: Value?
     @State private var isShown = false
-    @State private var isHovered = false
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        let color = selection.map(tint) ?? .secondary
+        let color = selection.map(tint)
         Button { isShown.toggle() } label: {
             HStack(spacing: 6) {
                 Text(selection.map(label) ?? title)
-                    .font(.caption.weight(.bold))
+                    .font(.system(size: 13))
                     .lineLimit(1)
                 Image(systemName: "chevron.down")
-                    .font(.caption2.weight(.semibold))
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(color == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tint))
             }
-            .foregroundStyle(selection == nil ? Color.primary : color)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(Capsule().fill(isHovered ? color.opacity(0.12) : Color(.controlBackgroundColor)))
-            .overlay(Capsule().strokeBorder(color.opacity(selection == nil ? 0.3 : 0.5), lineWidth: 1))
-            .animation(.easeInOut(duration: 0.12), value: isHovered)
+            .foregroundStyle(color.map { AnyShapeStyle($0.readableText(in: scheme)) } ?? AnyShapeStyle(.primary))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.bordered)
+        .controlSize(.large)
+        .tint(color)
         .fixedSize()
-        .onHover { isHovered = $0 }
         .help("Show one \(title.lowercased()) only")
         .popover(isPresented: $isShown, arrowEdge: .bottom) {
             let opts = options()
