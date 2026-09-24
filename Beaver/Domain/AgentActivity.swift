@@ -59,7 +59,7 @@ public struct NewAgentActivity: Sendable {
 
 public enum AgentActivityText {
     public static func visible(_ entries: [AgentActivity], hideReads: Bool) -> [AgentActivity] {
-        hideReads ? entries.filter { $0.kind != .read } : entries
+        hideReads ? entries.filter { $0.kind != .read || $0.isError } : entries
     }
 
     /// `14:03:12 claude-code logs_query — 41 events`, `✗` on failures.

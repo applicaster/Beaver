@@ -77,7 +77,7 @@ struct AgentActivityStoreTests {
         let change = AgentActivity(id: 3, at: at, client: "cursor", tool: "filters_save", kind: .change,
                                    summary: "saved", level: nil, isError: false, error: nil,
                                    linksJSON: nil, sessionId: nil, seen: false)
-        #expect(AgentActivityText.visible([read, change], hideReads: true) == [change])
+        #expect(AgentActivityText.visible([read, failed, change], hideReads: true) == [failed, change])
         #expect(AgentActivityText.line(read).hasSuffix("claude-code logs_query — 41 events"))
         #expect(AgentActivityText.line(failed).hasSuffix("agent network_get — No request #9 ✗"))
         #expect(AgentActivityText.copyText([read, change]).split(separator: "\n").count == 2)
