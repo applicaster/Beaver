@@ -9,6 +9,8 @@ import UniformTypeIdentifiers
 
 struct NetworkView: View {
     @Bindable var vm: NetworkViewModel
+    /// Switches to the Log feed at the request's start time.
+    var onShowInLogFeed: (NetworkEntry) -> Void = { _ in }
     @Environment(ToastCenter.self) private var toasts
     /// The entry open in the large detail sheet.
     @State private var expanded: NetworkEntry?
@@ -35,6 +37,7 @@ struct NetworkView: View {
                 NetworkDetailView(entry: vm.selected, isBookmarked: vm.selection.map(vm.isBookmarked) ?? false,
                                   payloadJSON: vm.payloadJSON,
                                   onToggleBookmark: { vm.toggleBookmark($0.id) },
+                                  onShowInLogFeed: onShowInLogFeed,
                                   onExpand: { expanded = $0 })
                     .frame(minWidth: 320, idealWidth: 360, maxHeight: .infinity)
             }
@@ -285,6 +288,7 @@ struct NetworkView: View {
         .contextMenu(forSelectionType: NetworkEntry.ID.self) { ids in
             if let id = ids.first, let e = vm.entries.first(where: { $0.id == id }) {
                 Button(vm.isBookmarked(e.id) ? "Remove bookmark" : "Bookmark") { vm.toggleBookmark(e.id) }
+                Button("Show in Log feed") { onShowInLogFeed(e) }
                 Divider()
                 Button("Only \(e.host)") { vm.filter.host = e.host }
                 Button("Hide \(e.host)") { vm.filter.excludedHosts.insert(e.host) }

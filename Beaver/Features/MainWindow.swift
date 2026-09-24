@@ -21,6 +21,9 @@ struct MainWindow: View {
     @State private var showingBookmarks = false
     @State private var bookmarksSnapshot: [BookmarkedEvent] = []
     @State private var showingTimeJump = false
+    /// A request's start time waiting for the Log feed to mount, from
+    /// Network's "Show in Log feed". See `detail`.
+    @State private var pendingLogFeedJump: Date?
 
     /// Per-session view-models, owned here so their state (filter,
     /// sort, exclude, expanded namespaces, search term, etc.)
@@ -177,6 +180,14 @@ struct MainWindow: View {
                     // session change would just throw away the
                     // selection / scroll position we just restored.
                     LogFeedView(vm: vm)
+                        // LogFeedView only listens for `.beaverJumpToTime`
+                        // while mounted, so Network's "Show in Log feed"
+                        // switches tabs first and posts once it appears.
+                        .task(id: pendingLogFeedJump) {
+                            guard let date = pendingLogFeedJump else { return }
+                            pendingLogFeedJump = nil
+                            NotificationCenter.default.post(name: .beaverJumpToTime, object: date)
+                        }
                 } else {
                     ConnectionPlaceholder(state: env.serverState)
                 }
@@ -193,7 +204,10 @@ struct MainWindow: View {
                 }
             case .network:
                 if let vm = networkVM {
-                    NetworkView(vm: vm)
+                    NetworkView(vm: vm, onShowInLogFeed: { entry in
+                        pendingLogFeedJump = Date(timeIntervalSince1970: Double(entry.startMillis) / 1000)
+                        selectedTab = .logFeed
+                    })
                 } else {
                     ConnectionPlaceholder(state: env.serverState)
                 }

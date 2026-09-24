@@ -17,13 +17,16 @@ struct NetworkDetailView: View {
     /// Reads the payload as received from the store, for Copy JSON.
     let payloadJSON: (NetworkEntry.ID) async -> String?
     var onToggleBookmark: ((NetworkEntry) -> Void)?
+    /// `nil` inside the sheet, which would stay on top of the Log feed.
+    var onShowInLogFeed: ((NetworkEntry) -> Void)?
     /// Opens the entry in the large sheet. `nil` inside the sheet itself.
     var onExpand: ((NetworkEntry) -> Void)?
 
     var body: some View {
         if let entry {
             NetworkDetailContent(entry: entry, isBookmarked: isBookmarked, payloadJSON: payloadJSON,
-                                 onToggleBookmark: onToggleBookmark, onExpand: onExpand)
+                                 onToggleBookmark: onToggleBookmark, onShowInLogFeed: onShowInLogFeed,
+                                 onExpand: onExpand)
         } else {
             ContentUnavailableView("No request selected", systemImage: "network")
         }
@@ -68,6 +71,7 @@ private struct NetworkDetailContent: View {
     let isBookmarked: Bool
     let payloadJSON: (NetworkEntry.ID) async -> String?
     let onToggleBookmark: ((NetworkEntry) -> Void)?
+    let onShowInLogFeed: ((NetworkEntry) -> Void)?
     let onExpand: ((NetworkEntry) -> Void)?
 
     @Environment(ToastCenter.self) private var toasts
@@ -190,6 +194,12 @@ private struct NetworkDetailContent: View {
                         .foregroundStyle(isBookmarked ? .yellow : .primary)
                 }
                 .help(isBookmarked ? "Remove bookmark" : "Bookmark this request")
+            }
+            if let onShowInLogFeed {
+                Button { onShowInLogFeed(entry) } label: {
+                    Label("Show in Log feed", systemImage: "list.bullet.rectangle").labelStyle(.iconOnly)
+                }
+                .help("Show in Log feed — the events around this request's start time")
             }
             if let onExpand {
                 Button { onExpand(entry) } label: {
