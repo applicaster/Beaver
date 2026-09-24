@@ -490,15 +490,8 @@ public actor LogStore {
     ) async throws -> [EventRecord] {
         try await dbQueue.read { db in
             let (whereClause, args) = Self.where(filter: filter, sessionId: sessionId)
-            let payloadColumns = includePayloads
-                ? "data_json, context_json"
-                : "NULL AS data_json, NULL AS context_json"
             let sql = """
-                SELECT id, session_id, timestamp_ms, level, subsystem,
-                       category, message, \(payloadColumns),
-                       COALESCE(octet_length(data_json), 0)
-                     + COALESCE(octet_length(context_json), 0)
-                       AS payload_bytes
+                SELECT \(Self.eventColumns(includePayloads: includePayloads))
                 FROM event
                 \(whereClause)
                 ORDER BY timestamp_ms ASC, id ASC
@@ -509,6 +502,114 @@ public actor LogStore {
             let rows = try Row.fetchAll(db, sql: sql, arguments: StatementArguments(fullArgs))
             return rows.map(Self.makeEventRecord)
         }
+    }
+
+    private static func eventColumns(includePayloads: Bool) -> String {
+        let payloadColumns = includePayloads
+            ? "data_json, context_json"
+            : "NULL AS data_json, NULL AS context_json"
+        return """
+            id, session_id, timestamp_ms, level, subsystem,
+            category, message, \(payloadColumns),
+            COALESCE(octet_length(data_json), 0)
+          + COALESCE(octet_length(context_json), 0)
+            AS payload_bytes
+        """
+    }
+
+    // MARK: - Events: Log feed
+
+    /// What the Log feed shows for a filter, read in one go.
+    public struct FeedSnapshot: Sendable {
+        /// The newest `limit` matching rows, oldest first, without payloads.
+        public let events: [EventRecord]
+        /// Rows matching the filter.
+        public let total: Int
+        /// Rows in the session.
+        public let unfiltered: Int
+        /// Highest event id in the store at read time — every row after
+        /// it is new to this snapshot. Store-wide rather than per session
+        /// so a session with no rows yet still has a tight bound.
+        public let watermark: Int64
+    }
+
+    /// Rows added after a snapshot or an earlier tail.
+    public struct FeedTail: Sendable {
+        /// New rows matching the filter, ordered like the feed.
+        public let events: [EventRecord]
+        /// New rows in the session, matching or not.
+        public let unfiltered: Int
+        public let watermark: Int64
+    }
+
+    /// Newest-first with a cap, so a session past `limit` rows loses its
+    /// oldest rows rather than the ones arriving. `total` is only
+    /// counted when the cap was hit; otherwise it's the rows in hand.
+    public func feedSnapshot(sessionId: Int64, filter: Filter, limit: Int) async throws -> FeedSnapshot {
+        try await dbQueue.read { db in
+            // One read on the single connection: no write lands between
+            // the watermark and the rows.
+            let watermark = try Int64.fetchOne(db, sql: "SELECT MAX(id) FROM event") ?? 0
+            let (whereClause, args) = Self.where(filter: filter, sessionId: sessionId)
+            let newestFirst = try Row.fetchAll(
+                db,
+                sql: """
+                    SELECT \(Self.eventColumns(includePayloads: false))
+                    FROM event
+                    \(whereClause)
+                    ORDER BY timestamp_ms DESC, id DESC
+                    LIMIT ?
+                """,
+                arguments: StatementArguments(args + [limit])
+            )
+            let events = newestFirst.reversed().map(Self.makeEventRecord)
+            let total = events.count < limit
+                ? events.count
+                : try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM event \(whereClause)",
+                                   arguments: StatementArguments(args)) ?? 0
+            let unfiltered = filter.isEmpty
+                ? total
+                : try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM event WHERE session_id = ?",
+                                   arguments: [sessionId]) ?? 0
+            return FeedSnapshot(events: events, total: total, unfiltered: unfiltered, watermark: watermark)
+        }
+    }
+
+    /// Rows past `watermark`. Both queries walk the rowid range of the
+    /// new rows only, so the cost follows what arrived, not the session.
+    public func feedTail(sessionId: Int64, filter: Filter, after watermark: Int64) async throws -> FeedTail {
+        try await dbQueue.read { db in
+            let (rangeSQL, rangeArgs) = Self.tailRangeQuery(sessionId: sessionId, after: watermark)
+            let range = try Row.fetchOne(db, sql: rangeSQL, arguments: StatementArguments(rangeArgs))
+            let newWatermark = (range?[0] as Int64?) ?? watermark
+            let unfiltered = (range?[1] as Int?) ?? 0
+            guard unfiltered > 0 else {
+                return FeedTail(events: [], unfiltered: 0, watermark: newWatermark)
+            }
+            let (sql, args) = Self.tailEventsQuery(sessionId: sessionId, filter: filter, after: watermark)
+            let events = try Row.fetchAll(db, sql: sql, arguments: StatementArguments(args))
+                .map(Self.makeEventRecord)
+            return FeedTail(events: events, unfiltered: unfiltered, watermark: newWatermark)
+        }
+    }
+
+    static func tailRangeQuery(sessionId: Int64, after watermark: Int64)
+        -> (String, [any DatabaseValueConvertible]) {
+        ("SELECT MAX(id), COALESCE(SUM(session_id = ?), 0) FROM event WHERE id > ?",
+         [sessionId, watermark])
+    }
+
+    /// `NOT INDEXED` keeps the planner off the `(session_id, …)` indexes,
+    /// which would walk the whole session; the rowid range stays usable.
+    static func tailEventsQuery(sessionId: Int64, filter: Filter, after watermark: Int64)
+        -> (String, [any DatabaseValueConvertible]) {
+        let (whereClause, args) = Self.where(filter: filter, sessionId: sessionId)
+        return ("""
+            SELECT \(eventColumns(includePayloads: false))
+            FROM event NOT INDEXED
+            \(whereClause) AND id > ?
+            ORDER BY timestamp_ms ASC, id ASC
+        """, args + [watermark])
     }
 
     /// Full rows — payloads included — for a specific set of ids. The feed
