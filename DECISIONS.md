@@ -2175,7 +2175,11 @@ won't decode, and the feed starts unfiltered once.
   keep theirs. A row hidden by a filter fails for an agent with the call
   that shows it; `filter: {}` shows every event, including cleared ones.
   `BeaverUITests/AgentFocusUITests` checks that nothing takes focus
-  without `reveal: true`.
+  without `reveal: true`. `reveal()` forces activation
+  (`NSApp.activate(ignoringOtherApps: true)`) because macOS 14+'s
+  cooperative `activate()` is declined for a background app;
+  `AgentFocusUITests` covers it, and a minimised window counts as open,
+  with `reveal()` restoring it.
 
 ---
 

@@ -380,8 +380,10 @@ outside the view can change them. The change:
    `env.activeFilter`, so no view model logic changes. A new selection scrolls
    to the row the way a bookmark jump does today.
 3. `reveal()` brings the window to the front and activates the app
-   (`NSApp.activate()`, `makeKeyAndOrderFront`). It is the only path that
-   takes focus, and only `ui_show(reveal: true)` calls it.
+   (`NSApp.activate(ignoringOtherApps: true)`, `makeKeyAndOrderFront`) —
+   forced, because macOS 14+'s cooperative `activate()` declines a request
+   made from the background. It is the only path that takes focus, and only
+   `ui_show(reveal: true)` calls it.
 
 No Accessibility API, no synthetic events, no AppleScript: the agent changes
 state and SwiftUI renders it, whether the window is visible, behind other

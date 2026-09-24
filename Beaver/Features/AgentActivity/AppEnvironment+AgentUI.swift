@@ -72,11 +72,10 @@ extension AppEnvironment: AgentUI {
             if window.isMiniaturized { window.deminiaturize(nil) }
             window.makeKeyAndOrderFront(nil)
         }
-        // Cooperative activation (macOS 14+) may decline a request from an
-        // app in the background; AgentFocusUITests checks it lands.
-        // `activate()` is cooperative and declines a request made while
-        // another app is active; an explicit ui_show(reveal: true) is the
-        // user asking, so force it.
+        // Cooperative activation (macOS 14+'s plain `activate()`) declines
+        // a request made from the background; an explicit
+        // ui_show(reveal: true) is the user asking, so force it.
+        // AgentFocusUITests checks it lands.
         NSApp.activate(ignoringOtherApps: true)
     }
 
