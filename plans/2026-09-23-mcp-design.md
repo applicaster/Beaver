@@ -31,8 +31,8 @@ Beaver can relay the agent's calls to the app: `app.info`, `app.restart`,
 
 ### Success criteria
 
-1. `claude mcp add --transport http beaver http://127.0.0.1:9081/mcp` is the
-   whole client-side setup.
+1. `claude mcp add --scope user --transport http beaver http://127.0.0.1:9081/mcp`
+   is the whole client-side setup, and installs for every project.
 2. For every user-facing capability in Beaver there is a tool, and a test
    fails if the tool list and `MCP.md` disagree.
 3. A typical debugging loop works with no human in it: send a command to the
@@ -868,7 +868,8 @@ Each decision: what, why, alternatives, and what changing it touches.
 ### M22. Settings live in the app menu, not a Settings window
 - **Why:** Beaver has no Settings scene. Two items cover it: "Agent Access
   (MCP)" (toggle, with the port and state in the title) and "Copy MCP Setup
-  Command" (copies the `claude mcp add …` line).
+  Command" (copies the `claude mcp add --scope user …` line, so the agent is
+  set up for every project, not just the one open when it was copied).
 - **To change:** move to a `Settings` scene if more settings appear.
 
 ### M23. This spec lives in `plans/`; decisions migrate to `DECISIONS.md`

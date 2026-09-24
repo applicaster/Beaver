@@ -46,9 +46,9 @@ struct AgentAccessTests {
         #expect(AgentAccess.configuredPort(defaults) == 9081)
     }
 
-    @Test("Setup command")
+    @Test("Setup command installs at user scope, for every project")
     func setup() {
-        #expect(AgentAccess.setupCommand(port: 9081) == "claude mcp add --transport http beaver http://127.0.0.1:9081/mcp")
+        #expect(AgentAccess.setupCommand(port: 9081) == "claude mcp add --scope user --transport http beaver http://127.0.0.1:9081/mcp")
     }
 
     @Test("Review focus: overlapping starts, then stop, leave nothing serving")

@@ -11,8 +11,9 @@ panel. Design: `plans/2026-09-23-mcp-design.md`.
    `127.0.0.1:9081`.
 2. App menu → **Copy MCP Setup Command**, and run it:
    ```bash
-   claude mcp add --transport http beaver http://127.0.0.1:9081/mcp
+   claude mcp add --scope user --transport http beaver http://127.0.0.1:9081/mcp
    ```
+   `--scope user` installs it for every project, not just the one you're in.
    Cursor, Codex and other clients: add an HTTP MCP server with the URL
    `http://127.0.0.1:9081/mcp`.
 3. Connect the device to Beaver as usual. The agent can also read past and

@@ -30,9 +30,10 @@ works the same way (design M27).
 1. Open Beaver. The app menu shows **Agent Access (MCP): On · 127.0.0.1:9081**.
 2. App menu → **Copy MCP Setup Command**, paste it into a terminal:
    ```bash
-   claude mcp add --transport http beaver http://127.0.0.1:9081/mcp
+   claude mcp add --scope user --transport http beaver http://127.0.0.1:9081/mcp
    ```
-   Cursor / Codex: add an HTTP MCP server with the same URL.
+   `--scope user` installs it for every project. Cursor / Codex: add an HTTP
+   MCP server with the same URL.
 3. Check it answers:
    ```bash
    curl -s -X POST http://127.0.0.1:9081/mcp -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'

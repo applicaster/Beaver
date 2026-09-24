@@ -109,6 +109,6 @@ public actor AgentAccess {
     }
 
     public static func setupCommand(port: UInt16) -> String {
-        "claude mcp add --transport http beaver http://127.0.0.1:\(port)/mcp"
+        "claude mcp add --scope user --transport http beaver http://127.0.0.1:\(port)/mcp"
     }
 }
