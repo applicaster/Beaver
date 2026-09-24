@@ -130,6 +130,8 @@ public enum MCPHTTP {
 public actor MCPHTTPListener {
     private let handler: MCPHTTP.Handler
     private var listener: NWListener?
+    /// Paired with `listener`: always set and cleared together.
+    private var cancelState: CancelState?
     private let queue = DispatchQueue(label: "com.applicaster.LoggerNext.MCP")
 
     public init(handler: @escaping MCPHTTP.Handler) {
@@ -139,7 +141,14 @@ public actor MCPHTTPListener {
     /// Binds 127.0.0.1:`port` (0 = any free port) and returns the bound
     /// port once listening. Throws if the port is taken.
     public func start(port: UInt16) async throws -> UInt16 {
-        await stop()
+        // A single `await stop()` isn't enough: it can itself suspend
+        // waiting for cancellation to be confirmed, and while it's
+        // suspended a fully independent `start()` can claim (and even
+        // ready) a listener of its own. Loop so we only claim once we've
+        // observed nothing there immediately before claiming it — nothing
+        // can slip in between that last check and the claim below, since
+        // there's no suspension in between.
+        while listener != nil { await stop() }
         let parameters = NWParameters.tcp
         parameters.acceptLocalOnly = true
         // Off on purpose: with reuse, a second Beaver could bind the same
@@ -155,11 +164,14 @@ public actor MCPHTTPListener {
         listener.newConnectionHandler = { connection in
             Self.serve(connection, queue: queue, handler: handler)
         }
-        // Claim the listener before it starts: a `stop()` (or another
-        // overlapping `start()`) that runs while we're suspended below
-        // must see this one and act on it — otherwise it would keep
-        // listening with nothing left holding a reference to it.
+        // Claim the listener (and its cancellation tracker) before it
+        // starts: a `stop()` (or another overlapping `start()`) that runs
+        // while we're suspended below must see this one and act on it —
+        // otherwise it would keep listening with nothing left holding a
+        // reference to it.
+        let cancelState = CancelState()
         self.listener = listener
+        self.cancelState = cancelState
         let resumed = OSAllocatedUnfairLock(initialState: false)
         do {
             let bound: UInt16 = try await withCheckedThrowingContinuation { continuation in
@@ -173,6 +185,13 @@ public actor MCPHTTPListener {
                         listener.cancel()
                         outcome = .failure(error)
                     case .cancelled:
+                        // Recorded here, not just observed by whoever
+                        // happens to be waiting: this handler is the only
+                        // one ever attached to this listener, so it's the
+                        // one reliable place to notice cancellation,
+                        // however and whenever it happens (see
+                        // `CancelState`).
+                        cancelState.markCancelled()
                         outcome = .failure(CancellationError())
                     default:
                         outcome = nil
@@ -192,7 +211,10 @@ public actor MCPHTTPListener {
             }
             return bound
         } catch {
-            if self.listener === listener { self.listener = nil }
+            if self.listener === listener {
+                self.listener = nil
+                self.cancelState = nil
+            }
             listener.cancel()
             throw error
         }
@@ -204,26 +226,58 @@ public actor MCPHTTPListener {
     /// (including our own `start()`) can otherwise race the OS and see
     /// `EADDRINUSE` even though it *just* stopped the previous listener.
     public func stop() async {
-        guard let listener else { return }
+        guard let listener, let cancelState else { return }
         self.listener = nil
-        await Self.cancelAndWait(listener)
+        self.cancelState = nil
+        listener.cancel()
+        await cancelState.wait()
     }
 
-    /// Chains onto whatever handler is already on `listener` — typically
-    /// `start()`'s own, if this listener is still mid-bind — so that
-    /// handler still gets to resolve its own continuation instead of
-    /// being silently replaced and left hanging forever.
-    private nonisolated static func cancelAndWait(_ listener: NWListener) async {
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            let resumed = OSAllocatedUnfairLock(initialState: false)
-            let previous = listener.stateUpdateHandler
-            listener.stateUpdateHandler = { state in
-                previous?(state)
-                guard case .cancelled = state else { return }
-                guard resumed.withLock({ done in defer { done = true }; return !done }) else { return }
-                continuation.resume()
+    /// Tracks whether a listener has reached `.cancelled`, and wakes
+    /// whoever is waiting on that exactly once.
+    ///
+    /// A plain `stateUpdateHandler` attached at `stop()`-time isn't
+    /// enough: Network.framework does not redeliver `.cancelled` to a
+    /// handler installed after the listener has already finished
+    /// cancelling (confirmed against this framework — setting a fresh
+    /// handler post-cancellation and calling `cancel()` again delivers
+    /// nothing). That can happen well before `stop()` is ever called —
+    /// e.g. a `.ready` listener later spontaneously fails, its own
+    /// handler (`start()`'s, never replaced) cancels it, and
+    /// `self.listener` still references it until someone calls `stop()`.
+    /// This box is written only by that one, permanently-attached
+    /// handler, and read by any later `wait()`, so cancellation is
+    /// recorded exactly once no matter when it happens relative to who's
+    /// asking.
+    private final class CancelState: @unchecked Sendable {
+        private struct Box {
+            var cancelled = false
+            var waiter: CheckedContinuation<Void, Never>?
+        }
+        private let box = OSAllocatedUnfairLock(initialState: Box())
+
+        /// Called from the listener's own state handler on `.cancelled`.
+        func markCancelled() {
+            let waiter = box.withLock { box -> CheckedContinuation<Void, Never>? in
+                guard !box.cancelled else { return nil }
+                box.cancelled = true
+                defer { box.waiter = nil }
+                return box.waiter
             }
-            listener.cancel()
+            waiter?.resume()
+        }
+
+        /// Suspends until `markCancelled()` runs, or returns immediately
+        /// if it already has.
+        func wait() async {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                let alreadyCancelled = box.withLock { box -> Bool in
+                    if box.cancelled { return true }
+                    box.waiter = continuation
+                    return false
+                }
+                if alreadyCancelled { continuation.resume() }
+            }
         }
     }
 

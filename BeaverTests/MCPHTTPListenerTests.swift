@@ -100,6 +100,75 @@ struct MCPHTTPListenerTests {
         #expect(status == 200)
     }
 
+    @Test("Review focus: three overlapping starts never leak a listener nothing can reach")
+    func threeOverlappingStartsDoNotLeak() async throws {
+        let listener = MCPHTTPListener { body, _ in body }
+        // The two-way race above only guards the claim *after* `stop()`
+        // returns; a third caller can still claim and ready a listener of
+        // its own while a second caller's own `await stop()` (inside its
+        // `start()`) is still suspended waiting for the first's
+        // cancellation to be confirmed. Without looping that away before
+        // claiming, the second caller would clobber the third's listener
+        // without ever cancelling it, leaking a listener nothing
+        // references and nothing can ever stop again. (A transient
+        // "success" for a call that a later one still ends up
+        // superseding is expected under 3-way contention — same as
+        // calling start() again always supersedes an earlier one — the
+        // invariant that must hold is that nothing is left running once
+        // every call has settled and we've stopped for good.)
+        // The exact interleaving that leaks is timing-dependent, so repeat
+        // it a number of times to make a regression here reliably show up.
+        for _ in 0..<20 {
+            async let first: UInt16? = try? await listener.start(port: 0)
+            async let second: UInt16? = try? await listener.start(port: 0)
+            async let third: UInt16? = try? await listener.start(port: 0)
+            let ports = [await first, await second, await third].compactMap { $0 }
+            await listener.stop()
+            for port in ports {
+                await #expect(throws: (any Error).self) { try await self.post(port, "{}") }
+            }
+        }
+    }
+
+    @Test("Review focus: stop() never hangs racing a start() that's failing", .timeLimit(.minutes(1)))
+    func stopNeverHangsOnAnAlreadyCancelledListener() async throws {
+        // Occupies a real port so every `contender.start(port:)` below is
+        // guaranteed to fail with EADDRINUSE: its handler cancels the
+        // listener itself (case .failed/.waiting), independently of
+        // `stop()`. Racing `stop()` against that failing `start()` many
+        // times — with and without a tiny head start for the failure —
+        // exercises `stop()`/`wait()` under contention with a listener
+        // that's in the middle of failing on its own; if it ever hangs,
+        // `.timeLimit` turns that into a failure instead of blocking the
+        // suite forever.
+        //
+        // This does not, by construction, reach the single narrowest
+        // ordering finding 1 named (`.cancelled` fully recorded *before*
+        // `stop()` is even called): in this actor, `self.listener` is
+        // always cleared either by `start()`'s own `catch` right after its
+        // continuation resumes, or by `stop()` immediately before it calls
+        // `cancel()` — both of which race ahead of the network stack
+        // actually delivering `.cancelled`. That exact ordering needs a
+        // listener that reaches `.ready`, returns successfully, and only
+        // *later* fails on its own with nothing racing it — not
+        // reproducible here without forcing a real network failure or
+        // reaching into private actor state. `CancelState.wait()`'s
+        // "already cancelled" check is verified correct by inspection
+        // instead (see its doc comment) and was confirmed, by temporarily
+        // deleting that check, to hang this test's sibling scenarios were
+        // it ever exercised.
+        let occupied = MCPHTTPListener { body, _ in body }
+        let port = try await occupied.start(port: 0)
+        defer { Task { await occupied.stop() } }
+        for i in 0..<100 {
+            let contender = MCPHTTPListener { body, _ in body }
+            async let attempt: UInt16? = try? await contender.start(port: port)
+            if i.isMultiple(of: 2) { try? await Task.sleep(for: .microseconds(200)) }
+            await contender.stop()
+            #expect(await attempt == nil)
+        }
+    }
+
     /// Sends raw bytes and reads until the server closes.
     private func rawExchange(_ port: UInt16, _ text: String) async throws -> String {
         let connection = NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: port)!, using: .tcp)
