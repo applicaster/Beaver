@@ -68,6 +68,7 @@ private struct NetworkDetailContent: View {
     let onExpand: ((NetworkEntry) -> Void)?
 
     @Environment(ToastCenter.self) private var toasts
+    @Environment(\.colorScheme) private var scheme
     /// Never parse in `body`: rebuilt only when the selected entry changes.
     @State private var parsed: ParsedEntry?
     /// The full URL under the short one; collapsed again for every entry.
@@ -170,7 +171,7 @@ private struct NetworkDetailContent: View {
             StatusBadge(entry: entry)
             Text(duration)
                 .font(.caption.monospaced())
-                .foregroundStyle(NetworkView.durationColor(entry.durationMillis))
+                .foregroundStyle(NetworkView.durationColor(entry.durationMillis, scheme))
             Text(NetworkView.time(entry.startMillis))
                 .font(.caption.monospaced())
                 .foregroundStyle(.secondary)

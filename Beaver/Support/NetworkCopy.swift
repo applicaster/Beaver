@@ -71,11 +71,17 @@ extension NetworkEntry {
         return value < 9.95 ? String(format: "%.1f ", value) + unit : "\(Int(value.rounded())) \(unit)"
     }
 
-    /// The table's Size cell stands out from 100 KB, or when it shows the
-    /// `+` of a body the SDK cut and no reported size says how big it was.
-    public var isTableSizeWarning: Bool {
-        guard let bytes = responseBodySize ?? responseBytes else { return false }
-        return bytes >= 100_000 || (isResponseBodyTruncated && responseBodySize == nil)
+    /// Traffic-light tier shared by the Size and Duration columns:
+    /// grey is fine, yellow deserves a look, red is a problem.
+    public enum Tier: Sendable { case normal, attention, critical }
+
+    /// Grey under 100 KB, yellow up to 1 MB, red from 1 MB. A body the SDK
+    /// cut with no reported size is at least 100 KB, so it is yellow.
+    public var tableSizeTier: Tier {
+        guard let bytes = responseBodySize ?? responseBytes else { return .normal }
+        if bytes >= 1_000_000 { return .critical }
+        if bytes >= 100_000 || (isResponseBodyTruncated && responseBodySize == nil) { return .attention }
+        return .normal
     }
 
     /// Duration colour tier: quiet under 1 s, slow to 3 s, very slow after.

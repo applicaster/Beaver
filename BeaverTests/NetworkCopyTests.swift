@@ -426,14 +426,16 @@ struct NetworkCopyTests {
     }
 
     @Test
-    func sizeWarnsFromOneMegabyteOrOnAnUnreportedCut() {
-        #expect(!e(#"{"url":"https://a.io","responseBody":"ok"}"#).isTableSizeWarning)
-        #expect(!e(#"{"url":"https://a.io"}"#).isTableSizeWarning)
-        #expect(!e(#"{"url":"https://a.io","responseBodySize":99999,"responseBody":"x"}"#).isTableSizeWarning)
-        #expect(e(#"{"url":"https://a.io","responseBodySize":100000,"responseBody":"x"}"#).isTableSizeWarning)
-        #expect(e(#"{"url":"https://a.io","responseBody":"{\"a\":1... [TRUNCATED]"}"#).isTableSizeWarning)
-        // A reported size replaces the "+": only its own size counts.
-        #expect(!e(#"{"url":"https://a.io","responseBodySize":5000,"responseBody":"x... [TRUNCATED]"}"#).isTableSizeWarning)
+    func sizeTiersGreyYellowRed() {
+        // Grey under 100 KB, yellow from 100 KB (or a cut body of unknown size), red from 1 MB.
+        #expect(e(#"{"url":"https://a.io","responseBody":"ok"}"#).tableSizeTier == .normal)
+        #expect(e(#"{"url":"https://a.io"}"#).tableSizeTier == .normal)
+        #expect(e(#"{"url":"https://a.io","responseBodySize":99999,"responseBody":"x"}"#).tableSizeTier == .normal)
+        #expect(e(#"{"url":"https://a.io","responseBodySize":100000,"responseBody":"x"}"#).tableSizeTier == .attention)
+        #expect(e(#"{"url":"https://a.io","responseBodySize":999999,"responseBody":"x"}"#).tableSizeTier == .attention)
+        #expect(e(#"{"url":"https://a.io","responseBodySize":1000000,"responseBody":"x"}"#).tableSizeTier == .critical)
+        #expect(e(#"{"url":"https://a.io","responseBody":"{\"a\":1... [TRUNCATED]"}"#).tableSizeTier == .attention)
+        #expect(e(#"{"url":"https://a.io","responseBodySize":5000,"responseBody":"x... [TRUNCATED]"}"#).tableSizeTier == .normal)
     }
 
     @Test

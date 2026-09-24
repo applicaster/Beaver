@@ -310,11 +310,12 @@ struct NetworkView: View {
     /// The table's single row font.
     static let rowFont = Font.system(size: 12, design: .monospaced)
 
-    static func durationColor(_ ms: Int?) -> Color {
+    /// Same grey / yellow / red scale as Size: under 1 s, 1–3 s, 3 s and up.
+    static func durationColor(_ ms: Int?, _ scheme: ColorScheme) -> Color {
         switch NetworkEntry.DurationTier(millis: ms) {
-        case .normal: .secondary
-        case .slow: .orange
-        case .verySlow: .red
+        case .normal: Color.tier(.normal, scheme)
+        case .slow: Color.tier(.attention, scheme)
+        case .verySlow: Color.tier(.critical, scheme)
         }
     }
 
@@ -341,18 +342,19 @@ struct NetworkView: View {
 private struct DurationCell: View {
     let millis: Int?
     @Environment(\.backgroundProminence) private var prominence
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         Text(millis.map { "\($0) ms" } ?? "—")
             .font(NetworkView.rowFont)
-            .foregroundStyle(prominence == .increased ? .white : NetworkView.durationColor(millis))
+            .foregroundStyle(prominence == .increased ? .white : NetworkView.durationColor(millis, scheme))
             .frame(maxWidth: .infinity, alignment: .trailing)
     }
 }
 
 /// The reported size when the SDK sent one (exact, no "+"), else the
 /// captured bytes. Content-Length is never used here — compressed, it would
-/// read as a wrong body size. Orange from 1 MB or on a cut body.
+/// read as a wrong body size. Grey / yellow / red by `tableSizeTier`.
 private struct SizeCell: View {
     let entry: NetworkEntry
     @Environment(\.backgroundProminence) private var prominence
@@ -362,7 +364,7 @@ private struct SizeCell: View {
         let text = Text(NetworkView.size(entry))
             .font(NetworkView.rowFont)
             .foregroundStyle(prominence == .increased ? .white
-                             : entry.isTableSizeWarning ? Color.sizeWarning(scheme) : .secondary)
+                             : Color.tier(entry.tableSizeTier, scheme))
             .frame(maxWidth: .infinity, alignment: .trailing)
         if entry.isResponseBodyTruncated && entry.responseBodySize == nil {
             text.help(NetworkView.sizeHelp(entry))
@@ -392,9 +394,14 @@ private struct MethodText: View {
 }
 
 extension Color {
-    /// System yellow is unreadable as text on white; darken it in light mode.
-    static func sizeWarning(_ scheme: ColorScheme) -> Color {
-        scheme == .dark ? .yellow : Color.yellow.mix(with: .black, by: 0.4)
+    /// Grey / yellow / red for the Size and Duration columns. System yellow
+    /// is unreadable as text on white, so it is darkened in light mode.
+    static func tier(_ tier: NetworkEntry.Tier, _ scheme: ColorScheme) -> Color {
+        switch tier {
+        case .normal: .secondary
+        case .attention: scheme == .dark ? .yellow : Color.yellow.mix(with: .black, by: 0.4)
+        case .critical: .red
+        }
     }
 }
 
