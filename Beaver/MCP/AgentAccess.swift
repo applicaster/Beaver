@@ -154,8 +154,8 @@ public actor AgentAccess {
                 code: "curl -s -X POST \(url) -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}'"),
             SetupStep(
                 title: "First prompt",
-                note: "Paste into your agent. If it is unsure, it calls beaver_guide; everything it does shows up in the Agent panel.",
-                code: "Use the beaver MCP server. Call beaver_status, then tell me what the app logged in the last 10 minutes, any errors, and any failing network requests."),
+                note: "Paste into your agent. Plain words are enough — it finds its way around Beaver on its own, and everything it does shows up in the Agent panel.",
+                code: "Use beaver: look at the app's logs from the last 10 minutes and tell me about errors and failing network requests."),
         ]
     }
 

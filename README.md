@@ -111,9 +111,8 @@ only runs commands can use the Perplexity command instead.
 curl -s -X POST http://127.0.0.1:9081/mcp -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
 
-First prompt to try: *"Use the beaver MCP server. Call beaver_status, then tell
-me what the app logged in the last 10 minutes, any errors, and any failing
-network requests."*
+First prompt to try: *"Use beaver: look at the app's logs from the last 10 minutes
+and tell me about errors and failing network requests."*
 
 Port taken? `defaults write ~/Library/Preferences/com.applicaster.LoggerNext mcpPort -int 9082`,
 then toggle Agent Access off and on. Tools, recipes and the tester checklist:

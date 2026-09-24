@@ -59,7 +59,7 @@ struct AgentAccessTests {
         #expect(!text.contains("9081"))
         #expect(text.contains("Cursor"))
         #expect(text.contains("curl"))
-        #expect(text.contains("beaver_status"))
+        #expect(text.contains("Use beaver:"))
     }
 
     @Test("Setup steps: one card per client, each with something to copy")

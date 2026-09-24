@@ -37,9 +37,9 @@ or a release):
    curl -s -X POST http://127.0.0.1:9081/mcp -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
    ```
    Expect JSON listing the tools below.
-4. Connect Claude Code (Setup, step 2) and ask: "What is Beaver connected to?
-   Show me the last errors." It should call `beaver_status`, then
-   `logs_facets` / `logs_query`.
+4. Connect Claude Code (Setup, step 2) and ask in plain words: "use beaver:
+   what is connected, and show me the last errors". The Agent panel lists
+   the calls it made.
 5. Open the **Agent** toolbar button: every call is listed; the badge counted
    them while the panel was closed.
 6. Turn **Agent Access (MCP)** off in the app menu: the `curl` above now fails
