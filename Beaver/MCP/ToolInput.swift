@@ -84,6 +84,16 @@ public enum ToolInput {
         return scored.sorted { $0.1 < $1.1 || ($0.1 == $1.1 && $0.0 < $1.0) }.prefix(count).map(\.0)
     }
 
+    /// Absolute or `~` paths only: Beaver runs elsewhere and doesn't know
+    /// the agent's working directory.
+    public static func fileURL(_ path: String) throws -> URL {
+        let expanded = (path.trimmingCharacters(in: .whitespaces) as NSString).expandingTildeInPath
+        guard expanded.hasPrefix("/") else {
+            throw ToolError("path \"\(path)\" must be absolute or start with ~ — Beaver doesn't know your working directory. Example: path: \"~/Downloads/session.json\".")
+        }
+        return URL(fileURLWithPath: expanded).standardizedFileURL
+    }
+
     static func distance(_ a: String, _ b: String) -> Int {
         let a = Array(a), b = Array(b)
         if a.isEmpty { return b.count }

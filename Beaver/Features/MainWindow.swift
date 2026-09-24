@@ -513,35 +513,12 @@ struct MainWindow: View {
             let didStart = url.startAccessingSecurityScopedResource()
             defer { if didStart { url.stopAccessingSecurityScopedResource() } }
 
-            guard let data = try? Data(contentsOf: url) else { return }
-            var imported = (try? EventJSON.decodeExport(data)) ?? .init()
-            // Not a Beaver export: maybe a HAR (Beaver's, Chrome's, Charles'…).
-            if imported.events.isEmpty && imported.storage.isEmpty && imported.network.isEmpty {
-                imported.network = HARExport.decode(data)
-            }
-            // A storage-only or network-only file is still worth opening.
-            guard !imported.events.isEmpty || !imported.storage.isEmpty
-                    || !imported.network.isEmpty else { return }
-
-            // Create a new "imported" session per D7 — don't destroy the
-            // current live session.
-            guard let session = try? await env.store.createSession(
-                source: .imported,
-                clientLabel: url.deletingPathExtension().lastPathComponent
-            ) else { return }
-            try? await env.store.appendBulk(imported.events, to: session.id)
-            for (namespace, json) in imported.storage {
-                try? await env.store.recordStorageSnapshot(
-                    sessionId: session.id,
-                    namespace: namespace,
-                    dataJSON: json
-                )
-            }
-            for capture in imported.network {
-                try? await env.store.recordNetworkEntry(capture, sessionId: session.id)
-            }
+            guard let data = try? Data(contentsOf: url),
+                  let imported = try? await SessionImport.run(
+                      data, label: url.deletingPathExtension().lastPathComponent, store: env.store)
+            else { return }
             // Switch the LogFeed to the newly imported session.
-            env.viewingSessionId = session.id
+            env.viewingSessionId = imported.session.id
         }
     }
 }

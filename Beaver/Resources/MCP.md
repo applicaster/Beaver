@@ -53,6 +53,9 @@ or a release):
 |---|---|
 | `beaver_status` | Device, live and viewed session, latest event id, where the device connects |
 | `sessions_list` | Stored sessions, newest first, with app, device and counts |
+| `sessions_import` | Open a Beaver / zapp-support JSON or a HAR file as a new session |
+| `sessions_export` | Write a session (or a filtered part) as JSON, or its requests as HAR |
+| `sessions_delete` | Delete one session, or all |
 | `logs_facets` | Counts per level, subsystem, category under a filter and range |
 | `logs_query` | Log lines by filter, id range or time; cursor paging |
 | `logs_get` | Full events with data and context payloads (256 KB cap) |
@@ -150,3 +153,15 @@ wherever ids do. Every result ends with `Next:` suggestions.
 1. `bookmarks_list()` — events and requests the user bookmarked.
 2. `filters_list()` — their saved filters; reuse one's conditions in
    `logs_query`.
+
+### files — a customer sent a log file
+
+1. `sessions_import(path: "~/Downloads/customer.json")` — a Beaver or
+   zapp-support export, or a HAR. The result has the new `sessionId`; the
+   user's window doesn't move.
+2. `logs_facets(sessionId: <id>)`, then investigate as in `investigate`.
+3. `sessions_export(sessionId: <id>, path: "~/Desktop/errors-only.json", filter: {minLevel: "error"})`
+   — the same file format, both ways. `format: "har"` writes the requests.
+   An existing file is never replaced unless you pass `overwrite: true`.
+4. `sessions_delete(sessionId: <id>)` when the user asks to remove it;
+   `sessions_delete(all: true)` removes every session.
