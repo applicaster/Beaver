@@ -65,19 +65,47 @@ storage and the app's commands. It listens on `http://127.0.0.1:9081/mcp`
 app menu. Everything the agent does is listed behind the **Agent** toolbar
 button, which also has **Connect agent** with these steps for your port.
 
-1. **Claude Code** — run once in Terminal; it works in every project:
-   ```bash
-   claude mcp add --scope user --transport http beaver http://127.0.0.1:9081/mcp
-   ```
-   Remove later with `claude mcp remove beaver`.
-2. **Cursor** — add to `~/.cursor/mcp.json`:
-   ```json
-   { "mcpServers": { "beaver": { "url": "http://127.0.0.1:9081/mcp" } } }
-   ```
-3. **Any other MCP client** — add a Streamable HTTP server at
-   `http://127.0.0.1:9081/mcp`.
+Set a client up once; after that just ask it to *use beaver*.
 
-Check it answers:
+### Claude Code
+
+Run once in Terminal — it works in every project:
+
+```bash
+claude mcp add --scope user --transport http beaver http://127.0.0.1:9081/mcp
+```
+
+Remove later with `claude mcp remove beaver`.
+
+### Cursor
+
+Add to `~/.cursor/mcp.json` (merge into `mcpServers` if the file already
+exists), then enable **beaver** in Cursor Settings → MCP:
+
+```json
+{
+  "mcpServers": {
+    "beaver": { "url": "http://127.0.0.1:9081/mcp" }
+  }
+}
+```
+
+### Perplexity (Mac app)
+
+Settings → Connectors → install the **PerplexityXPC** helper → **Add
+Connector** → **Simple**. Name it `beaver` and use this command (needs
+Node.js; it bridges Perplexity's local connectors to Beaver):
+
+```bash
+npx -y mcp-remote http://127.0.0.1:9081/mcp
+```
+
+### Other MCP clients
+
+Add a Streamable HTTP server at `http://127.0.0.1:9081/mcp`. A client that
+only runs commands can use the Perplexity command instead.
+
+### Check it answers
 
 ```bash
 curl -s -X POST http://127.0.0.1:9081/mcp -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'

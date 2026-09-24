@@ -23,7 +23,7 @@ When releasing:
   Access (MCP)** turns it off. The new **Agent** toolbar button lists
   everything an agent did, with a badge for what you haven't seen, and
   **Connect agent** shows how to hook up Claude Code, Cursor or any other
-  MCP client (also in the README).
+  MCP client — Claude Code, Cursor, Perplexity (also in the README).
 - **Log feed: the filter survives reconnects and relaunches**, and
   changing it keeps the selected row when it still matches.
   Right-click → **Show in Context** clears the filter and lands on the

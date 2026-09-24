@@ -112,36 +112,64 @@ public actor AgentAccess {
         "claude mcp add --scope user --transport http beaver http://127.0.0.1:\(port)/mcp"
     }
 
-    /// How to hand Beaver to an agent, shown behind the Agent panel's
-    /// "Connect agent" button. README.md → "Agent Access (MCP)" carries the
-    /// same steps for the default port.
-    public static func setupInstructions(port: UInt16) -> String {
+    /// One card on the Agent panel's "Connect agent" screen: a client (or a
+    /// check), a short note, and the one thing to copy.
+    public struct SetupStep: Sendable, Equatable {
+        public let title: String
+        public let note: String
+        public let code: String
+    }
+
+    /// How to hand Beaver to an agent, for the port Beaver is on. The
+    /// "Connect agent" screen shows these as cards; README.md → "Agent
+    /// Access (MCP)" carries the same steps for the default port.
+    public static func setupSteps(port: UInt16) -> [SetupStep] {
         let url = "http://127.0.0.1:\(port)/mcp"
-        return """
-        Connect an AI agent to Beaver
+        return [
+            SetupStep(
+                title: "Claude Code",
+                note: "Run once in Terminal — it works in every project. Then just ask, e.g. “use beaver: what went wrong with login?”. Remove later with: claude mcp remove beaver",
+                code: setupCommand(port: port)),
+            SetupStep(
+                title: "Cursor",
+                note: "Add to ~/.cursor/mcp.json (merge into \"mcpServers\" if the file already exists), then enable beaver in Cursor Settings → MCP.",
+                code: """
+                    {
+                      "mcpServers": {
+                        "beaver": { "url": "\(url)" }
+                      }
+                    }
+                    """),
+            SetupStep(
+                title: "Perplexity (Mac app)",
+                note: "Settings → Connectors → install the PerplexityXPC helper → Add Connector → Simple. Name it beaver and paste this command. Needs Node.js; it bridges Perplexity's local connectors to Beaver.",
+                code: "npx -y mcp-remote \(url)"),
+            SetupStep(
+                title: "Other MCP clients",
+                note: "Add a Streamable HTTP server at this address. A client that only runs commands can use the Perplexity command instead.",
+                code: url),
+            SetupStep(
+                title: "Check it answers",
+                note: "Run in Terminal while Beaver is open. You should get a JSON list of Beaver's tools.",
+                code: "curl -s -X POST \(url) -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}'"),
+            SetupStep(
+                title: "First prompt",
+                note: "Paste into your agent. If it is unsure, it calls beaver_guide; everything it does shows up in the Agent panel.",
+                code: "Use the beaver MCP server. Call beaver_status, then tell me what the app logged in the last 10 minutes, any errors, and any failing network requests."),
+        ]
+    }
 
-        Beaver runs an MCP server on this Mac at \(url) (loopback only). \
-        Keep Beaver open with Agent Access (MCP) turned on in the app menu.
+    /// The same steps as one plain text, for "Copy all".
+    public static func setupInstructions(port: UInt16) -> String {
+        let intro = """
+            Connect an AI agent to Beaver
 
-        1. Claude Code — run once in Terminal; it works in every project:
-           \(setupCommand(port: port))
-           Remove later with: claude mcp remove beaver
-
-        2. Cursor — add to ~/.cursor/mcp.json:
-           { "mcpServers": { "beaver": { "url": "\(url)" } } }
-
-        3. Any other MCP client — add a Streamable HTTP server at:
-           \(url)
-
-        Check it answers:
-           curl -s -X POST \(url) -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
-
-        First prompt to try:
-           Use the beaver MCP server. Call beaver_status, then tell me what the app \
-        logged in the last 10 minutes, any errors, and any failing network requests.
-
-        The agent reads logs, network requests, storage and the app's commands; \
-        if unsure it calls beaver_guide. Everything it does shows up in this panel.
-        """
+            Beaver runs an MCP server on this Mac at http://127.0.0.1:\(port)/mcp (loopback only). \
+            Keep Beaver open with Agent Access (MCP) turned on in the app menu.
+            """
+        let steps = setupSteps(port: port).map { step in
+            "\(step.title)\n\(step.note)\n\n\(step.code)"
+        }
+        return ([intro] + steps).joined(separator: "\n\n")
     }
 }

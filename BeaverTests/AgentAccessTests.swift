@@ -62,6 +62,19 @@ struct AgentAccessTests {
         #expect(text.contains("beaver_status"))
     }
 
+    @Test("Setup steps: one card per client, each with something to copy")
+    func setupSteps() {
+        let steps = AgentAccess.setupSteps(port: 9091)
+        #expect(steps.map(\.title) == ["Claude Code", "Cursor", "Perplexity (Mac app)",
+                                      "Other MCP clients", "Check it answers", "First prompt"])
+        #expect(steps.allSatisfy { !$0.code.isEmpty && !$0.note.isEmpty })
+        #expect(steps[0].code == AgentAccess.setupCommand(port: 9091))
+        #expect(steps[2].code == "npx -y mcp-remote http://127.0.0.1:9091/mcp")
+        // The copyable text and the cards come from the same steps.
+        let text = AgentAccess.setupInstructions(port: 9091)
+        #expect(steps.allSatisfy { text.contains($0.code) })
+    }
+
     @Test("Review focus: overlapping starts, then stop, leave nothing serving")
     func overlappingStartsThenStop() async throws {
         // Mirrors MCPHTTPListenerTests.overlappingStarts, one level up: two

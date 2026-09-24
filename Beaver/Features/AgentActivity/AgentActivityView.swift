@@ -89,11 +89,7 @@ struct AgentActivityView: View {
             }
             Text("Connect an agent").font(.headline)
             Spacer()
-            Button("Copy command") {
-                copy(AgentAccess.setupCommand(port: port))
-                toasts.success("Copied the Claude Code command")
-            }
-            Button("Copy instructions") {
+            Button("Copy all") {
                 copy(AgentAccess.setupInstructions(port: port))
                 toasts.success("Copied the setup instructions")
             }
@@ -106,11 +102,17 @@ struct AgentActivityView: View {
                     Label("Agent Access is off. Turn it on in the app menu → Agent Access (MCP).",
                           systemImage: "exclamationmark.triangle.fill")
                         .foregroundStyle(.orange)
+                } else {
+                    Text("Beaver's MCP server is at http://127.0.0.1:\(port)/mcp. Set a client up once; after that just ask it to use beaver.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
                 }
-                Text(AgentAccess.setupInstructions(port: port))
-                    .font(.system(.callout, design: .monospaced))
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
+                ForEach(AgentAccess.setupSteps(port: port), id: \.title) { step in
+                    SetupCard(step: step) {
+                        copy(step.code)
+                        toasts.success("Copied: \(step.title)")
+                    }
+                }
             }
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -120,6 +122,36 @@ struct AgentActivityView: View {
     private func copy(_ text: String) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
+    }
+}
+
+/// One client (or check) on the Connect agent screen.
+private struct SetupCard: View {
+    let step: AgentAccess.SetupStep
+    let onCopy: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(step.title).font(.title3.weight(.semibold))
+                Spacer()
+                Button("Copy", action: onCopy)
+            }
+            Text(step.note)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(step.code)
+                .font(.system(.callout, design: .monospaced))
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(10)
+                .background(RoundedRectangle(cornerRadius: 6).fill(.quaternary))
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 10).fill(.background.secondary))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.separator))
     }
 }
 
