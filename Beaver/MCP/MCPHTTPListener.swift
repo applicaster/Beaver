@@ -125,3 +125,109 @@ public enum MCPHTTP {
         return ["localhost", "127.0.0.1", "::1", "[::1]"].contains(host)
     }
 }
+
+/// Loopback HTTP listener for the MCP endpoint (design M2, M3).
+public actor MCPHTTPListener {
+    private let handler: MCPHTTP.Handler
+    private var listener: NWListener?
+    private let queue = DispatchQueue(label: "com.applicaster.LoggerNext.MCP")
+
+    public init(handler: @escaping MCPHTTP.Handler) {
+        self.handler = handler
+    }
+
+    /// Binds 127.0.0.1:`port` (0 = any free port) and returns the bound
+    /// port once listening. Throws if the port is taken.
+    public func start(port: UInt16) async throws -> UInt16 {
+        stop()
+        let parameters = NWParameters.tcp
+        parameters.acceptLocalOnly = true
+        // Off on purpose: with reuse, a second Beaver could bind the same
+        // port and the two would split the requests.
+        parameters.allowLocalEndpointReuse = false
+        parameters.requiredLocalEndpoint = .hostPort(
+            host: .ipv4(.loopback),
+            port: NWEndpoint.Port(rawValue: port) ?? .any
+        )
+        let listener = try NWListener(using: parameters)
+        let handler = self.handler
+        let queue = self.queue
+        listener.newConnectionHandler = { connection in
+            Self.serve(connection, queue: queue, handler: handler)
+        }
+        let resumed = OSAllocatedUnfairLock(initialState: false)
+        let bound: UInt16 = try await withCheckedThrowingContinuation { continuation in
+            listener.stateUpdateHandler = { state in
+                let outcome: Result<UInt16, Error>?
+                switch state {
+                case .ready:
+                    outcome = .success(listener.port?.rawValue ?? port)
+                case .failed(let error), .waiting(let error):
+                    // A taken port can show up as .waiting(EADDRINUSE) rather than .failed.
+                    listener.cancel()
+                    outcome = .failure(error)
+                case .cancelled:
+                    outcome = .failure(CancellationError())
+                default:
+                    outcome = nil
+                }
+                // Resume exactly once: the first of ready / failed / waiting / cancelled.
+                guard let outcome, resumed.withLock({ done in defer { done = true }; return !done }) else { return }
+                continuation.resume(with: outcome)
+            }
+            listener.start(queue: queue)
+        }
+        self.listener = listener
+        return bound
+    }
+
+    public func stop() {
+        listener?.cancel()
+        listener = nil
+    }
+
+    // MARK: - One connection = one request
+
+    private static let readTimeout: DispatchTimeInterval = .seconds(10)
+
+    private nonisolated static func serve(_ connection: NWConnection, queue: DispatchQueue,
+                                          handler: @escaping MCPHTTP.Handler) {
+        let complete = OSAllocatedUnfairLock(initialState: false)
+        connection.start(queue: queue)
+        receive(connection, buffer: Data(), handler: handler, complete: complete)
+        // Drop a client that never finishes its request. Once it has, the
+        // handler may take as long as it needs (logs_wait: up to 60 s).
+        queue.asyncAfter(deadline: .now() + readTimeout) {
+            if !complete.withLock({ $0 }) { connection.cancel() }
+        }
+    }
+
+    private nonisolated static func receive(_ connection: NWConnection, buffer: Data,
+                                            handler: @escaping MCPHTTP.Handler,
+                                            complete: OSAllocatedUnfairLock<Bool>) {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { data, _, isComplete, error in
+            var buffer = buffer
+            if let data { buffer.append(data) }
+            switch HTTPRequest.parse(buffer) {
+            case .incomplete:
+                if isComplete || error != nil { connection.cancel(); return }
+                receive(connection, buffer: buffer, handler: handler, complete: complete)
+            case .invalid(let status, let reason):
+                complete.withLock { $0 = true }
+                send(.text(status, reason), on: connection)
+            case .complete(let request):
+                complete.withLock { $0 = true }
+                Task {
+                    let response = await MCPHTTP.route(request, handler: handler)
+                    send(response, on: connection)
+                }
+            }
+        }
+    }
+
+    private nonisolated static func send(_ response: HTTPResponse, on connection: NWConnection) {
+        connection.send(content: response.serialized(), completion: .contentProcessed { _ in
+            connection.cancel()
+        })
+    }
+}
