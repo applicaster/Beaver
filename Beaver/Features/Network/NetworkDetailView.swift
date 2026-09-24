@@ -333,9 +333,11 @@ private struct NetworkDetailContent: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    /// Parsed shows a key/value grid; the tree stays for the section copy.
     private func headers(_ h: [String: String], tree: StorageRecord?, name: String) -> some View {
-        Subsection(title: "Headers (\(h.count))", name: name, tree: tree,
-                   raw: h.keys.sorted().map { "\($0): \(h[$0]!)" }.joined(separator: "\n"))
+        let rows = NetworkEntry.sortedHeaders(h)
+        return Subsection(title: "Headers (\(h.count))", name: name, tree: tree,
+                          raw: rows.map { "\($0.name): \($0.value)" }.joined(separator: "\n"), headers: rows)
     }
 
     @ViewBuilder
@@ -374,6 +376,8 @@ private struct Subsection: View {
     let tree: StorageRecord?
     let raw: String
     var truncated = false
+    /// Headers show as a key/value grid in Parsed mode instead of the tree.
+    var headers: [(name: String, value: String)]?
 
     @Environment(ToastCenter.self) private var toasts
     @State private var showRaw = false
@@ -398,7 +402,9 @@ private struct Subsection: View {
                     ParsedRawToggle(showRaw: $showRaw)
                 }
             }
-            if let tree, showsTree {
+            if let headers, showsTree {
+                HeaderGrid(rows: headers)
+            } else if let tree, showsTree {
                 JSONTreeView(record: tree, expandsRoot: true)
                 if truncated {
                     Text("Partial — the SDK cut this body at 100 000 characters")
@@ -419,6 +425,47 @@ private struct Subsection: View {
     /// Copies what is on screen: the tree as JSON, or the raw text.
     private func copy() {
         toasts.copy(tree.flatMap { showsTree ? StorageRecord.serializeJSON($0) : nil } ?? raw, "Copied \(name)")
+    }
+}
+
+/// Headers as `name  value` rows, sorted; each row's copy icon shows on
+/// hover and copies its value.
+private struct HeaderGrid: View {
+    let rows: [(name: String, value: String)]
+
+    @Environment(ToastCenter.self) private var toasts
+    /// Set on entering a row's cells and cleared only on leaving the grid,
+    /// so the icon doesn't blink while the pointer crosses the gaps.
+    @State private var hovered: String?
+
+    var body: some View {
+        Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 4) {
+            ForEach(rows, id: \.name) { row in
+                GridRow {
+                    Text(row.name)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .frame(maxWidth: 170, alignment: .leading)
+                        .onHover { if $0 { hovered = row.name } }
+                    Text(row.value)
+                        .font(.system(size: 11, design: .monospaced))
+                        .lineLimit(3)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .onHover { if $0 { hovered = row.name } }
+                    Button { toasts.copy(row.value, "Copied \(row.name)") } label: {
+                        Image(systemName: "doc.on.doc").font(.caption).foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Copy \(row.name)")
+                    .opacity(hovered == row.name ? 1 : 0)
+                    .allowsHitTesting(hovered == row.name)
+                    .onHover { if $0 { hovered = row.name } }
+                }
+            }
+        }
+        .onHover { if !$0 { hovered = nil } }
     }
 }
 
