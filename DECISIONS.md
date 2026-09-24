@@ -886,6 +886,11 @@ value rather than auto-bumping past it.
 - Branch protection on `main`, if ever enabled, must allow the
   `GITHUB_TOKEN` to push. Otherwise CI's bump commit + appcast push
   will fail.
+- **Prefixes (2026-09-24):** fixes use `fix:` (patch), features `feat:`
+  (minor) — also a step of a larger feature. `release:` (major) only
+  when the user asks for it; an agent may recommend one for something
+  big. Agent Access steps 2 and 3 were merged as `release:` and became
+  3.0.0 and 4.0.0 instead of 2.1.0 and 2.2.0.
 
 ---
 
