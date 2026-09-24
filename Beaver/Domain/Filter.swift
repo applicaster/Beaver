@@ -1,6 +1,6 @@
 import Foundation
 
-public struct Filter: Equatable, Hashable, Sendable {
+public struct Filter: Equatable, Hashable, Sendable, Codable {
 
     /// Which of the two click-to-filter columns a constraint applies to.
     public enum Facet: Hashable, Sendable {
@@ -93,6 +93,25 @@ public struct Filter: Equatable, Hashable, Sendable {
             && categories.isEmpty
             && excludedCategories.isEmpty
             && hiddenThroughEventId == nil
+    }
+
+    /// The filter as a new session inherits it: everything but Clear's
+    /// watermark, which is an event id from this session.
+    public var carriedOver: Filter {
+        var copy = self
+        copy.hiddenThroughEventId = nil
+        return copy
+    }
+
+    /// Stored form for remembering the filter across launches.
+    public var stored: Data {
+        (try? JSONEncoder().encode(self)) ?? Data()
+    }
+
+    /// `nil` for data that isn't a stored filter — including one written
+    /// before a field was added, which then starts from scratch.
+    public static func restore(from data: Data) -> Filter? {
+        try? JSONDecoder().decode(Filter.self, from: data)
     }
 
     /// Whether `pattern` compiles the way the store will run it. The

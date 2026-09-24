@@ -15,6 +15,19 @@ When releasing:
 ## [Unreleased]
 
 ### Added
+- **Log feed: the filter survives reconnects and relaunches**, and
+  changing it keeps the selected row when it still matches.
+  Right-click → **Show in Context** clears the filter and lands on the
+  row.
+- **Log feed: multi-select and ⌘C.** Selected rows copy as
+  `HH:mm:ss.SSS [LEVEL] subsystem/category: message` lines. The detail
+  pane has **Copy data** / **Copy context**.
+- **Log feed keyboard:** ⌘F focuses Search & highlight, ⌘G / ⇧⌘G step
+  through matches, `e` / `⇧E` jump to the next / previous error.
+- **Log feed: Time column shows its time zone**, plus an optional
+  **Δ** column (right-click the header): the time since the previous
+  row, or since the selected row when one is selected.
+- **Log feed: "⏎ N lines" badge** on rows whose message is cut off.
 - **Log feed: search event data.** The `{}` chip on Filter / Exclude
   also matches each event's JSON payload. It's off by default, since
   it's slower on big sessions, and saved filters keep it.
@@ -65,6 +78,12 @@ When releasing:
   and edit / delete target the key itself instead of `undefined`.
 
 ### Changed
+- **Log feed follows the tail by being at the bottom (D3).** Scroll up
+  and it stops; a floating **N new ↓** pill counts what arrived and
+  takes you back. The Auto-scroll toggle is gone.
+- **Log detail pane:** the message is a monospaced, scrollable block,
+  and very large payloads show 200 entries per level with
+  **Show more**.
 - **Storages tab restructured (D30 + D31).** Session / Local /
   Keychain are back as **tabs at the top** (one layer visible at a
   time). Inside each tab, every **namespace** (`applicaster.v2`,

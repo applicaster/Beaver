@@ -110,7 +110,11 @@ struct MainWindow: View {
                 return
             }
             if logFeedVM?.sessionId != sid {
-                logFeedVM = LogFeedViewModel(store: env.store, sessionId: sid)
+                // A reconnect or relaunch is a new session; the filter
+                // the user set up shouldn't go with the old one. Clear's
+                // watermark does — it's an id from that session.
+                let filter = logFeedVM?.filter.carriedOver ?? LogFeedViewModel.rememberedFilter()
+                logFeedVM = LogFeedViewModel(store: env.store, sessionId: sid, filter: filter)
             }
             if storagesVM?.sessionId != sid {
                 let fresh = StoragesViewModel(store: env.store, sessionId: sid)

@@ -18,6 +18,7 @@ final class LogFeedViewModel {
     var filter: Filter = .none {
         didSet {
             guard oldValue != filter else { return }
+            Self.remember(filter)
             // SwiftUI Table on macOS Tahoe occasionally panics
             // (`NSRangeException: range field {N, -M}`) inside
             // NSTableView's row-height diff when the underlying
@@ -26,10 +27,14 @@ final class LogFeedViewModel {
             // empty intermediate state turns one buggy "M → N diff"
             // into two safe "M → 0 deletes" + "0 → N inserts" passes.
             //
-            // Also clear stale references that the reload would
-            // invalidate (selection / match cursor).
-            selectedEventId = nil
+            // The selection is put back once the reload lands, where
+            // its rows still match; the match cursor starts over.
+            selectionToRestore = selectedEventIds
             currentMatchIndex = nil
+            // New rows, new count: an "N new" from the old filter means
+            // nothing here. Unpaused, the new rows open at the tail (or
+            // at the restored selection, which stops following again).
+            if !isPaused { follow.resume() }
             feed.replace(with: [])
             watermark = nil
             requestReload()
@@ -55,20 +60,28 @@ final class LogFeedViewModel {
     /// True when the table content is frozen — new events still
     /// arrive and persist in the store, but they don't enter `page`
     /// so the user can scroll / select / read without interference.
-    /// Resuming clears the unseen counter and fetches what arrived.
+    /// Resuming follows the tail again and fetches what arrived.
     var isPaused: Bool = false {
         didSet {
-            if oldValue && !isPaused {
-                // Resuming — catch up to whatever arrived while paused.
-                unseenCount = 0
+            guard oldValue != isPaused else { return }
+            if isPaused {
+                follow.stop()
+            } else {
+                follow.resume()
                 requestTail()
             }
         }
     }
 
-    /// Number of new events that arrived while paused. Drives the
-    /// "↓ N new events" pill next to the Pause/Resume button.
-    private(set) var unseenCount: Int = 0
+    /// Follow-the-tail state (D3): at the bottom means following; away
+    /// from it, arrivals are counted for the "N new ↓" pill.
+    private(set) var follow = TailFollow()
+
+    /// Events that arrived while not following or paused.
+    var unseenCount: Int { follow.unseen }
+
+    /// Bumped to make the table scroll to the newest row.
+    private(set) var latestScrollToken = UUID()
 
     /// When on, consecutive events with identical (subsystem, category,
     /// message, level) collapse to one visible row showing ×N. Display
@@ -80,22 +93,6 @@ final class LogFeedViewModel {
         get { feed.collapse }
         set { feed.collapse = newValue }
     }
-
-    /// Tail-following toggle. When ON, every new event scrolls the
-    /// table to the bottom; when OFF, new events still appear in
-    /// the page but the user's current scroll position is left
-    /// alone.
-    ///
-    /// Defaults to OFF: during high-volume streaming (e.g., video
-    /// playback that fires ~4 events/sec) the constant pull-to-bottom
-    /// prevents the user from reading older events. Opt-in is the
-    /// right default for a debugger.
-    ///
-    /// Auto-disabled by `ScrollWatcher` when the user manually
-    /// scrolls — so flipping it ON for live-tailing doesn't trap
-    /// them; the moment they scroll away, the toggle turns itself
-    /// off and the table stops chasing the tail.
-    var autoScrollEnabled: Bool = false
 
     /// Cached set of bookmarked event IDs in this session; refreshed
     /// via the store's `.bookmarksChanged` change stream.
@@ -153,13 +150,27 @@ final class LogFeedViewModel {
 
     var matchCount: Int { matchIds.count }
 
-    /// Selected row id (for the detail pane).
-    var selectedEventId: EventRecord.ID? {
+    /// Selected row ids. Several can be selected for copying.
+    var selectedEventIds: Set<EventRecord.ID> = [] {
         didSet {
-            guard oldValue != selectedEventId else { return }
+            guard oldValue != selectedEventIds else { return }
             loadSelectedEvent()
         }
     }
+
+    /// The selected row when exactly one is — what the detail pane,
+    /// `j` / `k` and the Δ column work from.
+    var selectedEventId: EventRecord.ID? {
+        get { selectedEventIds.count == 1 ? selectedEventIds.first : nil }
+        set { selectedEventIds = newValue.map { [$0] } ?? [] }
+    }
+
+    /// The selection as it was when the filter changed; re-applied, to
+    /// the rows that still match, when the new snapshot lands.
+    private var selectionToRestore: Set<EventRecord.ID>?
+
+    /// Bumped by ⌘F; the Search & highlight field takes focus.
+    private(set) var searchFocusRequest = 0
 
     /// The selected row *with* its JSON payloads. Rows in `page` are
     /// fetched without payloads (see `reload`), so the detail pane reads
@@ -243,9 +254,12 @@ final class LogFeedViewModel {
 
     // MARK: - Init
 
-    init(store: LogStore, sessionId: Int64) {
+    /// - Parameter filter: what to start with — the previous session's
+    ///   filter, so a reconnect or relaunch doesn't drop it.
+    init(store: LogStore, sessionId: Int64, filter: Filter = .none) {
         self.store = store
         self.sessionId = sessionId
+        self.filter = filter
         requestReload()
         Task { await self.subscribeToChanges() }
         Task { await self.reloadBookmarks() }
@@ -345,6 +359,11 @@ final class LogFeedViewModel {
                 self.feed.replace(with: snapshot.events)
                 self.loadedFilter = snapshotFilter
                 self.watermark = snapshot.watermark
+                self.restoreSelection()
+                // The table went through empty, which drops its scroll
+                // offset; the last row may be unchanged, so its onChange
+                // won't re-anchor. Do it explicitly.
+                if self.follow.isFollowing { self.latestScrollToken = UUID() }
                 // Appends announced while no watermark was set were
                 // skipped; fetch whatever landed after the read.
                 self.requestTail()
@@ -407,7 +426,7 @@ final class LogFeedViewModel {
                 case .appended(let sid, let count) where sid == self.sessionId:
                     await self.handleAppended(count: count)
                 case .cleared(let sid) where sid == self.sessionId:
-                    self.unseenCount = 0
+                    self.follow.resume()
                     self.requestReload()
                     if self.facetPopoverOpen > 0 { await self.reloadFacetValues() }
                 case .bookmarksChanged(let sid) where sid == self.sessionId:
@@ -429,7 +448,7 @@ final class LogFeedViewModel {
             // Frozen view — don't pull the new events into `page`.
             // Just track the gap so the UI shows the user how much
             // is waiting for them when they resume.
-            unseenCount += count
+            follow.appended(count)
             return
         }
         requestTail()
@@ -472,6 +491,7 @@ final class LogFeedViewModel {
                 return
             }
             feed.merge(tail.events)
+            follow.appended(tail.events.count)
         } catch {
             print("LogFeedViewModel.fetchTail: \(error)")
         }
@@ -481,7 +501,91 @@ final class LogFeedViewModel {
     /// kept as a named action so the UI (pill click) reads cleanly.
     func resume() {
         isPaused = false
-        // didSet on isPaused handles unseenCount reset + reload.
+        // didSet on isPaused handles following + catching up.
+    }
+
+    /// The "N new ↓" pill: unpause, follow, and go to the newest row.
+    func jumpToLatest() {
+        isPaused = false
+        follow.resume()
+        latestScrollToken = UUID()
+    }
+
+    /// Reported by the table on user scrolls. Reaching the bottom
+    /// resumes following; leaving it stops. An explicit pause holds.
+    func userScrolled(atBottom: Bool) {
+        guard !isPaused, atBottom != follow.isFollowing else { return }
+        follow.scrolled(atBottom: atBottom)
+    }
+
+    // MARK: - Selection across reloads
+
+    /// Put back the selection from before a filter change, on whichever
+    /// rows now show those events, and bring the first into view.
+    private func restoreSelection() {
+        guard let previous = selectionToRestore else { return }
+        selectionToRestore = nil
+        let kept = Set(previous.compactMap { feed.rowId(for: $0) })
+        selectedEventIds = kept
+        if let first = kept.compactMap({ feed.rowIndex(ofRow: $0) }).min() {
+            follow.stop()
+            scrollTarget = (feed.rows[first].id, UUID())
+        }
+    }
+
+    /// Drop the filter and land on `eventId` among its neighbours. Clear
+    /// stays in force unless it hides the event itself.
+    func showInContext(_ eventId: EventRecord.ID) {
+        var unfiltered = Filter.none
+        if let hidden = filter.hiddenThroughEventId, eventId > hidden {
+            unfiltered.hiddenThroughEventId = hidden
+        }
+        guard unfiltered != filter else {
+            Task { await jumpTo(eventId: eventId) }
+            return
+        }
+        selectedEventIds = [eventId]
+        filter = unfiltered
+    }
+
+    // MARK: - Filter carried across sessions
+
+    private static let rememberedFilterKey = "logFeed.lastFilter"
+
+    /// The filter last used, for the first session after a launch.
+    static func rememberedFilter() -> Filter {
+        UserDefaults.standard.data(forKey: rememberedFilterKey).flatMap(Filter.restore) ?? .none
+    }
+
+    private static func remember(_ filter: Filter) {
+        UserDefaults.standard.set(filter.carriedOver.stored, forKey: rememberedFilterKey)
+    }
+
+    // MARK: - Copy, search focus, Δ
+
+    /// The rows as clipboard lines, in table order.
+    func logLines(for rowIds: Set<EventRecord.ID>) -> String {
+        rowIds.compactMap { feed.rowIndex(ofRow: $0) }
+            .sorted()
+            .map { feed.rows[$0].event.logLine }
+            .joined(separator: "\n")
+    }
+
+    func focusSearch() {
+        searchFocusRequest += 1
+    }
+
+    /// Milliseconds from the selected row to `row`, or with nothing
+    /// selected from the row above it. `nil` for the first row.
+    func timeDelta(for row: FeedRow) -> Int64? {
+        let reference: FeedRow
+        if let selected = selectedEventId, let index = feed.rowIndex(ofRow: selected) {
+            reference = feed.rows[index]
+        } else {
+            guard let index = feed.rowIndex(ofRow: row.id), index > 0 else { return nil }
+            reference = feed.rows[index - 1]
+        }
+        return Int64(row.event.timestampMillis) - Int64(reference.event.timestampMillis)
     }
 
     // MARK: - Clearing the view
@@ -514,6 +618,10 @@ final class LogFeedViewModel {
     func selectNextRow() { moveSelection(by: 1) }
     func selectPreviousRow() { moveSelection(by: -1) }
 
+    /// `e` / `⇧E`: the next / previous error row. Doesn't wrap.
+    func selectNextError() { stepError(forward: true) }
+    func selectPreviousError() { stepError(forward: false) }
+
     private func moveSelection(by delta: Int) {
         let rows = collapsedRows
         guard !rows.isEmpty else { return }
@@ -521,15 +629,29 @@ final class LogFeedViewModel {
               let index = feed.rowIndex(ofRow: current)
         else {
             // Nothing selected yet: enter from the end you came from.
-            let entry = delta > 0 ? rows.first : rows.last
-            selectedEventId = entry?.id
-            if let entry { scrollTarget = (entry.id, UUID()) }
+            select(rowAt: delta > 0 ? 0 : rows.count - 1)
             return
         }
         let next = index + delta
         guard rows.indices.contains(next) else { return }
-        selectedEventId = rows[next].id
-        scrollTarget = (rows[next].id, UUID())
+        select(rowAt: next)
+    }
+
+    private func stepError(forward: Bool) {
+        let current = selectedEventId.flatMap { feed.rowIndex(ofRow: $0) }
+        guard let index = feed.rowIndex(after: current, forward: forward,
+                                         where: { $0.event.level == .error })
+        else { return }
+        select(rowAt: index)
+    }
+
+    /// Select and reveal a row. Anywhere but the last row takes the view
+    /// off the tail, so the next append doesn't scroll it away.
+    private func select(rowAt index: Int) {
+        let id = feed.rows[index].id
+        if index != feed.rows.count - 1 { follow.stop() }
+        selectedEventId = id
+        scrollTarget = (id, UUID())
     }
 
     // MARK: - Bookmarks
@@ -570,8 +692,8 @@ final class LogFeedViewModel {
     /// (live session today, imported session from last month — same
     /// behavior). Wraps around midnight.
     ///
-    /// Pauses follow-tail so the jump isn't immediately undone by
-    /// tail-scroll. See D27.
+    /// Stops following the tail so the jump isn't immediately undone
+    /// by tail-scroll. See D27.
     func jumpToTime(_ target: Date) {
         // Compute UTC milliseconds since UTC midnight. The user typed
         // a local time, the popover built a Date by combining that
@@ -591,7 +713,6 @@ final class LogFeedViewModel {
                     targetMillisSinceMidnight: targetMod,
                     filter: filter
                 ) else { return }
-                isPaused = true
                 await jumpTo(eventId: id)
             } catch {
                 print("jumpToTime: \(error)")
@@ -720,7 +841,7 @@ final class LogFeedViewModel {
 
     // MARK: - Search & highlight: match navigation
 
-    /// Step to the next matching event (wraps). Pauses Follow so the
+    /// Step to the next matching event (wraps). Stops following so the
     /// jump isn't immediately undone by tail-scroll.
     func nextMatch() { stepMatch(by: 1) }
     func previousMatch() { stepMatch(by: -1) }
@@ -792,9 +913,10 @@ final class LogFeedViewModel {
     /// there yet (a filter change just emptied the page, or the event
     /// arrived while paused).
     private func jumpTo(eventId: Int64) async {
-        // Pause first so incoming events neither scroll us off the match
-        // nor keep superseding the reload below.
-        isPaused = true
+        // Off the tail first, so incoming events don't scroll us off the
+        // match. (This used to pause; appends are cheap tails now and no
+        // longer supersede the reload below.)
+        follow.stop()
         if !feed.contains(eventId: eventId) {
             await reload()
         }
