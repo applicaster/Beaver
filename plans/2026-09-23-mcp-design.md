@@ -5,7 +5,7 @@ Date: 2026-09-23
 Scope: phase 1 (Beaver itself) in full; phase 2 (the app's toolbox through
 Beaver) as a direction to be researched before it is planned.
 
-Every choice below is a numbered decision in §12 (M1…M24), each with its
+Every choice below is a numbered decision in §12 (M1…M27), each with its
 reason, the alternatives, and what changing it would touch. Sections refer to
 them as *(M4)*. To change the design, change the decision and follow its
 "to change" note. When the first implementation PR lands, accepted decisions
@@ -41,6 +41,11 @@ Beaver can relay the agent's calls to the app: `app.info`, `app.restart`,
 4. No tool call moves focus, activates Beaver, or changes what the person is
    looking at, unless the call says `reveal: true` (or, for `ui_show`, it is
    the call's purpose).
+5. Everything the agent did is visible in Beaver's agent activity journal,
+   and the journal signals new entries without taking focus.
+6. Someone with only the downloaded `Beaver.zip` and no Xcode can turn Agent
+   Access on and off, connect an agent, test it, and report what happened
+   *(M27)*.
 
 ### Non-goals (phase 1)
 
@@ -90,6 +95,9 @@ MCP client (Claude Code / Cursor / Codex)
 │ BeaverTools       [MCPTool] — name, description, inputSchema,│
 │                   annotations, async handler           (M8)  │
 └─────────────────────────────────────────────────────────────┘
+        │  every call recorded by the dispatcher
+        ├──────────────────────────────► AgentJournal → agent_activity table
+        │                                 → Agent panel, toolbar + Dock badge
    │ LogStore (actor)   │ DeviceLink (WSServer)   │ AgentUI (@MainActor)
    ▼                    ▼                         ▼
  sessions, logs,     commands, storage.list,   tab, session, filter,
@@ -106,28 +114,39 @@ MCP client (Claude Code / Cursor / Codex)
 | `Beaver/MCP/MCPTool.swift` | BeaverCore | `MCPTool`, `ToolResult`, a small JSON Schema builder, argument decoding helpers |
 | `Beaver/MCP/BeaverTools.swift` | BeaverCore | The catalog in §5, one `static func` per group |
 | `Beaver/MCP/ToolContext.swift` | BeaverCore | `ToolContext { store, device: DeviceLink, ui: AgentUI, clock }` plus the `DeviceLink` and `AgentUI` protocols *(M14, M15)* |
-| `Beaver/MCP/AgentAccess.swift` | BeaverCore | The only entry point the app calls: `isAllowed` (build + policy + user), `start(env:)`, `stop()` *(M24)* |
+| `Beaver/MCP/AgentJournal.swift` | BeaverCore | Records every tool call, agent notes and system entries; unseen count *(M17)* |
+| `Beaver/Store/Schema.swift` | BeaverCore | One migration: the `agent_activity` table (§7.2) |
+| `Beaver/Features/AgentActivity/AgentActivityView.swift` | app | The Agent panel (inspector), toolbar button with badge, Dock badge *(M17)* |
+| `Beaver/MCP/AgentAccess.swift` | BeaverCore | The only entry point the app calls: `start(env:)`, `stop()`. The future access check goes here *(M24)* |
 | `Beaver/AppEnvironment.swift` | app | Conforms to `AgentUI`; gains `selectedTab`, `selection`, `reveal()` *(M12)* |
 | `Beaver/BeaverApp.swift` | app | Starts and stops the listener with the menu toggle *(M4, M22)* |
 | `MCP.md` | repo root | Tool reference + usage rules, the source of truth for agents and humans *(M13)* |
 
-### 3.2 A separate, switchable feature *(M4, M24)*
+### 3.2 A separate feature, open in phase 1 *(M4, M24)*
 
-Agent Access is a feature of its own, not part of Beaver's core. It can be
-turned off for a customer build, for a machine, or by the person using it:
+Agent Access is a feature of its own, not part of Beaver's core:
+- The rest of the app uses nothing from `Beaver/MCP/` or
+  `Beaver/Features/AgentActivity/` except three touch points: `AgentAccess.start(env:)` /
+  `.stop()` called from `BeaverApp`, the menu items, and the Agent toolbar
+  button in `MainWindow`. Removing the feature is deleting two folders and
+  those three touch points.
+- **Phase 1: access is open.** It is on for everyone who runs Beaver, including
+  customers (same `Beaver.zip`). The only switch is the "Agent Access (MCP)"
+  toggle in the app menu, on by default, for a person who wants it off.
+- The UI state that moves into `AppEnvironment` (§7.1) is plain app state, and
+  the `agent_activity` table is created in every build.
 
-| Level | Who uses it | How | Effect |
-|---|---|---|---|
-| **Build** | us, for a customer build | the `BEAVER_AGENT_ACCESS` Swift compilation condition (set in the default build) | Without it, `Beaver/MCP/` is not compiled: no listener, no menu items, no code in the binary |
-| **Policy** | IT / us, per machine or per customer | managed preference `AgentAccessPolicy` = `disabled` (configuration profile, or `defaults write com.applicaster.LoggerNext AgentAccessPolicy disabled`) | The server never starts and the menu items are hidden. A forced (profile-managed) value cannot be changed by the user |
-| **User** | the person | "Agent Access (MCP)" toggle in the app menu (`@AppStorage("agentAccessEnabled")`) | Starts and stops the listener immediately |
-
-The server runs only if all three allow it. The rest of the app never
-imports anything from `Beaver/MCP/`. It talks to one entry point,
-`AgentAccess.start(env:)` / `.stop()`, called from `BeaverApp`. So the build
-flag wraps exactly one call site plus the menu items, and removing the
-feature is deleting a folder. The UI state that moves into `AppEnvironment`
-(§7) is plain app state and stays either way.
+**To decide later — access control for customers** *(M24)*. Deliberately left
+open (agreed 2026-09-23): phase 1 ships open, testing happens on PR builds
+*(M27)*, and nobody outside the team knows the feature exists until we say so.
+It must be settled before phase 2, when the agent can also control the app.
+Options on the table:
+- a build flag (`BEAVER_AGENT_ACCESS`) and a separate customer build;
+- a `defaults` key (`AgentAccessPolicy`), settable by a person, an agent or a
+  configuration profile. Not an environment variable: an app started from
+  Finder or the Dock does not see the shell's environment;
+- off by default for everyone, turned on by the team with that key;
+- a token in the client config.
 
 ### 3.3 Concurrency
 
@@ -157,6 +176,8 @@ feature is deleting a folder. The UI state that moves into `AppEnvironment`
   `http://127.0.0.1…` or `null`, the request is rejected with `403`. This is
   the DNS-rebinding defense the MCP spec asks for. There are no
   `Access-Control-*` headers.
+- The `User-Agent` header (e.g. `claude-code/2.1`) is recorded as the client
+  name in the journal. Nothing else identifies a caller.
 - Body limit 4 MB in; responses are capped by the tools themselves (§6).
 - Bind failure (port taken) → the menu item shows "MCP: port 9081 in use", and
   `os_log` records it. The port can be overridden with
@@ -167,9 +188,21 @@ feature is deleting a folder. The UI state that moves into `AppEnvironment`
 ## 5. Tool catalog (phase 1)
 
 Conventions for every tool:
-- `sessionId` is optional. If omitted, the live session is used when a device
-  is connected, otherwise the session being viewed, otherwise the most recent
-  one. The result always says which session was used *(M9)*.
+- `sessionId` is optional *(M9, M26)*:
+  - **Omitted: follow the device.** The live session is used when a device is
+    connected, otherwise the session being viewed, otherwise the most recent
+    one. A waiting call (`logs_wait`, `commands_send` with `collectLogsMs`)
+    that sees the device disconnect and reconnect carries on in the new
+    session and reports `sessionChanged: {from, to}`.
+  - **Given: pinned.** If that session ends during a wait, the call returns
+    `sessionEnded: true` and the new live session id if one appeared.
+  - A device that has not come back when the wait ends →
+    `deviceDisconnected: true`.
+  - The result always says which session was used.
+- `deviceId` is optional on every tool that talks to a live device. Today
+  there is at most one device (D2). If there are ever several, a call that
+  needs a live device and has neither `sessionId` nor `deviceId` fails with the
+  list of devices instead of guessing *(M25)*.
 - `filter` is the same object everywhere logs are filtered: `minLevel`,
   `search`, `searchIsRegex`, `exclude`, `excludeIsRegex`, `searchPayloads`,
   `subsystems[]`, `excludeSubsystems[]`, `categories[]`,
@@ -182,7 +215,7 @@ Conventions for every tool:
 
 | Tool | Args | Returns | Hints |
 |---|---|---|---|
-| `beaver_status` | — | Beaver version; WS state (`listening` / `clientConnected` / `failed(reason)`); `ws://` URLs for the device to connect to; connected device fingerprint (app, version, model, platform, OS); live and viewed session ids; MCP port | R |
+| `beaver_status` | — | Beaver version; WS state (`listening` / `clientConnected` / `failed(reason)`); `ws://` URLs for the device to connect to; `devices: [...]` — each with id, fingerprint (app, version, model, platform, OS) and live session id; an array even though D2 allows one *(M25)*; viewed session id; MCP port | R |
 
 ### 5.2 Sessions
 
@@ -200,7 +233,7 @@ Conventions for every tool:
 | `logs_facets` | `sessionId`, `filter` | counts per level, subsystem and category under the other facets (same as `LogStore.facetCounts`) | R |
 | `logs_query` | `sessionId`, `filter`, `afterId`, `beforeId`, `limit` (default 100, max 500), `order` (`newest` default / `oldest`), `includeData` (default false) | one line per event, `#<id> HH:mm:ss.SSS LEVEL subsystem/category: message`; `total` matching; `nextCursor` | R |
 | `logs_get` | `ids[]` (max 50) | full events with `data` and `context` JSON; payloads over 256 KB truncated with a `truncated` flag | R |
-| `logs_wait` | `sessionId`, `filter`, `afterId` (default: latest id now), `timeoutMs` (default 15 000, max 60 000), `limit` | the matching events that arrived, or `timedOut: true` | R. Long-poll on `LogStore.changes()` *(M11)* |
+| `logs_wait` | `sessionId`, `filter`, `afterId` (default: latest id now), `timeoutMs` (default 15 000, max 60 000), `limit` | the matching events that arrived, or `timedOut: true`; plus `sessionChanged` / `sessionEnded` / `deviceDisconnected` when they happen *(M26)* | R. Long-poll on `LogStore.changes()` *(M11)* |
 | `logs_clear` | `sessionId` | the watermark event id | W. Same as the toolbar's Clear: hides events up to now via `hiddenThroughEventId`, deletes nothing |
 
 ### 5.4 Network
@@ -224,7 +257,7 @@ Conventions for every tool:
 | Tool | Args | Returns | Hints |
 |---|---|---|---|
 | `commands_list` | `refresh` (default false: resend `cmdlist`) | name, syntax, description, group — the merged list the command bar shows | R |
-| `commands_send` | `command`, `collectLogsMs` (default 0, max 30 000) | sent; if `collectLogsMs > 0`, the events that arrived in that window | W. Recorded in command history like a typed command |
+| `commands_send` | `command`, `collectLogsMs` (default 0, max 30 000) | sent; if `collectLogsMs > 0`, the events that arrived in that window, following the device across a reconnect *(M26)* | W. Recorded in command history like a typed command. Never refused: Beaver cannot know which commands restart the app |
 
 ### 5.7 Bookmarks and saved filters
 
@@ -243,7 +276,13 @@ Conventions for every tool:
 | `ui_state` | — | tab, viewed session, active filter, selected event or request, whether the window is key | R |
 | `ui_show` | any of `tab` (`logs`/`network`/`storages`), `sessionId`, `filter`, `selectEventId`, `selectNetworkId`, `reveal` (default false) | the resulting `ui_state` | W. Without `reveal` the window updates in place and nothing takes focus |
 
-Twenty-five tools. Adding a user-facing capability to Beaver means adding or
+### 5.9 Journal *(M17)*
+
+| Tool | Args | Returns | Hints |
+|---|---|---|---|
+| `journal_note` | `text`, `level` (`info` default / `attention`), `links[]` (each `{sessionId}`, `{eventId}`, `{networkId}` or `{savedFilter}`) | the note id | W. How the agent tells the person something ("this subsystem floods 2 000 lines/s", "here is the cause"). Notes stand out in the panel; each link is clickable |
+
+Twenty-six tools. Adding a user-facing capability to Beaver means adding or
 extending one of them (§9).
 
 ---
@@ -269,7 +308,9 @@ extending one of them (§9).
 
 ---
 
-## 7. Background UI model
+## 7. What the person sees
+
+### 7.1 Background UI model
 
 *(M12)*
 
@@ -290,6 +331,57 @@ outside the view can change them. The change:
 No Accessibility API, no synthetic events, no AppleScript: the agent changes
 state and SwiftUI renders it, whether the window is visible, behind other
 windows, or minimized.
+
+### 7.2 Agent activity journal
+
+*(M17)*
+
+A toolbar button **Agent** opens an inspector panel on the right:
+
+```
+┌ Agent activity ─────────────── [Hide reads] [Copy] [Clear] ┐
+│ 14:03:12  claude-code                                       │
+│ ★ "401 on /oauth/token after refresh — the token expired"   │  agent note
+│    → #48211 (event)   → #391 (request)                      │  links clickable
+│ 14:03:05  storage_set  local/authToken = …     ✓ applied    │  change
+│ 14:02:58  commands_send "debug.flag.on x"                   │
+│ 14:02:40  logs_query  level≥warning, subsystem auth*        │  read, dimmed
+│ 14:02:31  ⚠ sessions_delete #12                             │  destructive
+│ 14:01:10  ⓘ device disconnected after "restart" → #13       │  system entry
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Entries.**
+- **Every tool call**, recorded by the dispatcher, so a new tool is journaled
+  with no extra work: time, client (`User-Agent`), tool, a one-line summary the
+  tool provides, ✓ or ✗ with the error. Reads are dimmed and can be hidden
+  with *Hide reads*; changes are normal; destructive calls are highlighted.
+- **Agent notes** from `journal_note` (§5.9), highlighted, with clickable links.
+- **System entries**: the device disconnecting after an agent's command and the
+  session it came back in.
+- An entry that points at something (session, event, request, saved filter)
+  is clickable and shows it, through the same path as `ui_show`.
+
+**Signalling, without taking focus.**
+- The toolbar button shows a badge with the number of unseen entries and
+  pulses once when one arrives.
+- An `attention` note also sets the Dock icon's badge, visible while Beaver
+  is in the background. Setting a Dock badge does not activate the app.
+- Opening the panel marks everything seen and clears both badges.
+
+**Storage.** Table `agent_activity` (id, at, client, tool, kind
+`read`/`change`/`destructive`/`note`/`system`, summary, level, is_error,
+error, links JSON, session_id nullable, seen). It:
+- survives restarts;
+- is **not part of any session export**, so nothing reaches customers or
+  zapp-support by accident;
+- is emptied by *Clear*;
+- keeps the newest 2 000 rows, trimming the oldest on insert;
+- keeps entries when their session is deleted (`ON DELETE SET NULL`); the link
+  then shows as gone.
+
+*Copy* puts the visible entries on the clipboard as text, for bug reports from
+testers *(M27)*.
 
 ---
 
@@ -313,9 +405,13 @@ Three layers, each covering what the others cannot:
    > (`commands_send`, `storage_set`), then `logs_wait` with `afterId`.
    > Network bodies are capped at 100 KB by the SDK and headers such as
    > Authorization are redacted, so a replayed cURL may fail. Storage values
-   > cannot contain spaces through `storage_set`. Work in the background:
-   > use `ui_show` only to point the user at something, and `reveal: true`
-   > only when they ask to see it.
+   > cannot contain spaces through `storage_set`. Omitting `sessionId`
+   > follows the device: if it restarts during a wait, you carry on in its new
+   > session and are told so; pass `sessionId` to stay on one session. Work in
+   > the background: use `ui_show` only to point the user at something, and
+   > `reveal: true` only when they ask to see it. Everything you call is
+   > shown to the user in Beaver's agent journal; use `journal_note`, with
+   > links, to tell them what you found.
 
 2. **Tool and parameter descriptions**: what each does, defaults, limits.
 
@@ -352,10 +448,15 @@ an add-on:
    `MCP.md` and every tool in `MCP.md` must be registered.
 4. Tools work in the background: never activate the app or take focus
    unless the call has `reveal: true`.
-5. Agent Access stays a separate feature: code outside `Beaver/MCP/` never
-   imports from it, and the app must build and pass tests without the
-   `BEAVER_AGENT_ACCESS` flag.
-6. Mention agent-visible changes in `CHANGELOG.md` `[Unreleased]`.
+5. Every tool gives the journal a one-line summary of what it did; the
+   dispatcher records the call. Don't bypass the dispatcher.
+6. Agent Access stays a separate feature: code outside `Beaver/MCP/` and
+   `Beaver/Features/AgentActivity/` never imports from it; the app reaches it
+   only through `AgentAccess`.
+7. Testers use a built bundle (PR build or release), without Xcode. Anything
+   they need to turn on, set up or check must work from the app menu, and be
+   described in `MCP.md` → "Testing without Xcode".
+8. Mention agent-visible changes in `CHANGELOG.md` `[Unreleased]`.
 ```
 
 The drift test is what enforces rule 3. Rules 1–2 rest on review, with the
@@ -373,10 +474,12 @@ Swift Testing, `swift test`, no device and no app host:
 | `MCPServerTests` | `initialize` negotiates the version and returns `instructions`; `tools/list` schemas are valid JSON Schema; `tools/call` on an unknown tool → `isError`, never a crash; notifications return nothing; malformed JSON → `-32700` |
 | `MCPHTTPListenerTests` | one real loopback round-trip with `URLSession`; notification → 202; foreign `Origin` → 403; `GET` → 405 |
 | `BeaverToolsTests` | each group against `LogStore(databaseURL: .inMemory)` and a `FakeDeviceLink`: filter mapping equals the UI's `Filter`; pagination cursors; `logs_wait` returns on append and times out; `storage_set` rejects whitespace, reports `applied` / `notApplied` from the read-back; session resolution order *(M9)* |
-| `AgentAccessPolicyTests` | the server starts only when build, policy and user all allow it; a forced policy value hides the toggle |
-| CI build without `BEAVER_AGENT_ACCESS` | the app still compiles, i.e. nothing outside `Beaver/MCP/` depends on it |
+| `AgentJournalTests` | every call is recorded with the right kind; failed calls carry the error; notes keep their links; the 2 000-row trim; entries survive session delete with the link nulled; `SessionExport` output contains no journal data |
+| `FollowDeviceTests` | omitted `sessionId` carries a wait across a disconnect/reconnect and reports `sessionChanged`; a pinned session reports `sessionEnded`; no reconnect → `deviceDisconnected` |
+| `AgentAccessTests` | the menu toggle starts and stops the listener; toggled off, the port is closed |
 | `MCPDocDriftTests` | the tool names in `MCP.md`'s tables equal the registered names |
 | `AgentUITests` (app target, existing UI-test target) | `ui_show` without `reveal` leaves another app frontmost; with `reveal` Beaver becomes active |
+| Tester checklist (manual, on the PR bundle) | `MCP.md` → "Testing without Xcode": enable, connect Claude Code, run the smoke test, check the journal, switch off *(M27)* |
 
 ---
 
@@ -465,24 +568,12 @@ Each decision: what, why, alternatives, and what changing it touches.
 - **To change:** a token is an extra header check plus a "Copy setup command"
   that includes it.
 
-### M4. On by default in our build; user toggle in the app menu
+### M4. On for everyone in phase 1; one toggle in the app menu
 - **Why:** agreed with the user (2026-09-23). The value is in agents finding it
-  with no setup; the risk is bounded by M3. The toggle is the "User" level of
-  M24.
-- **Alternatives:** opt-in toggle.
-- **To change:** flip the `@AppStorage` default.
-
-### M24. Agent Access is a separate feature with three off switches
-- **Why:** the user asked (2026-09-23) that it can be switched off for
-  customers or at will. Beaver ships one Sparkle build to everyone, so a
-  customer build needs a compile-time switch, and machines we don't build for
-  need a policy that users can't override. The one `AgentAccess` entry point
-  keeps the rest of the app unaware of MCP (§3.2).
-- **Alternatives:** runtime toggle only (can't guarantee "off" for a
-  customer); a separate app or plugin bundle (a second product to sign,
-  notarize and update); remote config (needs a backend Beaver doesn't have).
-- **To change:** each level is independent; dropping one removes one check in
-  `AgentAccess.isAllowed`.
+  with no setup; the risk is bounded by M3 and by nobody outside the team
+  knowing the feature exists. Customers get it too (same `Beaver.zip`).
+- **Alternatives:** opt-in toggle; see M24 for access control.
+- **To change:** flip the `@AppStorage` default, or settle M24.
 
 ### M5. Destructive tools are allowed; the client confirms
 - **Why:** agreed with the user. MCP clients already ask before calling a tool
@@ -508,9 +599,9 @@ Each decision: what, why, alternatives, and what changing it touches.
   subscriptions need the SSE stream M2 leaves out.
 - **To change:** additive.
 
-### M8. One tool per capability, grouped (25 tools)
+### M8. One tool per capability, grouped (26 tools)
 - **Why:** agents choose better between named, narrow tools than between
-  modes of one giant tool. 25 is well within what clients handle.
+  modes of one giant tool. 26 is well within what clients handle.
 - **Alternatives:** a few "god tools" (`query(kind, …)`); one tool per UI
   control (hundreds).
 - **To change:** merge within a group; the drift test and `MCP.md` follow.
@@ -518,7 +609,8 @@ Each decision: what, why, alternatives, and what changing it touches.
 ### M9. Default session: live → viewed → most recent
 - **Why:** matches what a person means by "the logs" when a device is
   connected, and still works offline or on imported sessions. Echoing the
-  chosen id prevents silent confusion.
+  chosen id prevents silent confusion. What happens across a reconnect is
+  M26.
 - **To change:** one function, `ToolContext.resolveSession`.
 
 ### M10. Results: text + `structuredContent`, hard caps, id cursors, filter = `Filter`
@@ -572,14 +664,20 @@ Each decision: what, why, alternatives, and what changing it touches.
   apply this" as a person.
 - **To change:** shared code in `StorageCommand`; both paths move together.
 
-### M17. Audit: toasts and `os_log`, not the event log
-- **Why:** the person should see what an agent changed ("Agent deleted session
-  #12") without focus moving. That rules out alerts but allows the existing
-  `ToastCenter`, which shows in the window without activating it. Writing
-  agent actions into the session's events would end up in exports sent to
-  customers and zapp-support.
-- **Alternatives:** synthetic `beaver.agent` events; an "Agent activity" panel.
-- **To change:** one call site in the tool dispatcher.
+### M17. Agent activity journal: every call, agent notes, badges; not in exports
+- **Why:** agreed with the user (2026-09-23). The person needs to see what the
+  agent did, notice when something new happens, and jump to what the agent
+  found, all without the window taking focus (§7.2). Recording in the
+  dispatcher means no tool can forget to log. A separate table keeps agent
+  activity out of session exports, which go to customers and zapp-support.
+  `journal_note` lets the agent say something to the person with clickable
+  links, which a tool-call list cannot.
+- **Alternatives:** toasts only (gone when missed, no history); synthetic
+  `beaver.agent` events in the session (would end up in exports); `os_log`
+  only (invisible).
+- **To change:** kinds, cap and badge rules are constants in `AgentJournal`;
+  the panel is one view. A `journal_list` tool for agents is additive if a
+  use appears.
 
 ### M18. Phase 2 exposes the device through two generic tools
 - **Status:** deferred to phase 2; not reviewed yet.
@@ -624,35 +722,90 @@ Each decision: what, why, alternatives, and what changing it touches.
   colliding with D-numbers other branches may take.
 - **To change:** renumber on migration.
 
+### M24. Access control is open in phase 1 — to decide before phase 2
+- **Status:** open, deliberately (agreed 2026-09-23).
+- **Decided now:** no build flag, no policy key, no token. The feature is
+  isolated behind `AgentAccess` (§3.2), so any of those is one check in one
+  place later.
+- **Must be decided before phase 2**, when an agent can also restart the app
+  and change its storage: how to keep Agent Access, or some of its data, from
+  customers. Options are listed in §3.2: build flag + customer build,
+  `defaults` key (also usable by a configuration profile), off by default with
+  the team turning it on, client token. An environment variable is not an
+  option: apps started from Finder don't see it.
+
+### M25. The API is ready for several connected apps
+- **Why:** the user expects to connect several apps at once later (today D2
+  allows one). Tool shapes are hard to change once agents rely on them, so
+  phase 1 already uses the multi-device shape: `beaver_status.devices` is an
+  array, live-device tools take an optional `deviceId`, and with more than
+  one live device a call that doesn't say which one fails with the list.
+- **Alternatives:** a single `device` object now, reshaped later (a breaking
+  change for agents).
+- **To change:** lifting D2 changes `WSServer` and session creation; the tool
+  API stays as is.
+
+### M26. Omitted `sessionId` follows the device across reconnects
+- **Why:** agreed with the user. A command can restart the app, and Beaver
+  starts a new session on reconnect (D2). Beaver can't know which commands do
+  that, so it doesn't refuse any. Instead, waits carry on in the new session
+  and say so (`sessionChanged`), and a pinned `sessionId` reports
+  `sessionEnded`. `restart` → `logs_wait(search: "App started")` just works.
+  The journal records the disconnect as a system entry.
+- **Alternatives:** refuse such commands without `expectDisconnect: true`
+  (needs a list of disconnecting commands nobody has); leave it to the agent.
+- **To change:** the follow logic lives in `ToolContext.resolveSession` and
+  the wait helper shared by `logs_wait` and `commands_send`.
+
+### M27. Testers use signed PR bundles, no Xcode
+- **Why:** a few testers will check each step with a built app only, and
+  testing happens in PRs (agreed 2026-09-23). Today the PR workflow only
+  builds and tests; a signed app exists only after merge, which is also a
+  release to customers. So:
+  - the `on-pull-request` workflow gets a **manual approval job**, "Tester
+    bundle", that builds, signs and notarizes `Beaver.zip` with the release
+    job's steps, stores it as a CircleCI artifact and does **not** publish or
+    touch the appcast. It costs nothing unless someone clicks it;
+  - everything a tester needs works from the app menu: the toggle, "Copy MCP
+    Setup Command", the Agent panel, and *Copy* in the panel for reports;
+  - `MCP.md` has a "Testing without Xcode" section: install the bundle,
+    connect Claude Code (and Cursor), a `curl` smoke test
+    (`tools/list` against `http://127.0.0.1:9081/mcp`), a checklist per
+    delivery step, and how to report (journal *Copy* + Beaver version).
+- **Alternatives:** test only released builds (customers get untested
+  changes); run the job on every PR (a notarization per push).
+- **To change:** the job's trigger in `.circleci/config.yml`.
+
 ---
 
 ## 13. Delivery
 
 Each step is a PR that releases on merge (see `CLAUDE.md`), so each must stand
-on its own.
+on its own. Testers check each PR on its tester bundle before merge *(M27)*.
 
-1. **Core + read tools.** `MCPServer`, listener, menu items, `beaver_status`,
-   `sessions_list`, `logs_*`, `network_*`, `storage_snapshot(refresh:false)`,
-   `commands_list`, `bookmarks_list`, `filters_list`, `MCP.md`, the drift test,
-   the `CLAUDE.md` rule, D-number migration of M1–M17 and M20–M24. `AgentAccess` entry point with all three off switches (M24) and the no-flag CI build.
+1. **Core, read tools, journal.** `AgentAccess`, `MCPServer`, listener, menu
+   items, `beaver_status`, `sessions_list`, `logs_*`, `network_*`,
+   `storage_snapshot(refresh:false)`, `commands_list`, `bookmarks_list`,
+   `filters_list`; `AgentJournal`, the `agent_activity` migration and the
+   Agent panel with badges; `MCP.md` with "Testing without Xcode"; the drift
+   test; the `CLAUDE.md` rule; the CI "Tester bundle" job; migration of
+   M1–M17 and M20–M27 to `DECISIONS.md` (M24 as an open decision).
 2. **Actions.** `commands_send`, `storage_snapshot(refresh:true)`,
    `storage_set/delete`, `sessions_import/export/delete`, `logs_clear`,
-   `bookmarks_set`, `filters_save/delete`, toasts (M17).
-3. **UI.** State move (§7), `ui_state`, `ui_show`.
-4. **Phase 2 research** (§11), then its own spec update and plan.
+   `bookmarks_set`, `filters_save/delete`, `journal_note`, follow-device
+   waits (M26) and the disconnect system entry.
+3. **UI.** State move (§7.1), `ui_state`, `ui_show`, clickable journal links.
+4. **Before phase 2:** settle M24 (access control). Then phase 2 research
+   (§11), its own spec update and plan.
 
 ## 14. Open questions
 
-1. Should `commands_send` refuse commands that would close the WebSocket
-   (e.g. a device restart) unless the agent passes `expectDisconnect: true`?
-   Default in this spec: no, just send it.
-2. Is 9081 free of conflicts with other Applicaster tooling? (The SDK uses
-   11434 on the device and 9080 for Beaver.)
-3. ~~How do customers get Beaver?~~ **Answered (2026-09-23):** the same
-   build, downloaded from
-   `https://github.com/applicaster/Beaver/releases/latest/download/Beaver.zip`.
-   So phase 1 ships Agent Access to customers too, on by default. That is
-   accepted for phase 1: the server is loopback only and reads only data
-   already on the customer's own Mac. How to keep information from customers
-   is discussed in phase 2 or 3, when the device toolbox makes the stakes
-   higher. M24's build level is not used until then.
+1. **Access control for customers (M24)** — open on purpose; must be decided
+   before phase 2.
+2. ~~Should `commands_send` refuse commands that close the WebSocket?~~
+   **Answered:** no; waits follow the device (M26).
+3. ~~Is 9081 free?~~ **Answered:** yes.
+4. ~~How do customers get Beaver?~~ **Answered (2026-09-23):** the same
+   build, from
+   `https://github.com/applicaster/Beaver/releases/latest/download/Beaver.zip`,
+   so phase 1 ships Agent Access to them too (M4, M24).
