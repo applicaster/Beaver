@@ -113,6 +113,26 @@ public struct EventRecord: Identifiable, Hashable, Sendable {
         Self.timeFormatter.string(from: date)
     }
 
+    /// One line for the clipboard:
+    /// `HH:mm:ss.SSS [LEVEL] subsystem/category: message`.
+    public var logLine: String {
+        let source = category.isEmpty ? subsystem : "\(subsystem)/\(category)"
+        return "\(timeOfDayWithMillis) [\(level.displayName)] \(source): \(message)"
+    }
+
+    /// Lines in `message`, for the "⏎ N lines" badge on a clamped row.
+    /// `\r\n` counts once; a trailing newline starts an (empty) line.
+    public var lineCount: Int {
+        var count = 1
+        var previous: UInt8 = 0
+        for byte in message.utf8 {
+            if byte == 0x0A || (byte == 0x0D) { count += 1 }
+            if byte == 0x0A && previous == 0x0D { count -= 1 }
+            previous = byte
+        }
+        return count
+    }
+
     /// `subsystem` without the app's bundle id in front — see
     /// `shortSubsystem(_:)`.
     public var shortSubsystem: String { Self.shortSubsystem(subsystem) }
