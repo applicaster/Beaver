@@ -426,6 +426,18 @@ struct NetworkCopyTests {
     }
 
     @Test
+    func compactDurationSwitchesToSecondsFromOneSecond() {
+        #expect(NetworkEntry.compactDuration(0) == "0 ms")
+        #expect(NetworkEntry.compactDuration(830) == "830 ms")
+        #expect(NetworkEntry.compactDuration(999) == "999 ms")
+        #expect(NetworkEntry.compactDuration(1000) == "1.0 s")
+        #expect(NetworkEntry.compactDuration(2266) == "2.3 s")
+        #expect(NetworkEntry.compactDuration(15959) == "16.0 s")
+        #expect(NetworkEntry.compactDuration(99_949) == "99.9 s")
+        #expect(NetworkEntry.compactDuration(125_000) == "125 s")
+    }
+
+    @Test
     func sizeTiersGreyYellowRed() {
         // Grey under 50 KB, yellow 50–100 KB, red from 100 KB — which includes every body the SDK cut.
         #expect(e(#"{"url":"https://a.io","responseBody":"ok"}"#).tableSizeTier == .normal)

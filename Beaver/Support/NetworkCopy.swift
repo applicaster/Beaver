@@ -64,6 +64,15 @@ extension NetworkEntry {
     /// `237 B`, `4.2 KB`, `42 KB`, `1.5 MB` — decimal units like
     /// `ByteCountFormatter`'s `.file` style, so a 100 000-character body
     /// reads `100 KB`; short enough for the table's Size column.
+    /// Table-width duration: milliseconds under a second, then seconds with
+    /// one decimal ("2.3 s", "16.0 s"), whole seconds from 100 s. The detail
+    /// pane keeps the exact milliseconds.
+    public static func compactDuration(_ ms: Int) -> String {
+        guard ms >= 1000 else { return "\(ms) ms" }
+        let seconds = Double(ms) / 1000
+        return seconds < 99.95 ? String(format: "%.1f s", seconds) : "\(Int(seconds.rounded())) s"
+    }
+
     public static func compactSize(_ bytes: Int) -> String {
         guard bytes >= 1000 else { return "\(bytes) B" }
         var value = Double(bytes) / 1000, unit = "KB"

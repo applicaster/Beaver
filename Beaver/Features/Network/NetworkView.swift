@@ -345,7 +345,7 @@ private struct DurationCell: View {
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        Text(millis.map { "\($0) ms" } ?? "—")
+        Text(millis.map(NetworkEntry.compactDuration) ?? "—")
             .font(NetworkView.rowFont)
             .foregroundStyle(prominence == .increased ? .white : NetworkView.durationColor(millis, scheme))
             .frame(maxWidth: .infinity, alignment: .trailing)
