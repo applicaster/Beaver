@@ -75,20 +75,30 @@ Export button in a tool — log screen, storage screen — writes this same file
 | `data` | any JSON object/array | only when present |
 | `context` | JSON object | only when present |
 
-Files written this way read identically in both tools. For other input
-(legacy or hand-made files) an event missing `subsystem`, `message` or a
-numeric `timestamp` MAY be dropped (Beaver) or filled with placeholders
-(zapp-support: `"Unknown"`, the event's JSON, the import time).
+Readers MUST NOT drop an event for a missing field. Placeholders:
+
+| Missing | Read as |
+|---|---|
+| `subsystem` | `"Unknown"` |
+| `message` | the whole event, as JSON text |
+| `timestamp` | the import time |
+| `category` | `""` |
+
+A `timestamp` that is present but not a non-negative number of milliseconds
+that fits in Int64 MAY be rejected (Beaver drops the event; it is attacker
+input on the live socket too). Readers MUST keep `data` and `context` as
+given — the event reads the same as when it arrived live.
+
+zapp-support displays an empty `subsystem` / `category` as "Unknown", the same
+as for live events; that is presentation, not a different value.
 
 4.1 **Levels.** Writers MUST write one of `verbose`, `debug`, `info`,
 `warning`, `error` (older Beaver versions drop anything else). A level outside
 that set MUST be written as `info` with the original value kept in
 `context.originalLevel` (creating `context` if needed).
 
-Readers MUST read the five as themselves and MUST NOT drop an event because
-of its level. For other input they SHOULD map, case-insensitively (Beaver
-does; zapp-support keeps its pre-v1 mapping — lowercase, `warn` → `warning`,
-other values shown as-is — so its legacy imports stay unchanged):
+Readers MUST map, case-insensitively, and MUST NOT drop an event because of
+its level:
 
 | Read as | Strings | Numbers |
 |---|---|---|

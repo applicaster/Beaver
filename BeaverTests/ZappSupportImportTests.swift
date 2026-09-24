@@ -83,6 +83,23 @@ struct ZappSupportImportTests {
         #expect(event.contextJSON == nil, "nothing to record when there was no level")
     }
 
+    @Test("A line missing a field still opens, with zapp-support's placeholders")
+    func missingFieldsGetPlaceholders() throws {
+        let before = UInt64(Date().timeIntervalSince1970 * 1000)
+        let file = Data(#"[{"level":"info","category":"net","note":1}]"#.utf8)
+        let event = try #require(try EventJSON.decodeExport(file).events.first)
+        let after = UInt64(Date().timeIntervalSince1970 * 1000)
+
+        #expect(event.subsystem == "Unknown")
+        #expect(event.category == "net")
+        // The whole line, so nothing is lost.
+        let message = try #require(
+            try JSONSerialization.jsonObject(with: Data(event.message.utf8)) as? [String: Any]
+        )
+        #expect(message["note"] as? Int == 1)
+        #expect((before...after).contains(event.timestampMillis), "import time")
+    }
+
     @Test("An unknown level with no context creates one")
     func unknownLevelWithoutContext() throws {
         let file = Data(#"[{"subsystem":"a","timestamp":1,"level":"off","message":"m"}]"#.utf8)

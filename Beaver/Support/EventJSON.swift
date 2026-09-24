@@ -139,10 +139,21 @@ enum EventJSON {
     }
 
     private static func makeEvent(_ dict: [String: Any]) -> DecodedEvent? {
-        guard let subsystem = dict["subsystem"] as? String else { return nil }
-        guard let message   = dict["message"]   as? String else { return nil }
+        // A missing field doesn't drop the line either (SESSION_FILE_FORMAT.md
+        // §4), with the same placeholders zapp-support uses.
+        let subsystem = dict["subsystem"] as? String ?? "Unknown"
+        let message = dict["message"] as? String ?? jsonString(dict) ?? ""
 
-        guard let timestamp = ProtocolDecoder.timestampMillis(dict["timestamp"]) else { return nil }
+        // A timestamp that is present but can't be stored is still rejected
+        // (ProtocolDecoderTests): only an absent one falls back to import time.
+        let rawTimestamp = dict["timestamp"].flatMap { $0 is NSNull ? nil : $0 }
+        let timestamp: UInt64
+        if let rawTimestamp {
+            guard let parsed = ProtocolDecoder.timestampMillis(rawTimestamp) else { return nil }
+            timestamp = parsed
+        } else {
+            timestamp = UInt64(Date().timeIntervalSince1970 * 1000)
+        }
 
         // A line is never dropped over its level: an unknown one opens as
         // info, with the raw value kept in context as `originalLevel`.
