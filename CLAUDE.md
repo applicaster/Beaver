@@ -19,7 +19,8 @@ either. The format is specified in **[`SESSION_FILE_FORMAT.md`](SESSION_FILE_FOR
 
 When a change touches export or import (`Beaver/Support/EventJSON.swift`,
 `SessionExport.swift`, `HARExport.swift`, the importer in
-`Features/MainWindow.swift`):
+`Features/MainWindow.swift`, the Export menus in `MainWindow.swift` and
+`Features/Storages/StoragesView.swift`):
 
 1. Check it against `SESSION_FILE_FORMAT.md`. If the format itself changes,
    follow its §1: additive only in v1, readers before writers.

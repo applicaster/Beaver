@@ -45,8 +45,9 @@ A file is exactly one of:
 
 | Shape | When a writer uses it |
 |---|---|
-| **A. Bare array** `[Event, …]` | The session has no storage and no network entries. |
-| **B. Session object** `{"events": [Event, …], "storage"?: Storage, "network"?: [NetworkEntry, …]}` | Otherwise. |
+| **A. Bare array** `[Event, …]` | Session export; the session has no storage and no network entries. |
+| **B. Session object** `{"events": [Event, …], "storage"?: Storage, "network"?: [NetworkEntry, …]}` | Session export, otherwise. |
+| **C. Storage only** `Storage` (§5) at the top level | "Export storage only" (§3.5). |
 
 3.1 In shape B, `events` MUST be present (it MAY be empty). `storage` and
 `network` MUST be omitted when empty, never written as `{}` / `[]`.
@@ -59,9 +60,16 @@ its own session.
 is active they are the same, and a writer MAY skip the choice). The scope
 narrows **events only**; `storage` (the session's latest snapshot) and
 `network` (all of the session's requests) are always written whole. Every
-Export button in a tool — log screen, storage screen — writes this same file.
+Export button in a tool — log screen, storage screen — writes this same file
+(plus "storage only" on the storage screen, §3.5).
 
 3.4 Readers MUST ignore unknown top-level keys.
+
+3.5 **Storage only.** The storage screen additionally offers **Export storage
+only**: the session's latest snapshot as shape C, no events, no requests. It
+has a **Redact Keychain values** option, on by default: every leaf value under
+`secure` becomes `"[REDACTED]"`, keys kept, other layers untouched. Shape C
+MUST NOT contain `events`, `storage` or `network` keys.
 
 ## 4. Event
 
@@ -163,14 +171,27 @@ Detect in this order:
    §4.2 already handle it).
 3. An object with an `events` array → shape B. (zapp-support: unless it also
    has a `message` key — that was always a single log entry.)
-4. An object whose only keys are `session` / `local` / `secure` →
-   zapp-support's pre-v1 storage export: `{type: {namespace: {key: value}}}`,
-   keys with no namespace grouped under `"root"`. Read it as storage, putting
-   each `"root"` key back as `"<key>": {"undefined": value}`.
-5. Anything else: not a session file. (zapp-support has always imported a
-   lone object as one log row.)
+4. An object with none of `events` / `storage` / `network` and at least one
+   of `session` / `local` / `secure` → shape C, storage only (unknown keys
+   ignored; zapp-support: unless it also has a `message` key). This also
+   covers zapp-support's pre-v1 storage export, the same shape except that
+   keys with no namespace are grouped under `"root"`: readers MUST put each `"root"` key back as
+   `"<key>": {"undefined": value}`. (Consequence: a device namespace literally
+   named `root` reopens as plain keys — zapp-support reserves that name
+   anyway.)
+5. Anything else: not a session file. (zapp-support imports a lone object
+   that isn't shape C as one log row, as it always has.)
 
 ## 9. Examples
+
+Shape C (Keychain redacted):
+
+```json
+{
+  "local": {"applicaster.v2": {"uuid": "u-1"}},
+  "secure": {"authToken": "[REDACTED]"}
+}
+```
 
 Shape A:
 
