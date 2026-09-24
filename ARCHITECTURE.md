@@ -158,18 +158,11 @@ CREATE INDEX idx_event_session_ts ON event(session_id, timestamp_ms);
 CREATE INDEX idx_event_level      ON event(session_id, level);
 CREATE INDEX idx_event_subsystem  ON event(session_id, subsystem);
 
-CREATE VIRTUAL TABLE event_fts USING fts5(
-  message, subsystem, category, content='event', content_rowid='id'
-);
--- Triggers keep event_fts in sync with event.
---
--- NOTE (per D15): the event_fts table is currently NOT consulted by
--- any query. Substring filtering switched to plain LIKE because FTS5
--- prefix-match semantics were wrong for our UX (`'l*'` matched words
--- starting with l, not strings containing l) and exclude-with-short-
--- prefix queries were pathological. The table is kept in the schema
--- with negligible per-insert cost so we can re-introduce FTS5-backed
--- search at much larger scale without a migration.
+-- No full-text index. v1 created event_fts + triggers; nothing ever
+-- read them (D15), and v7 dropped them. Substring search is LIKE,
+-- optionally over data_json too (D40). A trigram FTS5 over payloads was
+-- measured and rejected: ~2.5x the payload bytes on disk, minutes to
+-- build on a real store.
 
 CREATE TABLE storage_snapshot (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -186,7 +179,8 @@ CREATE TABLE saved_filter (
   search      TEXT,
   search_rx   INTEGER NOT NULL DEFAULT 0,
   exclude     TEXT,
-  exclude_rx  INTEGER NOT NULL DEFAULT 0
+  exclude_rx  INTEGER NOT NULL DEFAULT 0,
+  search_payloads INTEGER NOT NULL DEFAULT 0   -- v8, D40
 );
 
 CREATE TABLE command_history (

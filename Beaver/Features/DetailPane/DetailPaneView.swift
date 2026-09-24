@@ -14,6 +14,10 @@ struct DetailPaneView: View {
     /// Already parsed by the caller — never parse in `body`.
     var data: StorageRecord?
     var context: StorageRecord?
+    /// Rows selected in the table; the pane details exactly one.
+    var selectionCount = 0
+
+    @Environment(ToastCenter.self) private var toasts
 
     var body: some View {
         if let event {
@@ -23,17 +27,26 @@ struct DetailPaneView: View {
                     Divider()
                     metadata(event)
                     if let data {
-                        sectionHeader("Data")
+                        sectionHeader("Data", copy: event.dataJSON)
                         treeView(root: data)
                     }
                     if let context {
-                        sectionHeader("Context")
+                        sectionHeader("Context", copy: event.contextJSON)
                         treeView(root: context)
                     }
                 }
                 .padding(16)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                // Fresh per event: "Show more" pages and expansion
+                // state belong to the payload they were opened on.
+                .id(event.id)
             }
+        } else if selectionCount > 1 {
+            ContentUnavailableView(
+                "\(selectionCount) events selected",
+                systemImage: "rectangle.stack",
+                description: Text("⌘C copies them as log lines.")
+            )
         } else {
             ContentUnavailableView(
                 "No event selected",
@@ -55,9 +68,26 @@ struct DetailPaneView: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(event.level.displayColor)
             }
-            Text(event.message)
-                .font(.title3)
-                .textSelection(.enabled)
+            // Monospaced so stack traces and pretty-printed JSON line
+            // up; capped and scrollable so a long one doesn't push the
+            // metadata and payload out of reach.
+            ScrollView {
+                Text(event.message)
+                    .font(.system(.body, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(8)
+            }
+            .frame(maxHeight: 260)
+            .fixedSize(horizontal: false, vertical: true)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(Color(.textBackgroundColor))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .strokeBorder(Color(.separatorColor), lineWidth: 1)
+            )
         }
     }
 
@@ -83,16 +113,35 @@ struct DetailPaneView: View {
         }
     }
 
+    /// `raw` is the stored JSON, copied verbatim.
     @ViewBuilder
-    private func sectionHeader(_ title: String) -> some View {
-        Text(title.uppercased())
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(.secondary)
-            .padding(.top, 4)
+    private func sectionHeader(_ title: String, copy raw: String?) -> some View {
+        HStack {
+            Text(title.uppercased())
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Spacer()
+            if let raw {
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(raw, forType: .string)
+                    toasts.success("Copied \(title.lowercased())")
+                } label: {
+                    Label("Copy \(title.lowercased())", systemImage: "doc.on.doc")
+                        .font(.caption)
+                }
+                .buttonStyle(.borderless)
+                .help("Copy the whole \(title.lowercased()) payload as JSON")
+            }
+        }
+        .padding(.top, 4)
     }
 
+    /// Paged: a payload with thousands of siblings at one level used to
+    /// lay every row out at once and freeze the pane.
     @ViewBuilder
     private func treeView(root: StorageRecord) -> some View {
         JSONTreeView(record: root)
+            .environment(\.jsonTreePageSize, 200)
     }
 }

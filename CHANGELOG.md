@@ -15,6 +15,22 @@ When releasing:
 ## [Unreleased]
 
 ### Added
+- **Log feed: the filter survives reconnects and relaunches**, and
+  changing it keeps the selected row when it still matches.
+  Right-click → **Show in Context** clears the filter and lands on the
+  row.
+- **Log feed: multi-select and ⌘C.** Selected rows copy as
+  `HH:mm:ss.SSS [LEVEL] subsystem/category: message` lines. The detail
+  pane has **Copy data** / **Copy context**.
+- **Log feed keyboard:** ⌘F focuses Search & highlight, ⌘G / ⇧⌘G step
+  through matches, `e` / `⇧E` jump to the next / previous error.
+- **Log feed: Time column shows its time zone**, plus an optional
+  **Δ** column (right-click the header): the time since the previous
+  row, or since the selected row when one is selected.
+- **Log feed: "⏎ N lines" badge** on rows whose message is cut off.
+- **Log feed: search event data.** The `{}` chip on Filter / Exclude
+  also matches each event's JSON payload. It's off by default, since
+  it's slower on big sessions, and saved filters keep it.
 - **Storages: edit and copy-key on every key row.** Hover a key for
   **copy key / copy value / edit / delete**; edit reuses the Add-key
   sheet with the key locked. Namespace rows show **＋ / copy** right
@@ -60,6 +76,16 @@ When releasing:
   layers are dimmed.
 
 ### Fixed
+- **Log feed: live streaming no longer refetches the session.** Each
+  append fetches only the new rows and merges them in place, including
+  events that arrive late with an earlier timestamp. On a 100k-event
+  session an append drops from ~150 ms to under a millisecond. Past
+  the 1M-row cap the feed now keeps the newest rows, not the oldest.
+- **Log feed: `%` and `_` in Filter / Exclude are literal**, regex
+  terms ignore case like plain ones, and an invalid regex outlines its
+  pill in red instead of silently showing no rows.
+- **A failed write shows an error toast** instead of dropping events
+  silently.
 - **Storages: unchanged snapshots no longer pile up.** Auto-refresh
   stored a full copy of every layer every 2 s; an unchanged report now
   only updates its time.
@@ -76,6 +102,12 @@ When releasing:
   and edit / delete target the key itself instead of `undefined`.
 
 ### Changed
+- **Log feed follows the tail by being at the bottom (D3).** Scroll up
+  and it stops; a floating **N new ↓** pill counts what arrived and
+  takes you back. The Auto-scroll toggle is gone.
+- **Log detail pane:** the message is a monospaced, scrollable block,
+  and very large payloads show 200 entries per level with
+  **Show more**.
 - **Storages tab restructured (D30 + D31).** Session / Local /
   Keychain are back as **tabs at the top** (one layer visible at a
   time). Inside each tab, every **namespace** (`applicaster.v2`,
@@ -109,6 +141,8 @@ When releasing:
   write at the layer's root.
 
 ### Removed
+- The unused full-text index (`event_fts`) and its triggers — inserts
+  and session deletes no longer pay for them (D40).
 - **Inline edit on storage values.** Changing a value now means
   delete + add. The common case (flip a feature flag) is binary
   anyway; keeping edit would re-introduce a sheet for a flow that

@@ -1,6 +1,6 @@
 import Foundation
 
-public struct Filter: Equatable, Hashable, Sendable {
+public struct Filter: Equatable, Hashable, Sendable, Codable {
 
     /// Which of the two click-to-filter columns a constraint applies to.
     public enum Facet: Hashable, Sendable {
@@ -33,6 +33,11 @@ public struct Filter: Equatable, Hashable, Sendable {
 
     public var excludeIsRegex: Bool
 
+    /// Also match search / exclude terms against the event's `data`
+    /// payload. Opt-in: payloads are ~97% of a session's bytes, so this
+    /// turns a millisecond scan into a noticeable one (D40).
+    public var searchPayloads: Bool
+
     /// Show only these subsystems. Empty means "no restriction", not
     /// "show nothing".
     public var subsystems: Set<String>
@@ -57,6 +62,7 @@ public struct Filter: Equatable, Hashable, Sendable {
         searchIsRegex: Bool = false,
         exclude: String? = nil,
         excludeIsRegex: Bool = false,
+        searchPayloads: Bool = false,
         subsystems: Set<String> = [],
         excludedSubsystems: Set<String> = [],
         categories: Set<String> = [],
@@ -68,6 +74,7 @@ public struct Filter: Equatable, Hashable, Sendable {
         self.searchIsRegex = searchIsRegex
         self.exclude = exclude?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
         self.excludeIsRegex = excludeIsRegex
+        self.searchPayloads = searchPayloads
         self.subsystems = subsystems
         self.excludedSubsystems = excludedSubsystems
         self.categories = categories
@@ -86,6 +93,38 @@ public struct Filter: Equatable, Hashable, Sendable {
             && categories.isEmpty
             && excludedCategories.isEmpty
             && hiddenThroughEventId == nil
+    }
+
+    /// The filter as a new session inherits it: everything but Clear's
+    /// watermark, which is an event id from this session.
+    public var carriedOver: Filter {
+        var copy = self
+        copy.hiddenThroughEventId = nil
+        return copy
+    }
+
+    /// Stored form for remembering the filter across launches.
+    public var stored: Data {
+        (try? JSONEncoder().encode(self)) ?? Data()
+    }
+
+    /// `nil` for data that isn't a stored filter — including one written
+    /// before a field was added, which then starts from scratch.
+    public static func restore(from data: Data) -> Filter? {
+        try? JSONDecoder().decode(Filter.self, from: data)
+    }
+
+    /// Whether `pattern` compiles the way the store will run it. The
+    /// store ignores a pattern that doesn't, so a half-typed regex
+    /// doesn't blank the feed; the UI marks the field instead.
+    public static func isValidRegex(_ pattern: String) -> Bool {
+        LogStore.compiledRegex(caseInsensitive(pattern)) != nil
+    }
+
+    /// Regex terms ignore case, matching `LIKE` and the highlighter.
+    /// An inline `(?-i)` in the pattern still turns it back on.
+    static func caseInsensitive(_ pattern: String) -> String {
+        "(?i)" + pattern
     }
 
     /// Number of active chips, for the facet menu's badge.

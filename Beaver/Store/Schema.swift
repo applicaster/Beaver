@@ -226,6 +226,30 @@ enum Schema {
             """)
         }
 
+        // `.immediate`: GRDB's default re-checks every foreign key in the
+        // database after a migration — a full scan that took ~3.8 s per
+        // migration on a real 2.8 GB store. These two touch no keyed
+        // rows, so there is nothing to check.
+        migrator.registerMigration("v7_drop_event_fts", foreignKeyChecks: .immediate) { db in
+            // Nothing has read event_fts since D15; the triggers still
+            // tokenised every insert and every delete. A trigram rebuild
+            // over payloads was measured and rejected (D40), so it goes.
+            // On the 2.8 GB reference store this takes ~11 ms: the index
+            // only covered short text columns.
+            try db.execute(sql: """
+                DROP TRIGGER IF EXISTS event_ai;
+                DROP TRIGGER IF EXISTS event_ad;
+                DROP TABLE IF EXISTS event_fts;
+            """)
+        }
+
+        migrator.registerMigration("v8_saved_filter_payloads", foreignKeyChecks: .immediate) { db in
+            try db.execute(sql: """
+                ALTER TABLE saved_filter
+                    ADD COLUMN search_payloads INTEGER NOT NULL DEFAULT 0;
+            """)
+        }
+
         return migrator
     }
 }

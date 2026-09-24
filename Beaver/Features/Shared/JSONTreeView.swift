@@ -12,6 +12,10 @@ struct StorageFieldEditor {
 
 extension EnvironmentValues {
     @Entry var storageFieldEditor: StorageFieldEditor? = nil
+    /// Siblings a tree level shows before a "Show N more" row. `nil`
+    /// shows them all — Storages and Network; the log detail pane sets
+    /// it, since an event payload can hold arrays of thousands.
+    @Entry var jsonTreePageSize: Int? = nil
 }
 
 /// Recursive JSON tree, shared by the log detail pane (DATA / CONTEXT)
@@ -163,9 +167,30 @@ struct JSONTreeList: View {
     let children: [StorageRecord]
     var depth: Int = 0
 
+    @Environment(\.jsonTreePageSize) private var pageSize
+    /// Pages revealed so far with "Show more".
+    @State private var pages = 1
+
+    private var shown: Int {
+        guard let pageSize else { return children.count }
+        return min(children.count, pageSize * pages)
+    }
+
     var body: some View {
-        ForEach(Array(children.enumerated()), id: \.element.id) { index, child in
+        ForEach(Array(children.prefix(shown).enumerated()), id: \.element.id) { index, child in
             JSONTreeView(record: child, depth: depth, rowIndex: index)
+        }
+        if let pageSize, shown < children.count {
+            let hidden = children.count - shown
+            Button {
+                pages += 1
+            } label: {
+                Text("Show \(min(pageSize, hidden)) more (\(hidden) hidden)")
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(Color.accentColor)
+                    .padding(.leading, CGFloat(depth) * 14 + 14)
+            }
+            .buttonStyle(.plain)
         }
     }
 }
