@@ -144,6 +144,8 @@ public struct ToastPresenter: View {
                         }
                         .buttonStyle(.link)
                         .font(.subheadline.weight(.semibold))
+                        // `.link` style exposes no title to accessibility.
+                        .accessibilityLabel(action.title)
                     }
                 }
                 .padding(.horizontal, 16)
