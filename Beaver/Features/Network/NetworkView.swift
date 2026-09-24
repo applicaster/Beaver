@@ -335,15 +335,31 @@ extension NetworkEntry.StatusClass {
 struct Pill: View {
     let text: String
     let tint: Color
+    @Environment(\.colorScheme) private var scheme
+    /// `.increased` inside a selected table row (blue background).
+    @Environment(\.backgroundProminence) private var prominence
 
     var body: some View {
         Text(text)
-            .font(.caption.monospaced().weight(.semibold))
-            .foregroundStyle(tint)
+            .font(.system(size: 11, weight: .bold, design: .monospaced))
+            .foregroundStyle(textColor)
             .lineLimit(1)
             .padding(.horizontal, 6)
-            .padding(.vertical, 1)
-            .background(tint.opacity(0.15), in: RoundedRectangle(cornerRadius: 4))
+            .padding(.vertical, 2)
+            .background(fill, in: RoundedRectangle(cornerRadius: 4))
+    }
+
+    // System .green/.orange are fill colours: as text on their own 15% tint
+    // they sit near 2:1 contrast and read as blurry. Darken (light mode) or
+    // lighten (dark mode) the text, and go white on a selected row.
+    private var textColor: Color {
+        if prominence == .increased { return .white }
+        return scheme == .dark ? tint.mix(with: .white, by: 0.25) : tint.mix(with: .black, by: 0.4)
+    }
+
+    private var fill: Color {
+        if prominence == .increased { return .white.opacity(0.22) }
+        return tint.opacity(scheme == .dark ? 0.25 : 0.18)
     }
 }
 
