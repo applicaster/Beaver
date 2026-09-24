@@ -50,7 +50,7 @@ struct WSServerControlFrameTests {
         try await client.send(.string(#"{"type":"marker"}"#))
 
         let first: Data? = await race(timeout: .seconds(10)) {
-            for await data in server.inbound { return data }
+            for await case .frame(let data) in server.inbound { return data }
             return nil
         } ?? nil
         #expect(first.map { String(decoding: $0, as: UTF8.self) } == #"{"type":"marker"}"#)

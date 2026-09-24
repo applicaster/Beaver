@@ -22,7 +22,17 @@ public actor WSServer {
         case failed(reason: String)
     }
 
-    public nonisolated let inbound: AsyncStream<Data>
+    /// A client's frames, bracketed by its connect and disconnect, in
+    /// order. One stream so the consumer opens the session before it
+    /// sees the first frame and ends it after the last one — `state`
+    /// is a separate stream and gives no ordering against frames.
+    public enum Inbound: Sendable, Equatable {
+        case connected
+        case frame(Data)
+        case disconnected
+    }
+
+    public nonisolated let inbound: AsyncStream<Inbound>
     public nonisolated let state: AsyncStream<State>
 
     private let port: NWEndpoint.Port
@@ -34,7 +44,7 @@ public actor WSServer {
     private var retryTask: Task<Void, Never>?
     private var retryAttempt = 0
 
-    private nonisolated let inboundContinuation: AsyncStream<Data>.Continuation
+    private nonisolated let inboundContinuation: AsyncStream<Inbound>.Continuation
     private nonisolated let stateContinuation: AsyncStream<State>.Continuation
 
     /// The dispatch queue used by `Network.framework` callbacks. Hops
@@ -52,7 +62,7 @@ public actor WSServer {
         }
         self.port = nwPort
 
-        var inboundCont: AsyncStream<Data>.Continuation!
+        var inboundCont: AsyncStream<Inbound>.Continuation!
         self.inbound = AsyncStream { inboundCont = $0 }
         self.inboundContinuation = inboundCont
 
@@ -217,7 +227,6 @@ public actor WSServer {
             Task { await self?.handleConnectionState(state, connection: connection) }
         }
         connection.start(queue: networkQueue)
-        receive(on: connection)
     }
 
     private func handleConnectionState(
@@ -242,6 +251,10 @@ public actor WSServer {
                 send(payload, on: connection)
             }
             stateContinuation.yield(.clientConnected)
+            // Read only after `.connected` is out: a frame the client
+            // sends at once would otherwise be yielded first.
+            inboundContinuation.yield(.connected)
+            receive(on: connection)
         case .failed(let error):
             print("[WSServer] -> client failed: \(error)")
             // A failed connection holds its resources — and this handler,
@@ -249,10 +262,12 @@ public actor WSServer {
             connection.cancel()
             current = nil
             stateContinuation.yield(.clientDisconnected(reason: error.localizedDescription))
+            inboundContinuation.yield(.disconnected)
         case .cancelled:
             print("[WSServer] -> client cancelled")
             current = nil
             stateContinuation.yield(.clientDisconnected(reason: "cancelled"))
+            inboundContinuation.yield(.disconnected)
         case .waiting(let error):
             print("[WSServer] -> client waiting: \(error)")
             stateContinuation.yield(.failed(reason: "waiting: \(error.localizedDescription)"))
@@ -278,7 +293,7 @@ public actor WSServer {
             let opcode = (context?.protocolMetadata(definition: NWProtocolWebSocket.definition)
                 as? NWProtocolWebSocket.Metadata)?.opcode
             if let data, !data.isEmpty, opcode == .text || opcode == .binary {
-                self.inboundContinuation.yield(data)
+                self.inboundContinuation.yield(.frame(data))
             }
             if error == nil {
                 // Continue reading.

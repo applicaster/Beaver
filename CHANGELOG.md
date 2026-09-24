@@ -14,6 +14,13 @@ When releasing:
 
 ## [Unreleased]
 
+### Fixed
+- **Events sent right after a device connects are no longer lost.** What
+  the SDK sent the moment it connected (for example, events it buffered
+  while disconnected) could arrive before Beaver had opened the live
+  session and was silently dropped. The session now always exists
+  before the first event is stored.
+
 ## [2.0.1] - 2026-09-24
 
 ### Fixed
