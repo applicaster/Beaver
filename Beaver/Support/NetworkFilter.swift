@@ -12,10 +12,20 @@ public struct NetworkFilter: Equatable, Sendable {
     /// One status to show: an exact code (NSURLError codes such as -999
     /// included) or entries that have no status at all. Not `.none`, which
     /// would read as `Optional.none` on `status`.
+    /// Single-select, hierarchical: Errors (4xx + 5xx + failed), a class,
+    /// or one code within a class.
     public enum StatusPick: Hashable, Sendable {
-        case code(Int), noStatus
+        case errors, statusClass(NetworkEntry.StatusClass), code(Int), noStatus
 
         public init(_ status: Int?) { self = status.map(Self.code) ?? .noStatus }
+
+        public func matches(_ e: NetworkEntry) -> Bool {
+            switch self {
+            case .errors: [.clientError, .serverError, .failed].contains(e.statusClass)
+            case .statusClass(let c): e.statusClass == c
+            case .code, .noStatus: self == StatusPick(e.status)
+            }
+        }
     }
 
     public var search = ""
@@ -52,7 +62,7 @@ public struct NetworkFilter: Equatable, Sendable {
         if excludedMethods.contains(e.method) { return false }
         if let method, method != e.method { return false }
         if excludedStatusClasses.contains(e.statusClass) { return false }
-        if let status, status != StatusPick(e.status) { return false }
+        if let status, !status.matches(e) { return false }
         let host = e.host
         if excludedHosts.contains(host) { return false }
         if let picked = self.host, picked != host { return false }
@@ -84,16 +94,26 @@ public struct NetworkFilter: Equatable, Sendable {
             .sorted { ($0.count, $1.value) > ($1.count, $0.value) }
     }
 
+    /// Flat, ordered for the picker to indent by `depth`: Errors, then each
+    /// class (depth 0) with its codes (depth 1). Empty rows are left out
+    /// unless they are the current selection.
     public func availableStatuses(in entries: [NetworkEntry]) -> [FacetOption<StatusPick>] {
         var f = self; f.status = nil
-        return Self.options(entries.filter(f.matches).map { StatusPick($0.status) }, keeping: status)
-            .sorted { a, b in
-                switch (a.value, b.value) {
-                case let (.code(x), .code(y)): x < y
-                case (.code, .noStatus): true
-                default: false
-                }
-            }
+        let matched = entries.filter(f.matches)
+        var result: [FacetOption<StatusPick>] = []
+        let errors = matched.count(where: StatusPick.errors.matches)
+        if errors > 0 || status == .errors { result.append(FacetOption(value: .errors, count: errors)) }
+        let staleCode = status?.codeClass == nil ? nil : status
+        let codes = Self.options(matched.map { StatusPick($0.status) }, keeping: staleCode)
+        for c in NetworkEntry.StatusClass.allCases {
+            let children = codes.filter { $0.value.codeClass == c }
+                .sorted { $0.value.sortKey < $1.value.sortKey }
+            let count = children.reduce(0) { $0 + $1.count }
+            guard !children.isEmpty || status == .statusClass(c) else { continue }
+            result.append(FacetOption(value: .statusClass(c), count: count))
+            result += children.map { FacetOption(value: $0.value, count: $0.count, depth: 1) }
+        }
+        return result
     }
 
     public func availableHosts(in entries: [NetworkEntry]) -> [FacetOption<String>] {
@@ -113,10 +133,29 @@ public struct NetworkFilter: Equatable, Sendable {
 public struct FacetOption<Value: Hashable & Sendable>: Hashable, Sendable {
     public let value: Value
     public let count: Int
+    /// Indent level in the picker; only the Status facet nests.
+    public let depth: Int
 
-    public init(value: Value, count: Int) {
+    public init(value: Value, count: Int, depth: Int = 0) {
         self.value = value
         self.count = count
+        self.depth = depth
+    }
+}
+
+private extension NetworkFilter.StatusPick {
+    /// The class a `.code`/`.noStatus` pick sits under; nil for Errors and classes.
+    var codeClass: NetworkEntry.StatusClass? {
+        switch self {
+        case .code(let n): NetworkEntry.StatusClass(status: n)
+        case .noStatus: .failed
+        case .errors, .statusClass: nil
+        }
+    }
+
+    /// Numeric within a class; "No status" last.
+    var sortKey: Int {
+        if case .code(let n) = self { n } else { .max }
     }
 }
 
