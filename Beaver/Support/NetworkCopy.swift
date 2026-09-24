@@ -75,12 +75,13 @@ extension NetworkEntry {
     /// grey is fine, yellow deserves a look, red is a problem.
     public enum Tier: Sendable { case normal, attention, critical }
 
-    /// Grey under 100 KB, yellow up to 1 MB, red from 1 MB. A body the SDK
-    /// cut with no reported size is at least 100 KB, so it is yellow.
+    /// Grey under 50 KB, yellow 50–100 KB, red from 100 KB. The SDK cuts
+    /// bodies at 100 000 chars and doesn't send the real size, so live
+    /// traffic tops out at "100 KB+": red means "too big to even capture".
     public var tableSizeTier: Tier {
         guard let bytes = responseBodySize ?? responseBytes else { return .normal }
-        if bytes >= 1_000_000 { return .critical }
-        if bytes >= 100_000 || (isResponseBodyTruncated && responseBodySize == nil) { return .attention }
+        if bytes >= 100_000 || (isResponseBodyTruncated && responseBodySize == nil) { return .critical }
+        if bytes >= 50_000 { return .attention }
         return .normal
     }
 

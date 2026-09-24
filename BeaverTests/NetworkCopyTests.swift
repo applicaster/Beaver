@@ -427,14 +427,14 @@ struct NetworkCopyTests {
 
     @Test
     func sizeTiersGreyYellowRed() {
-        // Grey under 100 KB, yellow from 100 KB (or a cut body of unknown size), red from 1 MB.
+        // Grey under 50 KB, yellow 50–100 KB, red from 100 KB — which includes every body the SDK cut.
         #expect(e(#"{"url":"https://a.io","responseBody":"ok"}"#).tableSizeTier == .normal)
         #expect(e(#"{"url":"https://a.io"}"#).tableSizeTier == .normal)
-        #expect(e(#"{"url":"https://a.io","responseBodySize":99999,"responseBody":"x"}"#).tableSizeTier == .normal)
-        #expect(e(#"{"url":"https://a.io","responseBodySize":100000,"responseBody":"x"}"#).tableSizeTier == .attention)
-        #expect(e(#"{"url":"https://a.io","responseBodySize":999999,"responseBody":"x"}"#).tableSizeTier == .attention)
-        #expect(e(#"{"url":"https://a.io","responseBodySize":1000000,"responseBody":"x"}"#).tableSizeTier == .critical)
-        #expect(e(#"{"url":"https://a.io","responseBody":"{\"a\":1... [TRUNCATED]"}"#).tableSizeTier == .attention)
+        #expect(e(#"{"url":"https://a.io","responseBodySize":49999,"responseBody":"x"}"#).tableSizeTier == .normal)
+        #expect(e(#"{"url":"https://a.io","responseBodySize":50000,"responseBody":"x"}"#).tableSizeTier == .attention)
+        #expect(e(#"{"url":"https://a.io","responseBodySize":99999,"responseBody":"x"}"#).tableSizeTier == .attention)
+        #expect(e(#"{"url":"https://a.io","responseBodySize":100000,"responseBody":"x"}"#).tableSizeTier == .critical)
+        #expect(e(#"{"url":"https://a.io","responseBody":"{\"a\":1... [TRUNCATED]"}"#).tableSizeTier == .critical)
         #expect(e(#"{"url":"https://a.io","responseBodySize":5000,"responseBody":"x... [TRUNCATED]"}"#).tableSizeTier == .normal)
     }
 
