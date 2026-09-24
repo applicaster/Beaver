@@ -14,6 +14,23 @@ When releasing:
 
 ## [Unreleased]
 
+### Fixed
+- **Events sent right after a device connects are no longer lost.** What
+  the SDK sent the moment it connected (for example, events it buffered
+  while disconnected) could arrive before Beaver had opened the live
+  session and was silently dropped. The session now always exists
+  before the first event is stored.
+
+## [2.0.1] - 2026-09-24
+
+### Fixed
+- **No more "decode failed: notJSON" every 20 seconds.** The SDK's keepalive
+  ping reached the decoder as if it were a log frame and showed up as a
+  `loggernext.protocol` warning in the feed. Beaver now answers pings and
+  ignores control frames.
+
+## [2.0.0] - 2026-09-24
+
 ### Added
 - **Agent Access (MCP).** An AI agent on this Mac (Claude Code, Cursor,
   Codex) can read what Beaver collected — sessions, logs, network requests,
@@ -332,7 +349,9 @@ end-to-end. No code-visible changes versus 1.0.0.
 
 Initial Beaver release. See `DECISIONS.md` D1–D20 for the design history.
 
-[Unreleased]: https://github.com/applicaster/Beaver/compare/1.0.2...HEAD
+[Unreleased]: https://github.com/applicaster/Beaver/compare/2.0.1...HEAD
+[2.0.1]: https://github.com/applicaster/Beaver/releases/tag/2.0.1
+[2.0.0]: https://github.com/applicaster/Beaver/releases/tag/2.0.0
 [1.0.2]: https://github.com/applicaster/Beaver/releases/tag/1.0.2
 [1.0.1]: https://github.com/applicaster/Beaver/releases/tag/1.0.1
 [1.0]: https://github.com/applicaster/Beaver/releases/tag/1.0.0
