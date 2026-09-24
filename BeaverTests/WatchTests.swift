@@ -96,4 +96,24 @@ struct WatchTests {
         }
         await #expect(throws: ToolError.self) { try await WatchTools.status.run(ToolArguments(["name": "nope"]), ctx) }
     }
+
+    @Test("markFired checks identity: a stale in-flight check for a replaced watch can't mark the replacement fired")
+    func markFiredIdentity() async {
+        let watches = Watches()
+        let old = Watches.Watch(name: "w", filter: .none, filterText: "no filter", follows: false,
+                                sessionId: 1, startId: 0, startedAt: Date(timeIntervalSince1970: 1),
+                                notifyAt: 1, firedAt: nil)
+        _ = await watches.add(old)
+        let new = Watches.Watch(name: "w", filter: .none, filterText: "no filter", follows: false,
+                                sessionId: 1, startId: 0, startedAt: Date(timeIntervalSince1970: 2),
+                                notifyAt: 1, firedAt: nil)
+        // watch_start replaced "w" while the old watch's notify task was
+        // mid-await; its stale `startedAt` must not mark the new watch fired.
+        _ = await watches.add(new)
+        #expect(await watches.markFired("w", startedAt: old.startedAt, at: Date()) == false)
+        #expect(await watches.get("w")?.firedAt == nil)
+        // Only the current watch's own identity can fire it, and only once.
+        #expect(await watches.markFired("w", startedAt: new.startedAt, at: Date()) == true)
+        #expect(await watches.markFired("w", startedAt: new.startedAt, at: Date()) == false)
+    }
 }

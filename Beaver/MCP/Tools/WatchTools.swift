@@ -75,7 +75,7 @@ enum WatchTools {
                               structured: ["watches": []], next: [startExample])
         }
         let statuses = try await list.asyncMap { try await ctx.status(of: $0) }
-        return report(statuses, verb: "Watch", ctx)
+        return report(statuses, stopped: false, ctx)
     }
 
     static let stop = MCPTool(
@@ -93,7 +93,7 @@ enum WatchTools {
             let gone = await ctx.watches.removeAll()
             let statuses = try await gone.asyncMap { try await ctx.status(of: $0) }
             guard !statuses.isEmpty else { return ToolResult(summary: "No watches to stop.", structured: ["watches": []]) }
-            return report(statuses, verb: "Stopped", ctx)
+            return report(statuses, stopped: true, ctx)
         }
         guard let name = try args.string("name").flatMap(ToolContext.trimmedNonEmpty) else {
             throw ToolError("Say which: watch_stop(name: \"player errors\"), or watch_stop(all: true).")
@@ -103,7 +103,7 @@ enum WatchTools {
             return ToolResult(summary: "No watch “\(name)”; nothing to stop. \(active)",
                               structured: ["watches": []], next: ["watch_status()"])
         }
-        return report([try await ctx.status(of: w)], verb: "Stopped", ctx)
+        return report([try await ctx.status(of: w)], stopped: true, ctx)
     }
 
     static func parseNotify(_ value: JSON?) throws -> Int? {
@@ -125,7 +125,7 @@ enum WatchTools {
     }
 
     /// One line per watch: `“player errors” — 23 matches since 14:10:05 in #13 → #14 (…); first #…, last #…; …`.
-    static func report(_ statuses: [WatchStatus], verb: String, _ ctx: ToolContext) -> ToolResult {
+    static func report(_ statuses: [WatchStatus], stopped: Bool, _ ctx: ToolContext) -> ToolResult {
         func counts(_ list: [FacetCount]) -> String {
             list.prefix(10).map { "\($0.value) \($0.count)" }.joined(separator: ", ")
         }
@@ -157,8 +157,8 @@ enum WatchTools {
             ])
         }
         let head = statuses.count == 1
-            ? "\(verb == "Stopped" ? "Stopped " : "")\(lines[0])"
-            : "\(verb == "Stopped" ? "Stopped \(statuses.count) watches" : "\(statuses.count) watches")."
+            ? "\(stopped ? "Stopped " : "")\(lines[0])"
+            : "\(stopped ? "Stopped \(statuses.count) watches" : "\(statuses.count) watches")."
         let next = statuses.first(where: { $0.first != nil }).map { s in
             ["logs_get(ids: [\(s.first?.id ?? 0)]) for the first match",
              "logs_query(afterId: \(s.watch.startId), filter: {…}, order: \"oldest\")"]

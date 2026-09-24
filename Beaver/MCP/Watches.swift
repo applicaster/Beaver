@@ -55,9 +55,11 @@ public actor Watches {
 
     func setTask(_ task: Task<Void, Never>, for name: String) { tasks[name] = task }
 
-    /// `false` when it already fired, or the watch is gone.
-    func markFired(_ name: String, at date: Date) -> Bool {
-        guard var watch = watches[name], watch.firedAt == nil else { return false }
+    /// `false` when the watch is gone, was replaced (a different
+    /// `startedAt` — the caller's stale copy lost the race to `add`), or
+    /// already fired.
+    func markFired(_ name: String, startedAt: Date, at date: Date) -> Bool {
+        guard var watch = watches[name], watch.startedAt == startedAt, watch.firedAt == nil else { return false }
         watch.firedAt = date
         watches[name] = watch
         return true
@@ -155,7 +157,12 @@ extension ToolContext {
                 guard let current = await watches.get(w.name), current.startedAt == w.startedAt,
                       current.firedAt == nil else { return }
                 guard let m = try? await matches(of: current), m.total >= threshold else { continue }
-                guard await watches.markFired(w.name, at: now()) else { return }
+                // `matches(of:)` awaited the store; a replacing watch_start
+                // (or watch_stop) could have landed while it did. `cancel()`
+                // doesn't interrupt that await, so re-check both explicitly
+                // before publishing what could otherwise be the old watch's
+                // count under the new watch's name.
+                guard !Task.isCancelled, await watches.markFired(w.name, startedAt: w.startedAt, at: now()) else { return }
                 let text = "Watch “\(w.name)”: \(m.total) match\(m.total == 1 ? "" : "es") (\(w.filterText))."
                 let links = m.first.map { [JournalLink.event($0.id)] } ?? []
                 let outcome = await ui.notify(AgentNote(text: text, links: links))
