@@ -62,6 +62,24 @@ struct ToolInputTests {
         }
     }
 
+    @Test("Session label: most recent says so, given/live/viewed don't")
+    func sessionLabels() async throws {
+        let store = try LogStore(source: .inMemory)
+        let imported = try await store.createSession(source: .imported)
+        let live = try await store.createSession(source: .live)
+
+        // .latest: an old live session sitting around must not read as "live".
+        #expect(try await makeContext(store).resolveSession(ToolArguments()).label == "#\(live.id) (most recent, live)")
+        // .given keeps the source, with no "most recent".
+        #expect(try await makeContext(store)
+            .resolveSession(ToolArguments(["sessionId": .number(Double(imported.id))])).label == "#\(imported.id) (imported)")
+        // .live / .viewed report how the session was picked, not its source.
+        #expect(try await makeContext(store, ui: HostSnapshot(liveSessionId: live.id))
+            .resolveSession(ToolArguments()).label == "#\(live.id) (live)")
+        #expect(try await makeContext(store, ui: HostSnapshot(viewingSessionId: imported.id))
+            .resolveSession(ToolArguments()).label == "#\(imported.id) (viewed)")
+    }
+
     @Test("Filter: resolves names, echoes them, rejects a miss and a bad regex")
     func filters() async throws {
         let store = try LogStore(source: .inMemory)

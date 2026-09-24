@@ -116,9 +116,16 @@ public struct ResolvedSession: Sendable {
     public let session: Session
     public let how: How
 
-    /// `#13 (live)`, `#12 (viewed)`, `#9 (imported)`.
+    /// `#13 (live)`, `#12 (viewed)`, `#9 (imported)`, `#7 (most recent, live)`.
+    /// `.latest` always says "most recent" — an old live session that's no
+    /// longer the one connected must not read as simply "(live)", which
+    /// would look like the current one.
     public var label: String {
-        "#\(id) (\(how == .given || how == .latest ? session.source.rawValue : how.rawValue))"
+        switch how {
+        case .given: "#\(id) (\(session.source.rawValue))"
+        case .latest: "#\(id) (most recent, \(session.source.rawValue))"
+        case .live, .viewed: "#\(id) (\(how.rawValue))"
+        }
     }
 }
 
