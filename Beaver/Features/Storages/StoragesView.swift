@@ -324,9 +324,10 @@ private struct StoragesTopBar: View {
                     NamespaceTab(
                         namespace: ns,
                         isSelected: vm.selectedNamespace == ns,
-                        count: vm.recordCount(in: ns)
+                        count: vm.recordCount(in: ns),
+                        matchCount: vm.layerMatchCounts[ns]
                     ) {
-                        vm.selectedNamespace = ns
+                        vm.showMatches(in: ns)
                     }
                 }
             }
@@ -808,6 +809,8 @@ private struct NamespaceTab: View {
     let namespace: StorageSnapshot.Namespace
     let isSelected: Bool
     let count: Int
+    /// Discover hits in this layer; nil when not searching.
+    let matchCount: Int?
     let action: () -> Void
 
     @State private var isHovered = false
@@ -835,6 +838,11 @@ private struct NamespaceTab: View {
                     .font(.system(size: 12, weight: .medium))
                 Text(namespace.displayName)
                     .font(.subheadline.weight(.semibold))
+                if let matchCount {
+                    Label("\(matchCount)", systemImage: "magnifyingglass")
+                        .labelStyle(.titleAndIcon)
+                        .font(.caption.monospacedDigit().weight(.semibold))
+                }
                 Text("\(count)")
                     .font(.caption.monospacedDigit().weight(.semibold))
                     .padding(.horizontal, 7)
@@ -849,7 +857,7 @@ private struct NamespaceTab: View {
             // Same 30pt as the green ＋ tile beside the tabs.
             .frame(height: 30)
             .foregroundStyle(isSelected ? Color.white : color)
-            .opacity(count == 0 && !isSelected ? 0.6 : 1)
+            .opacity((matchCount ?? count) == 0 && !isSelected ? 0.6 : 1)
             .background(
                 RoundedRectangle(cornerRadius: 8)
                     .fill(isSelected
@@ -863,7 +871,8 @@ private struct NamespaceTab: View {
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
-        .help("\(count) \(count == 1 ? "namespace" : "namespaces") in \(namespace.displayName) storage")
+        .help(matchCount.map { "\($0) \($0 == 1 ? "match" : "matches") in \(namespace.displayName) storage — click to jump to the first" }
+              ?? "\(count) \(count == 1 ? "namespace" : "namespaces") in \(namespace.displayName) storage")
     }
 }
 

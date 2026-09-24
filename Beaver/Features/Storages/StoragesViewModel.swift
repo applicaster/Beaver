@@ -179,6 +179,17 @@ final class StoragesViewModel {
 
     var matchCount: Int { matchIds.count }
 
+    /// Discover hits per layer, so a tab can say where the matches are.
+    /// Empty when not searching. Only the selected layer honours the
+    /// group picker — group names mean nothing on the other tabs.
+    private(set) var layerMatchCounts: [StorageSnapshot.Namespace: Int] = [:]
+
+    /// Switch to a layer's tab and land on its first match.
+    func showMatches(in namespace: StorageSnapshot.Namespace) {
+        selectedNamespace = namespace
+        if !matchIds.isEmpty { jump(to: 0) }
+    }
+
     /// True when `.*` is on and the pattern doesn't compile. The box
     /// turns red and nothing matches, but the list stays visible so the
     /// user doesn't lose their place.
@@ -200,8 +211,10 @@ final class StoragesViewModel {
         guard !matchIds.isEmpty else { return }
         let current = currentMatchIndex ?? (delta > 0 ? -1 : 0)
         let count = matchIds.count
-        let next = ((current + delta) % count + count) % count
+        jump(to: ((current + delta) % count + count) % count)
+    }
 
+    private func jump(to next: Int) {
         currentMatchIndex = next
         let id = matchIds[next]
         currentMatchId = id
@@ -228,6 +241,17 @@ final class StoragesViewModel {
         )
         currentMatchIndex = matchIds.isEmpty ? nil : 0
         currentMatchId = matchIds.first
+
+        let matcher = self.matcher
+        var counts: [StorageSnapshot.Namespace: Int] = [:]
+        if matcher.isFiltering {
+            for ns in StorageSnapshot.Namespace.allCases {
+                counts[ns] = ns == selectedNamespace
+                    ? matchIds.count
+                    : StorageSearch.collectMatches(in: records(in: ns), with: matcher).count
+            }
+        }
+        if counts != layerMatchCounts { layerMatchCounts = counts }
     }
 
 
