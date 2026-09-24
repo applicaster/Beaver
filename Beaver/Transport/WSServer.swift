@@ -268,10 +268,16 @@ public actor WSServer {
     /// Yields straight from the callback: a `Task` per frame gives no
     /// ordering guarantee, and an older storage snapshot overtaking a
     /// newer one would win as "latest".
+    ///
+    /// Control frames (ping, pong, close) are delivered here too, even
+    /// with `autoReplyPing` answering the ping. They carry no protocol
+    /// frame, so only data messages go on to the decoder (PROTOCOL.md §1).
     private nonisolated func receive(on connection: NWConnection) {
-        connection.receiveMessage { [weak self] data, _, _, error in
+        connection.receiveMessage { [weak self] data, context, _, error in
             guard let self else { return }
-            if let data, !data.isEmpty {
+            let opcode = (context?.protocolMetadata(definition: NWProtocolWebSocket.definition)
+                as? NWProtocolWebSocket.Metadata)?.opcode
+            if let data, !data.isEmpty, opcode == .text || opcode == .binary {
                 self.inboundContinuation.yield(data)
             }
             if error == nil {

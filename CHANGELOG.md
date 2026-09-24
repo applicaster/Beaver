@@ -94,6 +94,10 @@ When releasing:
   layers are dimmed.
 
 ### Fixed
+- **No more "decode failed: notJSON" every 20 seconds.** The SDK's keepalive
+  ping reached the decoder as if it were a log frame and showed up as a
+  `loggernext.protocol` warning in the feed. Beaver now answers pings and
+  ignores control frames.
 - **Log feed: live streaming no longer refetches the session.** Each
   append fetches only the new rows and merges them in place, including
   events that arrive late with an earlier timestamp. On a 100k-event
