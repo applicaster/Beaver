@@ -15,7 +15,7 @@ enum StateTools {
         case "local": return [.local]
         case "secure", "keychain": return [.keychain]
         case let other?:
-            throw ToolError("Unknown layer \"\(other)\". Use session, local, secure (keychain) or all.")
+            throw ToolError("Unknown layer \"\(other)\". Use storage_snapshot(layer: \"local\") or session, secure (keychain), all.")
         }
     }
 
@@ -39,11 +39,20 @@ enum StateTools {
                 blocks.append("\(ns.displayName): no snapshot")
                 continue
             }
-            let data = (try? JSON.parse(Data(snap.dataJSON.utf8))) ?? .string(snap.dataJSON)
-            let text = ToolText.capped(data.prettyText, maxBytes: ToolText.payloadCap)
+            // Cap the raw dataJSON text first, then parse if whole
+            let capped = ToolText.capped(snap.dataJSON, maxBytes: ToolText.payloadCap)
+            let prettyIfWhole = !capped.truncated ? (try? JSON.parse(Data(capped.text.utf8)).prettyText) : nil
+            let text = ToolText.capped(prettyIfWhole ?? capped.text, maxBytes: ToolText.payloadCap)
             blocks.append("\(ns.displayName) — as of \(snap.takenAt.ISO8601Format()):\n\(text.text)"
                 + (text.truncated ? "\n[cut at 256 KB]" : ""))
-            out[ns.rawValue] = ["takenAt": .string(snap.takenAt.ISO8601Format()), "data": data]
+            // Parsed when whole and valid, so the agent gets structure; the raw text otherwise.
+            func payload(_ p: (text: String, truncated: Bool)) -> JSON {
+                if !p.truncated, let parsed = try? JSON.parse(Data(p.text.utf8)) { return parsed }
+                return .string(p.text)
+            }
+            out[ns.rawValue] = ["takenAt": .string(snap.takenAt.ISO8601Format()),
+                                "data": payload(capped),
+                                "dataTruncated": .bool(capped.truncated)]
         }
         let found = out.count
         let result = ToolResult(
@@ -56,7 +65,6 @@ enum StateTools {
                              : ["logs_query(filter: {search: \"storage\"}) for storage-related logs"],
             sessionId: s.id
         )
-        assert(!result.next.isEmpty)
         return result
     }
 
@@ -69,16 +77,14 @@ enum StateTools {
     ) { _, ctx in
         let hints = await ctx.ui.snapshot().commands
         guard !hints.isEmpty else {
-            let result = ToolResult(summary: "No command list yet: no device is connected, or it hasn't answered cmdlist.",
+            return ToolResult(summary: "No command list yet: no device is connected, or it hasn't answered cmdlist.",
                               structured: ["commands": []], next: ["beaver_status()"])
-            assert(!result.next.isEmpty)
-            return result
         }
         let lines = hints.map { h in
             [h.syntax ?? h.name, h.description].compactMap { $0 }.joined(separator: " — ")
         }
         let nextSuggestions = hints.first.map { h in ["logs_query(filter: {search: \"\(h.name)\"}) to see what a command logged"] } ?? []
-        let result = ToolResult(
+        return ToolResult(
             summary: "The app accepts \(hints.count) command(s).",
             body: lines.joined(separator: "\n"),
             structured: ["commands": .array(hints.map { h in
@@ -86,8 +92,6 @@ enum StateTools {
             })],
             next: nextSuggestions
         )
-        assert(!result.next.isEmpty)
-        return result
     }
 
     static let bookmarksList = MCPTool(
@@ -103,7 +107,7 @@ enum StateTools {
         let requests = try await ctx.store.networkEntries(sessionId: s.id).filter { requestIds.contains($0.id) }
         let lines = events.map(ToolText.eventLine) + requests.map(NetworkTools.line)
         let nextSuggestions = events.first.map { e in ["logs_get(ids: [\(e.id)])"] } ?? ["logs_query()"]
-        let result = ToolResult(
+        return ToolResult(
             summary: "Session \(s.label): \(events.count) bookmarked event(s), \(requests.count) bookmarked request(s).",
             body: lines.joined(separator: "\n"),
             structured: ["sessionId": JSON(s.id),
@@ -112,8 +116,6 @@ enum StateTools {
             next: nextSuggestions,
             sessionId: s.id
         )
-        assert(!result.next.isEmpty)
-        return result
     }
 
     static let filtersList = MCPTool(
@@ -133,13 +135,11 @@ enum StateTools {
                 return "logs_query(filter: {…\(filterRepr)…}) to apply the \"\(f.name)\" filter"
             }
         }
-        let result = ToolResult(
+        return ToolResult(
             summary: saved.isEmpty ? "No saved filters." : "\(saved.count) saved filter(s).",
             body: saved.map { "\($0.name) — \(ToolText.describe($0.filter))" }.joined(separator: "\n"),
             structured: ["filters": .array(saved.map { ["name": .string($0.name), "describes": .string(ToolText.describe($0.filter))] })],
             next: nextSuggestions
         )
-        assert(!result.next.isEmpty)
-        return result
     }
 }

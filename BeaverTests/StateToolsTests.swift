@@ -54,4 +54,23 @@ struct StateToolsTests {
         let r = try await StateTools.filtersList.run(ToolArguments(), makeContext(store))
         #expect(r.body.contains("Auth — level ≥ warning; subsystems com.app.auth"))
     }
+
+    @Test("Large storage snapshot is truncated in structured data")
+    func largeSnapshot() async throws {
+        let store = try LogStore(source: .inMemory)
+        let s = try await store.createSession(source: .live)
+        // Create a JSON >256 KB by repeating a pattern
+        let chunk = String(repeating: "{\"k\":\"" + String(repeating: "x", count: 1000) + "\"}", count: 300)
+        let largeJSON = "{\"applicaster.v2\":" + chunk + "}"
+        try await store.recordStorageSnapshot(sessionId: s.id, namespace: .local, dataJSON: largeJSON)
+        let ctx = makeContext(store, ui: HostSnapshot(liveSessionId: s.id))
+        let result = try await StateTools.storageSnapshot.run(ToolArguments(["layer": "local"]), ctx)
+        #expect(result.structured["layers"]?["local"]?["dataTruncated"] == true)
+        // Verify the structured data is a string (truncated) and ≤256 KB
+        if let dataJSON = result.structured["layers"]?["local"]?["data"]?.string {
+            #expect(dataJSON.utf8.count <= 256 * 1024)
+        } else {
+            Issue.record("Expected string data when truncated")
+        }
+    }
 }
