@@ -9,9 +9,10 @@ import Foundation
 /// frame (PROTOCOL.md §4.3). One frame is one finished request; there is no
 /// request/response pairing on the wire.
 ///
-/// `payloadJSON` is the payload as received. The store saves it and reads
-/// it back through `parse`, so live and reopened sessions go through the
-/// same code.
+/// Parsed fields only. The payload as received travels as a
+/// `NetworkCapture` into the store, which reads it back through `parse`,
+/// so live and reopened sessions go through the same code. The Network
+/// tab's list never holds it: bodies would sit in memory twice.
 public struct NetworkEntry: Identifiable, Hashable, Sendable {
 
     public enum StatusClass: String, CaseIterable, Sendable {
@@ -45,6 +46,12 @@ public struct NetworkEntry: Identifiable, Hashable, Sendable {
     public let id: Int64
     public let requestId: String
     public let url: String
+    /// Parsed once in `parse`: the table, the filter and the Host facet
+    /// read it for every row on every pass.
+    public let host: String
+    /// Path plus query, the "Path" column. Falls back to the whole URL
+    /// when it doesn't parse, so the row is never blank.
+    public let path: String
     public let method: String
     public let status: Int?
     public let statusText: String?
@@ -60,17 +67,6 @@ public struct NetworkEntry: Identifiable, Hashable, Sendable {
     public let startMillis: UInt64
     public let durationMillis: Int?
     public let error: String?
-    public let payloadJSON: String
-
-    public var host: String { URLComponents(string: url)?.host ?? "" }
-
-    /// Path plus query, the "Path" column. Falls back to the whole URL
-    /// when it doesn't parse, so the row is never blank.
-    public var path: String {
-        guard let c = URLComponents(string: url), c.host != nil else { return url }
-        let p = c.percentEncodedPath.isEmpty ? "/" : c.percentEncodedPath
-        return c.percentEncodedQuery.map { "\(p)?\($0)" } ?? p
-    }
 
     public var statusClass: StatusClass { StatusClass(status: status) }
 
@@ -87,28 +83,37 @@ public struct NetworkEntry: Identifiable, Hashable, Sendable {
         let start = ProtocolDecoder.timestampMillis(timing?["startTime"])
             ?? ProtocolDecoder.timestampMillis(o["timestamp"])
             ?? fallbackMillis
-        let duration: Int? = int(timing?["duration"]) ?? {
+        // A clock step on the device can put endTime before startTime.
+        let duration: Int? = (int(timing?["duration"]) ?? {
             guard let end = int(timing?["endTime"]), let s = int(timing?["startTime"]) else { return nil }
             return end - s
+        }()).map { max($0, 0) }
+
+        let c = URLComponents(string: url)
+        let path: String = {
+            guard let c, c.host != nil else { return url }
+            let p = c.percentEncodedPath.isEmpty ? "/" : c.percentEncodedPath
+            return c.percentEncodedQuery.map { "\(p)?\($0)" } ?? p
         }()
 
         return NetworkEntry(
             id: id,
             requestId: o["requestId"] as? String ?? "",
             url: url,
+            host: c?.host ?? "",
+            path: path,
             method: (o["method"] as? String ?? "GET").uppercased(),
             status: int(o["status"]),
             statusText: o["statusText"] as? String,
             requestHeaders: headers(o["requestHeaders"]),
             responseHeaders: headers(o["responseHeaders"]),
-            requestBody: o["requestBody"] as? String,
-            responseBody: o["responseBody"] as? String,
+            requestBody: body(o["requestBody"]),
+            responseBody: body(o["responseBody"]),
             requestBodySize: nonNegativeInt(o["requestBodySize"]),
             responseBodySize: nonNegativeInt(o["responseBodySize"]),
             startMillis: start,
             durationMillis: duration,
-            error: o["error"] as? String,
-            payloadJSON: payloadJSON
+            error: o["error"] as? String
         )
     }
 
@@ -129,8 +134,36 @@ public struct NetworkEntry: Identifiable, Hashable, Sendable {
         return n
     }
 
+    /// A body the SDK sent as JSON rather than a string is kept as JSON
+    /// text, not dropped; `null` means no body.
+    private static func body(_ value: Any?) -> String? {
+        switch value {
+        case nil, is NSNull: return nil
+        case let s as String: return s
+        case let v?:
+            let data = try? JSONSerialization.data(
+                withJSONObject: v, options: [.fragmentsAllowed, .sortedKeys, .withoutEscapingSlashes])
+            return data.map { String(decoding: $0, as: UTF8.self) } ?? "\(v)"
+        }
+    }
+
     private static func headers(_ value: Any?) -> [String: String] {
         guard let dict = value as? [String: Any] else { return [:] }
         return dict.mapValues { ($0 as? String) ?? "\($0)" }
+    }
+}
+
+/// A request as received: the parsed entry plus the payload verbatim.
+/// Decoders hand these to `LogStore.recordNetworkEntry`, which keeps the
+/// payload; everything after that reads bare entries and fetches the
+/// payload by id (`LogStore.networkPayload(id:)`) when it needs it.
+public struct NetworkCapture: Sendable {
+    public let entry: NetworkEntry
+    public let payloadJSON: String
+
+    public init?(_ payloadJSON: String, fallbackMillis: UInt64) {
+        guard let entry = NetworkEntry.parse(payloadJSON, fallbackMillis: fallbackMillis) else { return nil }
+        self.entry = entry
+        self.payloadJSON = payloadJSON
     }
 }

@@ -190,8 +190,8 @@ struct BeaverApp: App {
                     dataJSON: json
                 )
             }
-        case .success(.network(let entry)):
-            try? await env.store.recordNetworkEntry(entry, sessionId: sessionId)
+        case .success(.network(let capture)):
+            try? await env.store.recordNetworkEntry(capture, sessionId: sessionId)
         case .success(.unknown(let typeRaw)):
             // PROTOCOL.md §7: tolerate unknown types, log as a synthetic
             // event so the user sees them.

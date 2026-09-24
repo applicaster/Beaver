@@ -21,12 +21,12 @@ enum EventJSON {
     struct Export {
         var events: [DecodedEvent]
         var storage: [StorageSnapshot.Namespace: String]
-        var network: [NetworkEntry]
+        var network: [NetworkCapture]
 
         init(
             events: [DecodedEvent] = [],
             storage: [StorageSnapshot.Namespace: String] = [:],
-            network: [NetworkEntry] = []
+            network: [NetworkCapture] = []
         ) {
             self.events = events
             self.storage = storage
@@ -123,15 +123,15 @@ enum EventJSON {
         return decodeStorage(layers)
     }
 
-    private static func decodeNetwork(_ value: Any?) -> [NetworkEntry] {
+    private static func decodeNetwork(_ value: Any?) -> [NetworkCapture] {
         if let array = value as? [[String: Any]] {
             return array.compactMap { dict in
                 guard let json = jsonString(dict) else { return nil }
-                return NetworkEntry.parse(json, fallbackMillis: 0)
+                return NetworkCapture(json, fallbackMillis: 0)
             }
         }
         if let strings = value as? [String] {
-            return strings.compactMap { NetworkEntry.parse($0, fallbackMillis: 0) }
+            return strings.compactMap { NetworkCapture($0, fallbackMillis: 0) }
         }
         return []
     }
@@ -242,7 +242,7 @@ enum EventJSON {
     static func encode(
         _ events: [EventRecord],
         storage: [StorageSnapshot.Namespace: String],
-        network: [NetworkEntry] = [],
+        network: [String] = [],
         pretty: Bool = true
     ) throws -> Data {
         guard !storage.isEmpty || !network.isEmpty else {
@@ -253,8 +253,8 @@ enum EventJSON {
             root["storage"] = storageObject(storage)
         }
         if !network.isEmpty {
-            root["network"] = network.compactMap { entry in
-                try? JSONSerialization.jsonObject(with: Data(entry.payloadJSON.utf8))
+            root["network"] = network.compactMap { payload in
+                try? JSONSerialization.jsonObject(with: Data(payload.utf8))
             }
         }
         let options: JSONSerialization.WritingOptions = pretty ? [.prettyPrinted] : []

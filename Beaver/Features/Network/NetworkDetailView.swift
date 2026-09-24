@@ -14,14 +14,19 @@ import AppKit
 struct NetworkDetailView: View {
     let entry: NetworkEntry?
     var isBookmarked = false
+    /// Reads the payload as received from the store, for Copy JSON.
+    let payloadJSON: (NetworkEntry.ID) async -> String?
     var onToggleBookmark: ((NetworkEntry) -> Void)?
+    /// `nil` inside the sheet, which would stay on top of the Log feed.
+    var onShowInLogFeed: ((NetworkEntry) -> Void)?
     /// Opens the entry in the large sheet. `nil` inside the sheet itself.
     var onExpand: ((NetworkEntry) -> Void)?
 
     var body: some View {
         if let entry {
-            NetworkDetailContent(entry: entry, isBookmarked: isBookmarked,
-                                 onToggleBookmark: onToggleBookmark, onExpand: onExpand)
+            NetworkDetailContent(entry: entry, isBookmarked: isBookmarked, payloadJSON: payloadJSON,
+                                 onToggleBookmark: onToggleBookmark, onShowInLogFeed: onShowInLogFeed,
+                                 onExpand: onExpand)
         } else {
             ContentUnavailableView("No request selected", systemImage: "network")
         }
@@ -64,7 +69,9 @@ private struct ParsedEntry {
 private struct NetworkDetailContent: View {
     let entry: NetworkEntry
     let isBookmarked: Bool
+    let payloadJSON: (NetworkEntry.ID) async -> String?
     let onToggleBookmark: ((NetworkEntry) -> Void)?
+    let onShowInLogFeed: ((NetworkEntry) -> Void)?
     let onExpand: ((NetworkEntry) -> Void)?
 
     @Environment(ToastCenter.self) private var toasts
@@ -188,17 +195,31 @@ private struct NetworkDetailContent: View {
                 }
                 .help(isBookmarked ? "Remove bookmark" : "Bookmark this request")
             }
+            if let onShowInLogFeed {
+                Button { onShowInLogFeed(entry) } label: {
+                    Label("Show in Log feed", systemImage: "list.bullet.rectangle").labelStyle(.iconOnly)
+                }
+                .help("Show in Log feed — the events around this request's start time")
+            }
             if let onExpand {
                 Button { onExpand(entry) } label: {
                     Image(systemName: "arrow.up.left.and.arrow.down.right")
                 }
                 .help("Open in a larger window")
             }
-            Button("Copy JSON") { toasts.copy(entry.prettyPayloadJSON, "Copied JSON") }
+            Button("Copy JSON") {
+                Task {
+                    guard let payload = await payloadJSON(entry.id) else {
+                        toasts.error("Couldn't read this request")
+                        return
+                    }
+                    toasts.copy(NetworkEntry.prettyPayloadJSON(payload), "Copied JSON")
+                }
+            }
                 .help("Copy the whole payload as received")
-            Button("cURL") { toasts.copy(entry.curlCommand, "Copied cURL") }
+            Button("cURL") { toasts.copy(entry.curlCommand, entry.copyToast("cURL")) }
                 .help("Copy as a cURL command")
-            Button("fetch") { toasts.copy(entry.fetchSnippet, "Copied fetch") }
+            Button("fetch") { toasts.copy(entry.fetchSnippet, entry.copyToast("fetch")) }
                 .help("Copy as a JavaScript fetch call")
         }
         .buttonStyle(.bordered)

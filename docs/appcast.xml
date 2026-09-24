@@ -28,6 +28,30 @@
     <language>en</language>
 
     <item>
+      <title>Version 1.20.0</title>
+      <pubDate>Thu, 24 Sep 2026 01:59:05 +0000</pubDate>
+      <sparkle:version>37</sparkle:version>
+      <sparkle:shortVersionString>1.20.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>15.5</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/applicaster/Beaver/releases/download/1.20.0/Beaver-1.20.0.zip"
+        sparkle:edSignature="cfjBgI93zGeYMKsuyPKdQh/m4N+pA8JiNDIZOKgSTGUxETMs46F07z5b1Y8Z4j2/mPAgFzEvBbUacuWOiMDyAQ==" length="8670190"
+        type="application/octet-stream" />
+    </item>
+
+    <item>
+      <title>Version 1.19.0</title>
+      <pubDate>Thu, 24 Sep 2026 01:55:37 +0000</pubDate>
+      <sparkle:version>36</sparkle:version>
+      <sparkle:shortVersionString>1.19.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>15.5</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/applicaster/Beaver/releases/download/1.19.0/Beaver-1.19.0.zip"
+        sparkle:edSignature="+1EjHi5Od6fyySxUrvPU11tLCTZWdClRFzSUoGD7OSwAyxxXh1SvSNAKiht71XhnFnzoQQobzEbMWtJ0BzhCCw==" length="8601229"
+        type="application/octet-stream" />
+    </item>
+
+    <item>
       <title>Version 1.18.0</title>
       <pubDate>Thu, 24 Sep 2026 01:48:46 +0000</pubDate>
       <sparkle:version>35</sparkle:version>

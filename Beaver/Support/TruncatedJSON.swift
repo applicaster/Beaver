@@ -9,6 +9,8 @@ import Foundation
 enum TruncatedJSON {
 
     static let marker = "... [TRUNCATED]"
+    /// Characters the SDK keeps before appending `marker`.
+    static let limit = 100_000
 
     /// The document up to its last complete value, with the open containers
     /// closed: `{"a":1,"b":"hal` → `{"a":1}`. A dangling `,`, key or `key:`

@@ -294,8 +294,8 @@ public actor LogStore {
     }
 
     /// Delete every event row in a session plus any bookmarks that
-    /// pointed at those events. Used by the "Clear" toolbar button.
-    /// The session row itself is kept.
+    /// pointed at those events. The session row itself is kept, and so
+    /// are its network requests: they go only with the session (D39).
     public func clearEvents(sessionId: Int64) async throws {
         try await dbQueue.write { db in
             try db.execute(
@@ -307,10 +307,6 @@ public actor LogStore {
             // orphaned rows.
             try db.execute(
                 sql: "DELETE FROM event_bookmark WHERE session_id = ?",
-                arguments: [sessionId]
-            )
-            try db.execute(
-                sql: "DELETE FROM network_entry WHERE session_id = ?",
                 arguments: [sessionId]
             )
         }
@@ -1065,14 +1061,14 @@ public actor LogStore {
 
     // MARK: - Network entries
 
-    public func recordNetworkEntry(_ entry: NetworkEntry, sessionId: Int64) async throws {
+    public func recordNetworkEntry(_ capture: NetworkCapture, sessionId: Int64) async throws {
         try await dbQueue.write { db in
             try db.execute(
                 sql: """
                     INSERT INTO network_entry (session_id, timestamp_ms, payload_json)
                     VALUES (?, ?, ?)
                 """,
-                arguments: [sessionId, Int(entry.startMillis), entry.payloadJSON]
+                arguments: [sessionId, Int(capture.entry.startMillis), capture.payloadJSON]
             )
         }
         broadcast(.networkAppended(sessionId: sessionId))
@@ -1096,6 +1092,25 @@ public actor LogStore {
                     fallbackMillis: UInt64(row["timestamp_ms"] as Int)
                 )
             }
+        }
+    }
+
+    /// One entry's payload as received, for Copy JSON: the in-memory
+    /// entries keep only the parsed fields.
+    public func networkPayload(id: Int64) async throws -> String? {
+        try await dbQueue.read { db in
+            try String.fetchOne(db, sql: "SELECT payload_json FROM network_entry WHERE id = ?", arguments: [id])
+        }
+    }
+
+    /// Every payload in the session, in arrival order, for Export.
+    public func networkPayloads(sessionId: Int64) async throws -> [String] {
+        try await dbQueue.read { db in
+            try String.fetchAll(
+                db,
+                sql: "SELECT payload_json FROM network_entry WHERE session_id = ? ORDER BY id",
+                arguments: [sessionId]
+            )
         }
     }
 

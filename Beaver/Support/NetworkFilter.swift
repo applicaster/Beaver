@@ -159,6 +159,53 @@ private extension NetworkFilter.StatusPick {
     }
 }
 
+// MARK: - Sort
+
+extension NetworkEntry {
+    /// The table's column sort. No comparator keeps arrival order. A
+    /// missing value (no status, duration or size) sorts last in either
+    /// direction, and ties fall back to arrival order (`id`).
+    public static func sorted(_ entries: [NetworkEntry], using order: [KeyPathComparator<NetworkEntry>]) -> [NetworkEntry] {
+        guard !order.isEmpty else { return entries }
+        return entries.sorted { a, b in
+            for c in order {
+                switch (sortValue(a, c.keyPath), sortValue(b, c.keyPath)) {
+                case (nil, nil): continue
+                case (nil, _): return false
+                case (_, nil): return true
+                case let (x?, y?):
+                    guard x != y else { continue }
+                    return (x < y) == (c.order == .forward)
+                }
+            }
+            return a.id < b.id
+        }
+    }
+
+    private enum SortValue: Comparable {
+        case number(Int64), text(String)
+
+        static func < (l: Self, r: Self) -> Bool {
+            switch (l, r) {
+            case let (.number(a), .number(b)): a < b
+            case let (.text(a), .text(b)): a.localizedStandardCompare(b) == .orderedAscending
+            default: false
+            }
+        }
+    }
+
+    /// `nil` for a missing optional; an `Any` holding `Int?.some` casts to `Int`.
+    private static func sortValue(_ e: NetworkEntry, _ keyPath: PartialKeyPath<NetworkEntry>) -> SortValue? {
+        switch e[keyPath: keyPath] {
+        case let s as String: .text(s)
+        case let n as Int: .number(Int64(n))
+        case let n as UInt64: .number(Int64(clamping: n))
+        case let n as Int64: .number(n)
+        default: nil
+        }
+    }
+}
+
 /// The Network tab's results bar. Like zapp-support, the success ratio
 /// only counts requests that got an HTTP response: a timeout or a
 /// cancelled request (-999) is neither a success nor a failure here.
