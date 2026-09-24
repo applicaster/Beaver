@@ -13,7 +13,6 @@ struct MainWindow: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(ToastCenter.self) private var toasts
 
-    @State private var selectedTab: Tab = .logFeed
     @State private var showingImporter = false
     @State private var showingExporter = false
     @State private var showingExportChoice = false
@@ -30,7 +29,7 @@ struct MainWindow: View {
     /// Per-session view-models, owned here so their state (filter,
     /// sort, exclude, expanded namespaces, search term, etc.)
     /// survives tab switches. Without this, the `switch
-    /// selectedTab` below tears down each tab's view subtree —
+    /// env.selectedTab` below tears down each tab's view subtree —
     /// including its `@State` VM — so coming back from Storages
     /// would reset every Log-feed filter pill.
     ///
@@ -39,13 +38,6 @@ struct MainWindow: View {
     @State private var logFeedVM: LogFeedViewModel?
     @State private var storagesVM: StoragesViewModel?
     @State private var networkVM: NetworkViewModel?
-
-    enum Tab: Hashable {
-        case logFeed
-        case storages
-        case network
-        case sessions
-    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -66,6 +58,8 @@ struct MainWindow: View {
             CommandBarView()
         }
         .frame(minWidth: 900, minHeight: 600)
+        // Agent-settable window state lives in env (D54); the models follow it.
+        .modifier(UIStateSync(logFeed: logFeedVM, network: networkVM, storages: storagesVM))
         // Toast surface — single chip that slides down from the top
         // when any action posts to ToastCenter (copy, save, delete, …).
         // `allowsHitTesting(false)` is applied inside ToastPresenter
@@ -122,11 +116,15 @@ struct MainWindow: View {
                 return
             }
             if logFeedVM?.sessionId != sid {
-                // A reconnect or relaunch is a new session; the filter
-                // the user set up shouldn't go with the old one. Clear's
-                // watermark does — it's an id from that session.
-                let filter = logFeedVM?.filter.carriedOver ?? LogFeedViewModel.rememberedFilter()
-                logFeedVM = LogFeedViewModel(store: env.store, sessionId: sid, filter: filter)
+                // env holds the filter (D54): the previous session's, which a
+                // reconnect or relaunch keeps without its Clear watermark
+                // (an id from that session), or what ui_show just set.
+                let vm = LogFeedViewModel(store: env.store, sessionId: sid,
+                                          filter: env.activeFilter.carriedOver)
+                logFeedVM = vm
+                if env.activeFilter != vm.filter { env.activeFilter = vm.filter }
+                // A selection ui_show made along with the switch.
+                if let id = env.selectedEventId { vm.show(filter: vm.filter, select: id) }
             }
             if storagesVM?.sessionId != sid {
                 let fresh = StoragesViewModel(store: env.store, sessionId: sid)
@@ -136,6 +134,10 @@ struct MainWindow: View {
                 await fresh.bootstrap()
                 guard !Task.isCancelled else { return }
                 storagesVM = fresh
+                // Start from env (D54), read after the await: ui_show may
+                // have changed it meanwhile.
+                fresh.selectedNamespace = env.storageLayer
+                fresh.searchTerm = env.storageSearch
                 // Auto-fetch the first storage snapshot so the user
                 // doesn't have to click Reload to see anything.
                 // No-op if no client is connected; safe to call
@@ -145,10 +147,13 @@ struct MainWindow: View {
                 fresh.requestRefresh(via: env.server)
             }
             if networkVM?.sessionId != sid {
-                let fresh = NetworkViewModel(store: env.store, sessionId: sid)
+                let fresh = NetworkViewModel(store: env.store, sessionId: sid, filter: env.networkFilter)
                 await fresh.bootstrap()
                 guard !Task.isCancelled else { return }
                 networkVM = fresh
+                // Read after the await: ui_show may have changed the filter
+                // or picked a row meanwhile.
+                fresh.show(filter: env.networkFilter, select: env.selectedNetworkId)
             }
         }
         .fileImporter(
@@ -170,15 +175,15 @@ struct MainWindow: View {
 
     @ViewBuilder
     private var sidebar: some View {
-        List(selection: $selectedTab) {
+        List(selection: Bindable(env).selectedTab) {
             Label("Log feed", systemImage: "list.bullet.rectangle")
-                .tag(Tab.logFeed)
+                .tag(UITab.logs)
             Label("Storages",  systemImage: "externaldrive")
-                .tag(Tab.storages)
+                .tag(UITab.storages)
             Label("Network",   systemImage: "network")
-                .tag(Tab.network)
+                .tag(UITab.network)
             Label("Sessions",  systemImage: "clock.arrow.circlepath")
-                .tag(Tab.sessions)
+                .tag(UITab.sessions)
         }
         .navigationTitle("Beaver")
     }
@@ -188,8 +193,8 @@ struct MainWindow: View {
     @ViewBuilder
     private var detail: some View {
         Group {
-            switch selectedTab {
-            case .logFeed:
+            switch env.selectedTab {
+            case .logs:
                 if let vm = logFeedVM {
                     // No `.id(sessionId)` here — the VM is replaced
                     // on session change (via the `.task(id:)` above)
@@ -224,7 +229,7 @@ struct MainWindow: View {
                 if let vm = networkVM {
                     NetworkView(vm: vm, onShowInLogFeed: { entry in
                         pendingLogFeedJump = Date(timeIntervalSince1970: Double(entry.startMillis) / 1000)
-                        selectedTab = .logFeed
+                        env.selectedTab = .logs
                     })
                 } else {
                     ConnectionPlaceholder(state: env.serverState)
@@ -234,7 +239,7 @@ struct MainWindow: View {
                     // The row already mutated `env.viewingSessionId`
                     // (via the List selection binding). All we have
                     // to do is flip to the Log feed tab.
-                    selectedTab = .logFeed
+                    env.selectedTab = .logs
                 })
             }
         }
@@ -461,14 +466,7 @@ struct MainWindow: View {
         !env.activeFilter.isEmpty
     }
 
-    private var navigationTitle: String {
-        switch selectedTab {
-        case .logFeed:  "Log feed"
-        case .storages: "Storages"
-        case .network:  "Network"
-        case .sessions: "Sessions"
-        }
-    }
+    private var navigationTitle: String { env.selectedTab.title }
 
     private var defaultExportName: String {
         let formatter = DateFormatter()

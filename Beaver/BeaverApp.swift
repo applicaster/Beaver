@@ -50,6 +50,9 @@ struct BeaverApp: App {
         }
         let server = WSServer(port: 9080)
         let environment = AppEnvironment(store: store, server: server)
+        // The Log feed's filter lives in env (D54); a launch starts with
+        // the one last used, as LogFeedViewModel did on its own before.
+        environment.activeFilter = LogFeedViewModel.rememberedFilter()
         _env = State(initialValue: environment)
         agentAccess = AgentAccess(store: store, ui: environment)
 

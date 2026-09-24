@@ -245,9 +245,16 @@ struct NetworkView: View {
                     guard following, let id = vm.filtered.last?.id else { return }
                     DispatchQueue.main.async { proxy.scrollTo(id, anchor: .bottom) }
                 }
+                // An agent's ui_show or a journal link picked a row.
+                .onChange(of: vm.scrollTarget?.token) { _, _ in
+                    guard let id = vm.scrollTarget?.id else { return }
+                    DispatchQueue.main.async { proxy.scrollTo(id, anchor: .center) }
+                }
+                // Back on the tab: the tail while following, else the row
+                // an agent or a link picked while the tab was hidden.
                 .onAppear {
-                    guard vm.isFollowing, let id = rows.last?.id else { return }
-                    DispatchQueue.main.async { proxy.scrollTo(id, anchor: .bottom) }
+                    guard let id = vm.isFollowing ? rows.last?.id : vm.scrollTarget?.id else { return }
+                    DispatchQueue.main.async { proxy.scrollTo(id, anchor: vm.isFollowing ? .bottom : .center) }
                 }
                 .overlay(alignment: .bottom) {
                     if !vm.isFollowing && vm.sortOrder.isEmpty && vm.unseenCount > 0 {

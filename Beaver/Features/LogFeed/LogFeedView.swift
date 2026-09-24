@@ -24,7 +24,6 @@ struct LogFeedView: View {
 
 private struct LogFeedContent: View {
     @Bindable var vm: LogFeedViewModel
-    @Environment(AppEnvironment.self) private var env
 
     var body: some View {
         VStack(spacing: 0) {
@@ -76,18 +75,6 @@ private struct LogFeedContent: View {
             NotificationCenter.default.publisher(for: .beaverClearView)
         ) { _ in
             Task { await vm.clearView() }
-        }
-        // Mirror the active filter to env so MainWindow's Export
-        // toolbar action can scope its query to the rows currently
-        // shown in the table (D26). Initialize on appear in case
-        // the view mounts with a non-empty filter (saved-preset
-        // selection survives session switches).
-        .onAppear { env.activeFilter = vm.filter }
-        // Deliberately NOT cleared on disappear: the Storages tab has
-        // an Export too, and "Export filtered" there has to mean the
-        // same filter the user set on this screen.
-        .onChange(of: vm.filter) { _, newValue in
-            env.activeFilter = newValue
         }
     }
 
@@ -1148,6 +1135,12 @@ private struct LogFeedTable: View {
                 withAnimation(.easeInOut(duration: 0.2)) {
                     proxy.scrollTo(target, anchor: .center)
                 }
+            }
+            // Back on the tab after an agent's ui_show or a journal link
+            // picked a row while the Log feed was hidden: centre it.
+            .onAppear {
+                guard !vm.follow.isFollowing, let target = vm.scrollTarget?.id else { return }
+                DispatchQueue.main.async { proxy.scrollTo(target, anchor: .center) }
             }
         }
     }

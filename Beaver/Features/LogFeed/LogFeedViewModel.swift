@@ -548,6 +548,19 @@ final class LogFeedViewModel {
         filter = unfiltered
     }
 
+    /// An agent's `ui_show` or a journal link (D54): this filter, and this
+    /// event selected and centred. Same order as Show in Context: select
+    /// first, so the filter change's reload restores the selection and
+    /// scrolls to it.
+    func show(filter newFilter: Filter, select eventId: EventRecord.ID?) {
+        if let eventId { selectedEventIds = [eventId] }
+        if newFilter != filter {
+            filter = newFilter
+        } else if let eventId {
+            Task { await jumpTo(eventId: eventId) }
+        }
+    }
+
     // MARK: - Filter carried across sessions
 
     private static let rememberedFilterKey = "logFeed.lastFilter"
