@@ -12,12 +12,12 @@ public struct AgentJournal: Sendable {
 
     public init(store: LogStore) { self.store = store }
 
-    func record(tool: MCPTool, client: String?, result: ToolResult?, error: String?) async {
+    func record(toolName: String, kind: AgentActivity.Kind, client: String?, result: ToolResult?, error: String?) async {
         let summary = result?.summary ?? error ?? ""
         _ = try? await store.recordAgentActivity(NewAgentActivity(
             client: Self.clientName(client),
-            tool: tool.name,
-            kind: tool.kind,
+            tool: toolName,
+            kind: kind,
             summary: String(summary.prefix(300)),
             isError: error != nil,
             error: error,

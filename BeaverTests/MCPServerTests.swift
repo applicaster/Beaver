@@ -81,6 +81,15 @@ struct MCPServerTests {
         #expect(reply?["result"]?["content"]?.array?.first?["text"]?.string?.contains("beaver_guide") == true)
     }
 
+    @Test("Unknown tool call is journaled as an error")
+    func unknownToolJournaled() async throws {
+        let (s, store) = try server()
+        _ = try await call(s, #"{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"nope"}}"#)
+        let journal = try await store.agentActivity()
+        #expect(journal.first?.tool == "nope")
+        #expect(journal.first?.isError == true)
+    }
+
     @Test("Notifications and responses get no reply")
     func notifications() async throws {
         let (s, _) = try server()

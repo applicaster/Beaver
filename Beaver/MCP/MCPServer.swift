@@ -85,20 +85,21 @@ public struct MCPServer: Sendable {
 
     private func call(_ name: String, _ arguments: ToolArguments, client: String?, structured: Bool) async -> JSON {
         guard let tool = tools.first(where: { $0.name == name }) else {
-            return Self.content("Unknown tool \(name). Call tools/list for the tools, or beaver_guide() for how to use them.",
-                                structured: nil, isError: true)
+            let errorMessage = "Unknown tool \(name). Call tools/list for the tools, or beaver_guide() for how to use them."
+            await journal.record(toolName: name, kind: .read, client: client, result: nil, error: errorMessage)
+            return Self.content(errorMessage, structured: nil, isError: true)
         }
         do {
             let result = try await tool.run(arguments, context)
-            await journal.record(tool: tool, client: client, result: result, error: nil)
+            await journal.record(toolName: tool.name, kind: tool.kind, client: client, result: result, error: nil)
             let structuredValue: JSON? = if structured { result.structured } else { nil }
             return Self.content(result.text, structured: structuredValue, isError: false)
         } catch let error as ToolError {
-            await journal.record(tool: tool, client: client, result: nil, error: error.message)
+            await journal.record(toolName: tool.name, kind: tool.kind, client: client, result: nil, error: error.message)
             return Self.content(error.message, structured: nil, isError: true)
         } catch {
             let message = "Beaver failed to run \(name): \(error.localizedDescription)"
-            await journal.record(tool: tool, client: client, result: nil, error: message)
+            await journal.record(toolName: tool.name, kind: tool.kind, client: client, result: nil, error: message)
             return Self.content(message, structured: nil, isError: true)
         }
     }
