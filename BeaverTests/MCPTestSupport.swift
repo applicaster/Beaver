@@ -3,13 +3,15 @@ import Synchronization
 @testable import BeaverCore
 
 /// The app's side of AgentUI. Changeable mid-test (the device dropping
-/// during a wait), and it records what tools asked the app to do.
+/// during a wait), and it records what tools asked the app to do; `show`
+/// applies window changes the way `AppEnvironment` does.
 final class FakeUI: AgentUI {
     struct Clear: Equatable, Sendable { let sessionId: Int64; let through: Int64 }
     private struct Calls: Sendable {
         var commands: [String] = []
         var clears: [Clear] = []
         var notes: [AgentNote] = []
+        var changes: [UIChange] = []
         var outcome = NotifyOutcome(notified: true)
     }
 
@@ -24,9 +26,14 @@ final class FakeUI: AgentUI {
     var sentCommands: [String] { calls.withLock { $0.commands } }
     var clears: [Clear] { calls.withLock { $0.clears } }
     var notes: [AgentNote] { calls.withLock { $0.notes } }
+    var changes: [UIChange] { calls.withLock { $0.changes } }
     func setNotifyOutcome(_ outcome: NotifyOutcome) { calls.withLock { $0.outcome = outcome } }
 
     func snapshot() async -> HostSnapshot { value }
+    func show(_ change: UIChange) async {
+        calls.withLock { $0.changes.append(change) }
+        state.withLock { $0.ui = $0.ui.applying(change) }
+    }
     func didSendCommand(_ command: String) async { calls.withLock { $0.commands.append(command) } }
     func clearLogView(sessionId: Int64, through eventId: Int64) async {
         calls.withLock { $0.clears.append(Clear(sessionId: sessionId, through: eventId)) }
@@ -62,6 +69,14 @@ func makeContext(_ store: LogStore, fakeUI: FakeUI, device: FakeDevice = FakeDev
     ToolContext(store: store, ui: fakeUI, device: device, now: { now })
 }
 
+/// A context whose fake UI the test can read back.
+func makeUIContext(_ store: LogStore, ui: HostSnapshot = HostSnapshot()) -> (ToolContext, FakeUI) {
+    let fake = FakeUI(value: ui)
+    return (makeContext(store, fakeUI: fake), fake)
+}
+
+/// Appends `rows` (level, subsystem, category, message) 1 ms apart and
+/// waits for the batched write to land.
 func seed(_ store: LogStore, session: Int64,
           _ rows: [(LogLevel, String, String, String)],
           startMillis: UInt64 = 1_000,

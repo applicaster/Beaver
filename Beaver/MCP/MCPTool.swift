@@ -10,6 +10,11 @@ import Foundation
 public struct ToolError: Error, Sendable, Equatable {
     public let message: String
     public init(_ message: String) { self.message = message }
+
+    /// The message without its example call, for a toast a person reads.
+    public var personMessage: String {
+        message.range(of: " Example:").map { String(message[..<$0.lowerBound]) } ?? message
+    }
 }
 
 public struct ToolResult: Sendable {

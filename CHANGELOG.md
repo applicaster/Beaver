@@ -26,6 +26,13 @@ When releasing:
   also raise a macOS notification when Beaver is in the background, and a
   Dock badge. The Agent panel and the app menu (**Agent Notifications**)
   say where to turn notifications on, and the panel can mute them.
+- **Agent Access: the agent can point Beaver at something.** Asked to show
+  the failed requests or the auth errors, it switches the tab, session,
+  filters, storage layer and selected row while Beaver stays in the
+  background. Beaver comes forward only when the agent passes
+  `reveal: true`, which agents are told to do only when you ask to see it.
+  In the **Agent** panel, a call that touched a session, event or request
+  links to it — click to open it.
 
 ### Fixed
 - **Events sent right after a device connects are no longer lost.** What

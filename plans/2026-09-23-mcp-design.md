@@ -380,8 +380,10 @@ outside the view can change them. The change:
    `env.activeFilter`, so no view model logic changes. A new selection scrolls
    to the row the way a bookmark jump does today.
 3. `reveal()` brings the window to the front and activates the app
-   (`NSApp.activate()`, `makeKeyAndOrderFront`). It is the only path that
-   takes focus, and only `ui_show(reveal: true)` calls it.
+   (`NSApp.activate(ignoringOtherApps: true)`, `makeKeyAndOrderFront`) —
+   forced, because macOS 14+'s cooperative `activate()` declines a request
+   made from the background. It is the only path that takes focus, and only
+   `ui_show(reveal: true)` calls it.
 
 No Accessibility API, no synthetic events, no AppleScript: the agent changes
 state and SwiftUI renders it, whether the window is visible, behind other
@@ -396,6 +398,16 @@ windows, or minimized.
 | "What's in keychain?" | `ui_show(tab: storages, storage: {layer: secure}, reveal: true)` |
 | "Review the errors with me" | `logs_query(filter: {minLevel: error})` → groups them by cause → one `journal_note` with a link per group ("3 causes: token expired ×41, feed 500 ×12, player timeout ×3") → `ui_show(filter…, select: {eventId: first cause}, reveal: true)`. "Next" in chat → `ui_show(select: {eventId: …})` on the next cause; the person can also click the links in the note |
 | (while working, unasked) | `ui_show(...)` without `reveal`: the window is ready on the right view when the person looks, nothing jumps |
+
+**As built (PR 3, D54).** Two selection fields (`selectedEventId`,
+`selectedNetworkId`) instead of one `selection`; `reveal()` is a method,
+not a `revealRequest` counter; the view models keep their properties,
+start from env, and `UIStateSync` keeps them equal to env both ways.
+`ui_show` also accepts `tab: sessions`; `networkFilter` takes one method,
+status and host (the Network tab picks one of each). `filter: {}` shows
+every event, including ones the person cleared. A row hidden by a filter
+fails for an agent with the call that shows it; a journal link click
+clears the filter instead (Show in Context).
 
 ### 7.2 Agent activity journal
 
@@ -1008,7 +1020,7 @@ on its own. Testers check each PR on its tester bundle before merge *(M27)*.
    waits (M26) and the disconnect system entry; toasts for destructive calls
    and `attention` notes; macOS notifications with the permission strip and
    menu item (M28); watches (M29).
-3. **UI.** State move (§7.1), `ui_state`, `ui_show`, clickable journal links.
+3. **UI.** State move (§7.1), `ui_state`, `ui_show`, clickable journal links — done in PR 3 (plans/2026-09-24-mcp-pr3-plan.md).
 4. **Before phase 2:** settle M24 (access control). Then phase 2 research
    (§11), its own spec update and plan.
 

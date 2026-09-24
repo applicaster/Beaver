@@ -22,7 +22,20 @@ public final class AppEnvironment {
 
     /// Session id the user is *viewing*. Defaults to `currentSessionId`,
     /// but can point at any past session via the Sessions sidebar.
-    public var viewingSessionId: Int64?
+    ///
+    /// Switching starts Network and Storages at their defaults and drops
+    /// the selection, as rebuilding their view models always did — the
+    /// same rule `UIState.applying` follows for an agent's switch.
+    public var viewingSessionId: Int64? {
+        didSet {
+            guard viewingSessionId != oldValue else { return }
+            networkFilter = NetworkFilter()
+            storageLayer = .session
+            storageSearch = ""
+            selectedEventId = nil
+            selectedNetworkId = nil
+        }
+    }
 
     /// Latest server state for the connection indicator.
     public var serverState: WSServer.State = .stopped
@@ -55,6 +68,26 @@ public final class AppEnvironment {
 
     /// The bound MCP port while Agent Access is on.
     public var agentAccessPort: UInt16?
+
+    // MARK: - Window state an agent can set (D54, design §7.1)
+    //
+    // The view models follow these (`UIStateSync`), and write the
+    // person's own changes back, so `ui_state` reports what is on screen.
+
+    /// The sidebar tab.
+    public var selectedTab: UITab = .logs
+
+    /// The Network tab's filter.
+    public var networkFilter = NetworkFilter()
+
+    /// Storages: the layer tab and the Discover search.
+    public var storageLayer: StorageSnapshot.Namespace = .session
+    public var storageSearch = ""
+
+    /// The Log feed's selected event and the Network tab's selected
+    /// request, each while exactly one row is selected.
+    public var selectedEventId: Int64?
+    public var selectedNetworkId: Int64?
 
     public init(store: LogStore, server: WSServer) {
         self.store = store

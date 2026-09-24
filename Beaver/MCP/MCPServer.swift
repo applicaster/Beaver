@@ -33,8 +33,10 @@ public struct MCPServer: Sendable {
         headers are [REDACTED], so a replayed cURL may fail. Everything you call is listed in \
         Beaver's Agent panel; tell the user what you found with journal_note and links. Use level: \
         attention only when they must look now; if it returns notified: false, tell them and pass \
-        on howToEnable. Work in the background: nothing you call moves Beaver's window to the front. \
-        Every result ends with Next: suggestions. If unsure how to do something, call beaver_guide.
+        on howToEnable. Work in the background: to point the user at something in Beaver use \
+        ui_show (tab, filter, select); pass reveal: true only when they ask to see it — nothing else \
+        moves Beaver's window to the front. Every result ends with Next: suggestions. If unsure how \
+        to do something, call beaver_guide.
         """
 
     let tools: [MCPTool]

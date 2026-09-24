@@ -63,6 +63,23 @@ final class NetworkViewModel {
         isFollowing = atBottom
     }
 
+    /// The table scrolls to `id` whenever `token` changes (see `show`).
+    private(set) var scrollTarget: (id: NetworkEntry.ID, token: UUID)?
+
+    /// An agent's `ui_show` or a journal link (D54): this filter, applied
+    /// at once rather than debounced — the row must be in the table to
+    /// scroll to — and this request selected and in view.
+    func show(filter newFilter: NetworkFilter, select id: NetworkEntry.ID?) {
+        if newFilter != filter {
+            filter = newFilter
+            recompute()
+        }
+        guard let id else { return }
+        selection = id
+        isFollowing = false
+        scrollTarget = (id, UUID())
+    }
+
     /// What the table shows (filtered, then sorted), and its results bar. Stored, not computed:
     /// rebuilt only when the filter, bookmarks or entries change, and on
     /// append only the new rows are filtered — never on a render.
@@ -96,9 +113,10 @@ final class NetworkViewModel {
     @ObservationIgnored
     private var maxLoadedId: Int64 = 0
 
-    init(store: LogStore, sessionId: Int64) {
+    init(store: LogStore, sessionId: Int64, filter: NetworkFilter = NetworkFilter()) {
         self.store = store
         self.sessionId = sessionId
+        self.filter = filter
     }
 
     deinit { subscription?.cancel() }

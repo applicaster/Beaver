@@ -2161,9 +2161,25 @@ won't decode, and the feed starts unfiltered once.
   tools.
 - **To change:** the `AgentUI` protocol is the boundary; new UI tools
   add members to it.
-- **Implemented:** from PR 3 (not in PR 1) — `AgentUI` in PR 1 is
-  read-only (`snapshot()`); the `ui_show` members this decision
-  describes don't exist yet.
+- **Implemented (PR 3):** `UIState` (BeaverCore) is the window state an
+  agent reads and sets; `AppEnvironment` holds its fields
+  (`selectedTab`, `viewingSessionId`, `activeFilter`, `networkFilter`,
+  `storageLayer`, `storageSearch`, `selectedEventId`,
+  `selectedNetworkId`) and applies `AgentUI.show(UIChange)`.
+  `reveal()` is a method on `AppEnvironment`, not a counter, and the
+  only code that activates Beaver. The view models keep their own
+  properties: they start from env, and `UIStateSync` (a modifier on
+  `MainWindow`) keeps both sides equal — env → models for an agent,
+  models → env for the person — as `activeFilter` already did (D26).
+  Two selection fields, not one, because the Log feed and Network each
+  keep theirs. A row hidden by a filter fails for an agent with the call
+  that shows it; `filter: {}` shows every event, including cleared ones.
+  `BeaverUITests/AgentFocusUITests` checks that nothing takes focus
+  without `reveal: true`. `reveal()` forces activation
+  (`NSApp.activate(ignoringOtherApps: true)`) because macOS 14+'s
+  cooperative `activate()` is declined for a background app;
+  `AgentFocusUITests` covers it, and a minimised window counts as open,
+  with `reveal()` restoring it.
 
 ---
 
@@ -2262,6 +2278,19 @@ won't decode, and the feed starts unfiltered once.
   calls; attention notes) and the Dock badge (unseen attention notes).
   `journal_note` returns no note id: the dispatcher writes the row after
   the tool returns, and no tool takes one.
+  **PR 3:** every entry links to what it points at. Links are
+  `[JournalLink]` in `links_json` (`[{"eventId":…}]`, the shape
+  `journal_note(links:)` takes); reads that point at something
+  (`logs_get`, `network_get`, `network_copy`, `ui_show`) store theirs,
+  and the panel links a row without stored links to its `session_id`
+  (`AgentActivity.shownLinks`; toasts follow stored links only). Every
+  way in — a journal row's link, a toast's **Show**, a notification
+  click — runs `UITools.open`, the `ui_show` path, via
+  `AppEnvironment.open(_:reveal:)`: in context (a hiding filter is
+  cleared, like Show in Context), not journaled. A row's link opens with
+  `reveal: false` (the person is already in Beaver); Show and a
+  notification with `reveal: true`. PR 2's interim navigation
+  (`MainWindow.showAgentLink`'s own session/tab/bookmark jump) is gone.
 
 ---
 

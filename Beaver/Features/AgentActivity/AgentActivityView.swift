@@ -9,6 +9,8 @@ import SwiftUI
 
 struct AgentActivityView: View {
     @Bindable var model: AgentActivityViewModel
+    /// A row's link was clicked: get the popover out of the way.
+    var onOpened: () -> Void = {}
     @Environment(ToastCenter.self) private var toasts
     @Environment(AppEnvironment.self) private var env
     @State private var showingSetup = false
@@ -70,11 +72,31 @@ struct AgentActivityView: View {
             .frame(maxHeight: .infinity)
         } else {
             List(model.visible) { entry in
-                AgentActivityRow(entry: entry)
+                AgentActivityRow(entry: entry) { link in
+                    // Dismiss first, so the window is visible behind it,
+                    // then show what the link points at.
+                    onOpened()
+                    Task { await open(link) }
+                }
             }
             .listStyle(.plain)
         }
     }
+
+    /// Shows what a journal link points at, through the same path
+    /// `ui_show` uses. A person's click, not an agent call: not journaled,
+    /// and `reveal: false` — the popover closing already brings the window
+    /// into view.
+    private func open(_ link: JournalLink) async {
+        do {
+            try await env.open(link, reveal: false)
+        } catch let error as ToolError {
+            toasts.error(error.personMessage)
+        } catch {
+            toasts.error(error.localizedDescription)
+        }
+    }
+
 
     // MARK: - Setup
 
@@ -158,6 +180,7 @@ private struct SetupCard: View {
 
 private struct AgentActivityRow: View {
     let entry: AgentActivity
+    let onOpen: (JournalLink) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -185,15 +208,19 @@ private struct AgentActivityRow: View {
                 .lineLimit(entry.kind == .note ? nil : 6)
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
-            let links = entry.links
+            // What the entry points at (design §7.2): a click shows it.
+            let links = entry.shownLinks
             if !links.isEmpty {
                 HStack(spacing: 10) {
                     ForEach(links, id: \.self) { link in
-                        Button("→ \(link.label)") { AgentNotifier.shared.show([link]) }
-                            .buttonStyle(.link)
-                            .font(.caption)
+                        Button { onOpen(link) } label: {
+                            Label(link.label, systemImage: Self.icon(link))
+                        }
+                        .buttonStyle(.link)
+                        .help("Show it in Beaver")
                     }
                 }
+                .font(.caption)
             }
             if !entry.isError, let notice = entry.error {
                 HStack(spacing: 6) {
@@ -218,6 +245,15 @@ private struct AgentActivityRow: View {
 
     private var title: String {
         entry.kind == .note ? "★ note" : (entry.tool ?? entry.kind.rawValue)
+    }
+
+    private static func icon(_ link: JournalLink) -> String {
+        switch link {
+        case .event: "text.alignleft"
+        case .network: "network"
+        case .savedFilter: "line.3.horizontal.decrease.circle"
+        case .session: "clock.arrow.circlepath"
+        }
     }
 }
 

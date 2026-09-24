@@ -173,9 +173,9 @@ final class AgentNotifier {
         }
     }
 
-    /// Toast Show, a notification click or a journal link: the person asked,
-    /// so Beaver comes forward on what the note points at. (PR 3 routes this
-    /// through ui_show.)
+    /// Toast Show or a notification click: the person asked, so Beaver comes
+    /// forward on what the note points at — MainWindow opens the link
+    /// through ui_show's path (`AppEnvironment.open(_:reveal: true)`).
     func show(_ links: [JournalLink]) {
         NSApp.activate()
         NSApp.windows.first { $0.canBecomeMain }?.makeKeyAndOrderFront(nil)

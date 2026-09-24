@@ -46,9 +46,7 @@ or a release):
    the calls it made.
 5. Open the **Agent** toolbar button: every call is listed; the badge counted
    them while the panel was closed.
-6. Turn **Agent Access (MCP)** off in the app menu: the `curl` above now fails
-   to connect.
-7. Actions (with a device connected; ask the agent in plain words):
+6. Actions (with a device connected; ask the agent in plain words):
    - "send `cmdlist` to the app and show me what it logged" → `commands_send`
      with `collectLogsMs`; the command also appears in the command bar's
      history (↑).
@@ -64,7 +62,14 @@ or a release):
    - "export this session to ~/Desktop/beaver-test.json, import it back, then
      delete the imported copy" → three calls; the imported session is not
      shown until you pick it; the delete toasts.
-8. Report problems with the Beaver version (Beaver → About) and the Agent
+7. With another app in front, ask the agent: "in Beaver, show the failed
+   requests — don't bring it forward". Beaver's Network tab changes while
+   the other app stays in front. Then "show me": Beaver comes forward.
+8. In the **Agent** panel, click a row's link (**session #…**,
+   **request #…**): the popover closes and Beaver shows it.
+9. Turn **Agent Access (MCP)** off in the app menu: the `curl` above now fails
+   to connect.
+10. Report problems with the Beaver version (Beaver → About) and the Agent
    panel's **Copy** output.
 
 ## Tools
@@ -98,6 +103,8 @@ or a release):
 | `watch_status` | What a watch caught: counts, first/last, breakdown, whether it fired |
 | `watch_stop` | Stop a watch and get its final status |
 | `journal_note` | Tell the user something in the Agent panel, with clickable links; `attention` also notifies |
+| `ui_state` | What Beaver's window shows: tab, session, filters, selection, whether it is in front |
+| `ui_show` | Point the window at a tab, session, filter or row — in the background unless `reveal: true` |
 | `beaver_guide` | These recipes, by topic |
 
 Conventions: omitting `sessionId` means the live session, else the viewed one,
@@ -107,6 +114,9 @@ session if the app restarts (`sessionChanged`); a given `sessionId` stays put
 fragments and any case; results say what they matched. `since: "5m"` works
 wherever ids do. File paths are absolute or start with `~`. Every result ends
 with `Next:` suggestions.
+
+UI tools work in the background: the window changes where it is and nothing
+takes focus, unless you pass `reveal: true`.
 
 ## Recipes
 
@@ -240,3 +250,24 @@ with `Next:` suggestions.
    lines themselves.
 4. `watch_stop(name: "player errors")` — final status. Watches live until
    Beaver quits.
+
+### ui — point the user at something
+
+Everything here happens in the background: Beaver's window changes where it
+is, and nothing takes focus. Pass `reveal: true` only when the user asks to
+see it.
+
+1. `ui_state()` — what the user is looking at now.
+2. `ui_show(filter: {minLevel: "error", subsystems: ["*auth*"]}, select: "first")`
+   — the Log feed, filtered, first match selected. `filter` takes the same
+   keys as `logs_query`.
+3. `ui_show(networkFilter: {status: "errors"}, select: "first")` — the first
+   failing request. One method, one status and one host at a time.
+4. `ui_show(storage: {layer: "secure", search: "token"})` — the keychain,
+   searched.
+5. The user says "show me": `ui_show(reveal: true)`. "Next one":
+   `ui_show(select: {eventId: <next id>})` — it opens the event's session if
+   needed.
+6. An event or request hidden by the user's filter fails with the call that
+   shows it. `filter: {}` shows every event, including ones the user cleared
+   from view.

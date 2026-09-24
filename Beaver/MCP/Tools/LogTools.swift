@@ -171,7 +171,9 @@ enum LogTools {
             body: blocks.joined(separator: "\n\n"),
             structured: ["events": .array(rows), "missing": .array(missing.map { JSON($0) })],
             next: events.last.map { ["logs_query(afterId: \($0.id), order: \"oldest\") for what came after"] } ?? ["logs_query()"],
-            sessionId: events.first?.sessionId
+            sessionId: events.first?.sessionId,
+            // Five at most: a row with fifty link buttons helps nobody.
+            links: events.prefix(5).map { .event($0.id) }
         )
     }
 

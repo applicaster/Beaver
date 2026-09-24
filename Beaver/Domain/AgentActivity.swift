@@ -120,6 +120,13 @@ extension AgentActivity {
 
     public var links: [JournalLink] { JournalLink.decode(linksJSON) }
 
+    /// What the Agent panel links the row to: its stored links, else the
+    /// session the call was about.
+    public var shownLinks: [JournalLink] {
+        let stored = links
+        return stored.isEmpty ? sessionId.map { [.session($0)] } ?? [] : stored
+    }
+
     /// A `journal_note(level: attention)`, or a watch that fired.
     public var isAttention: Bool { kind == .note && level == Self.attention }
 
