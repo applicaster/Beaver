@@ -82,4 +82,12 @@ extension AppEnvironment: AgentUI {
     private var mainWindow: NSWindow? {
         NSApp.windows.first { $0.canBecomeMain && ($0.isVisible || $0.isMiniaturized) }
     }
+
+    /// Shows what a journal link points at, through `ui_show`'s path
+    /// (design §7.2). Not journaled: the person clicked, not an agent.
+    /// PR 2's toast "Show" and notification click call it with
+    /// `reveal: true`.
+    func open(_ link: AgentLink, reveal: Bool) async throws {
+        _ = try await UITools.open(link, reveal: reveal, ToolContext(store: store, ui: self))
+    }
 }

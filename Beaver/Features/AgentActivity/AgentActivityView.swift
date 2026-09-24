@@ -9,6 +9,8 @@ import SwiftUI
 
 struct AgentActivityView: View {
     @Bindable var model: AgentActivityViewModel
+    /// A row's link was clicked.
+    var onOpen: (AgentLink) -> Void = { _ in }
     @Environment(ToastCenter.self) private var toasts
     @Environment(AppEnvironment.self) private var env
     @State private var showingSetup = false
@@ -69,7 +71,7 @@ struct AgentActivityView: View {
             .frame(maxHeight: .infinity)
         } else {
             List(model.visible) { entry in
-                AgentActivityRow(entry: entry)
+                AgentActivityRow(entry: entry, onOpen: onOpen)
             }
             .listStyle(.plain)
         }
@@ -157,6 +159,7 @@ private struct SetupCard: View {
 
 private struct AgentActivityRow: View {
     let entry: AgentActivity
+    let onOpen: (AgentLink) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -181,9 +184,30 @@ private struct AgentActivityRow: View {
                 .lineLimit(6)
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
+            // What the entry points at (design §7.2): a click shows it.
+            let links = entry.links
+            if !links.isEmpty {
+                HStack(spacing: 10) {
+                    ForEach(links, id: \.self) { link in
+                        Button { onOpen(link) } label: {
+                            Label(link.label, systemImage: Self.icon(link))
+                        }
+                        .buttonStyle(.link)
+                        .help("Show it in Beaver")
+                    }
+                }
+                .font(.caption)
+            }
         }
         .opacity(entry.kind == .read && !entry.isError ? 0.75 : 1)
         .padding(.vertical, 4)
+    }
+
+    private static func icon(_ link: AgentLink) -> String {
+        if link.eventId != nil { return "text.alignleft" }
+        if link.networkId != nil { return "network" }
+        if link.savedFilter != nil { return "line.3.horizontal.decrease.circle" }
+        return "clock.arrow.circlepath"
     }
 }
 

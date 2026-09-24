@@ -402,8 +402,20 @@ struct MainWindow: View {
                 // view it swallowed every toolbar item.
                 AgentToolbarButton(model: agentActivity, isPresented: $showingAgentPanel)
                     .popover(isPresented: $showingAgentPanel, arrowEdge: .bottom) {
-                        AgentActivityView(model: agentActivity)
-                            .frame(width: 560, height: 640)
+                        AgentActivityView(model: agentActivity) { link in
+                            // Close the popover so the window shows the row.
+                            showingAgentPanel = false
+                            Task {
+                                do {
+                                    try await env.open(link, reveal: false)
+                                } catch let error as ToolError {
+                                    toasts.error(error.message)
+                                } catch {
+                                    toasts.error(error.localizedDescription)
+                                }
+                            }
+                        }
+                        .frame(width: 560, height: 640)
                     }
             }
         }
