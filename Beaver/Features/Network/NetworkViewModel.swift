@@ -12,8 +12,18 @@ final class NetworkViewModel {
     let sessionId: Int64
     private let store: LogStore
 
-    private(set) var entries: [NetworkEntry] = []
-    var filter = NetworkFilter()
+    private(set) var entries: [NetworkEntry] = [] {
+        didSet { bookmarkCount = entries.count { bookmarkedIds.contains($0.id) } }
+    }
+    /// A search edit waits `searchDebounce` before re-filtering, so typing
+    /// doesn't scan every body on each keystroke; other changes apply at once.
+    var filter = NetworkFilter() {
+        didSet {
+            guard filter != oldValue else { return }
+            var unsearched = filter; unsearched.search = oldValue.search
+            if unsearched == oldValue { scheduleSearch() } else { recompute() }
+        }
+    }
     var selection: NetworkEntry.ID?
 
     /// While paused new requests are stored but not loaded; `pendingCount`
@@ -21,15 +31,46 @@ final class NetworkViewModel {
     private(set) var isPaused = false
     private(set) var pendingCount = 0
 
-    private(set) var bookmarkedIds: Set<Int64> = []
-    var showOnlyBookmarked = false
+    private(set) var bookmarkedIds: Set<Int64> = [] {
+        didSet {
+            bookmarkCount = entries.count { bookmarkedIds.contains($0.id) }
+            if showOnlyBookmarked { recompute() }
+        }
+    }
+    private(set) var bookmarkCount = 0
+    var showOnlyBookmarked = false { didSet { if showOnlyBookmarked != oldValue { recompute() } } }
 
-    // ponytail: filters the whole array on every change. Fine for a few
-    // thousand requests per session; move to SQL / incremental if a
-    // session ever gets much bigger.
-    var filtered: [NetworkEntry] { filter.isEmpty ? base : base.filter(filter.matches) }
+    /// The table's column sort; empty keeps arrival order. In memory
+    /// only: a `KeyPathComparator` isn't Codable for `@AppStorage`.
+    var sortOrder: [KeyPathComparator<NetworkEntry>] = [] {
+        didSet {
+            guard sortOrder != oldValue else { return }
+            // New rows land anywhere in a sorted table: no tail to follow.
+            isFollowing = sortOrder.isEmpty
+            recompute()
+        }
+    }
+
+    /// Follow the tail: while the table sits at the bottom, new requests
+    /// keep it there. Scrolling up stops it and `unseenCount` counts the
+    /// rows that arrived since, for the "N new ↓" pill. Off while sorted.
+    var isFollowing = true { didSet { if isFollowing { unseenCount = 0 } } }
+    private(set) var unseenCount = 0
+
+    /// A user scroll (not a programmatic one) ended `atBottom` or not.
+    func userScrolled(atBottom: Bool) {
+        guard sortOrder.isEmpty, atBottom != isFollowing else { return }
+        isFollowing = atBottom
+    }
+
+    /// What the table shows (filtered, then sorted), and its results bar. Stored, not computed:
+    /// rebuilt only when the filter, bookmarks or entries change, and on
+    /// append only the new rows are filtered — never on a render.
+    private(set) var filtered: [NetworkEntry] = []
+    private(set) var stats = NetworkStats([])
+
     /// After Clear and bookmarks-only, before the filter: what the
-    /// Method / Status / Host dropdowns count.
+    /// Method / Status / Host dropdowns count (only while one is open).
     var base: [NetworkEntry] {
         showOnlyBookmarked ? entries.filter { bookmarkedIds.contains($0.id) } : entries
     }
@@ -37,10 +78,12 @@ final class NetworkViewModel {
     /// or bookmarks-only that hides it also empties the detail pane, instead
     /// of showing a request the table no longer lists.
     var selected: NetworkEntry? {
-        guard let id = selection, let e = entries.first(where: { $0.id == id }) else { return nil }
-        let visible = (!showOnlyBookmarked || bookmarkedIds.contains(id)) && filter.matches(e)
-        return visible ? e : nil
+        guard let id = selection else { return nil }
+        return filtered.first { $0.id == id }
     }
+
+    private static let searchDebounce = Duration.milliseconds(150)
+    @ObservationIgnored private var searchTask: Task<Void, Never>?
 
     /// See StoragesViewModel.subscription for why this is nonisolated(unsafe).
     private nonisolated(unsafe) var subscription: Task<Void, Never>?
@@ -72,12 +115,7 @@ final class NetworkViewModel {
                     if self.isPaused { self.pendingCount += 1 } else { await self.loadNew() }
                 case .networkBookmarksChanged(let sid) where sid == self.sessionId:
                     await self.loadBookmarks()
-                case .cleared(let sid) where sid == self.sessionId:
-                    self.entries = []
-                    self.selection = nil
-                    self.maxLoadedId = 0
-                    self.pendingCount = 0
-                    self.bookmarkedIds = []
+                // Not `.cleared`: the Log feed's clearEvents keeps network rows.
                 default:
                     break
                 }
@@ -93,7 +131,12 @@ final class NetworkViewModel {
     /// session (a new VM) shows everything again.
     func clear() {
         entries = []
+        recompute()
         selection = nil
+        unseenCount = 0
+        // An empty table can't be scrolled, so no scroll event would ever
+        // turn following back on: resume it here unless a sort is active.
+        isFollowing = sortOrder.isEmpty
     }
 
     func togglePause() {
@@ -101,6 +144,12 @@ final class NetworkViewModel {
         guard !isPaused else { return }
         pendingCount = 0
         Task { await loadNew() }
+    }
+
+    /// The payload as received, for Copy JSON; entries keep only the
+    /// parsed fields.
+    func payloadJSON(_ id: NetworkEntry.ID) async -> String? {
+        try? await store.networkPayload(id: id)
     }
 
     func isBookmarked(_ id: NetworkEntry.ID) -> Bool { bookmarkedIds.contains(id) }
@@ -123,5 +172,30 @@ final class NetworkViewModel {
         guard !newOnes.isEmpty else { return }
         entries.append(contentsOf: newOnes)
         maxLoadedId = max(maxLoadedId, newOnes.map(\.id).max() ?? 0)
+        let shown = newOnes.filter(isShown)
+        guard !shown.isEmpty else { return }
+        if !isFollowing && sortOrder.isEmpty { unseenCount += shown.count }
+        filtered = sortOrder.isEmpty ? filtered + shown : NetworkEntry.sorted(filtered + shown, using: sortOrder)
+        stats = NetworkStats(filtered)
+    }
+
+    private func isShown(_ e: NetworkEntry) -> Bool {
+        (!showOnlyBookmarked || bookmarkedIds.contains(e.id)) && filter.matches(e)
+    }
+
+    private func recompute() {
+        searchTask?.cancel()
+        let shown = filter.isEmpty && !showOnlyBookmarked ? entries : entries.filter(isShown)
+        filtered = NetworkEntry.sorted(shown, using: sortOrder)
+        stats = NetworkStats(filtered)
+    }
+
+    private func scheduleSearch() {
+        searchTask?.cancel()
+        searchTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.searchDebounce)
+            guard !Task.isCancelled else { return }
+            self?.recompute()
+        }
     }
 }

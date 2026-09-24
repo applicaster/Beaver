@@ -10,9 +10,9 @@ import Foundation
 @Suite("LogStore network entries")
 struct LogStoreNetworkTests {
 
-    private func entry(_ url: String, at ms: UInt64) -> NetworkEntry {
-        NetworkEntry.parse(#"{"url":"\#(url)","status":200,"timing":{"startTime":\#(ms),"duration":3}}"#,
-                           fallbackMillis: 0)!
+    private func entry(_ url: String, at ms: UInt64) -> NetworkCapture {
+        NetworkCapture(#"{"url":"\#(url)","status":200,"timing":{"startTime":\#(ms),"duration":3}}"#,
+                       fallbackMillis: 0)!
     }
 
     @Test
@@ -45,15 +45,18 @@ struct LogStoreNetworkTests {
     }
 
     @Test
-    func entriesAreScopedToSessionAndClearedWithEvents() async throws {
+    func entriesSurviveClearEventsAndGoWithTheSession() async throws {
         let store = try LogStore(source: .inMemory)
         let s1 = try await store.createSession(source: .live)
         let s2 = try await store.createSession(source: .live)
         try await store.recordNetworkEntry(entry("https://a.io", at: 1), sessionId: s1.id)
         try await store.recordNetworkEntry(entry("https://b.io", at: 1), sessionId: s2.id)
 
+        // The Log feed's Clear is about log noise, not request history.
         try await store.clearEvents(sessionId: s1.id)
+        #expect(try await store.networkEntries(sessionId: s1.id).count == 1)
 
+        try await store.deleteSession(id: s1.id)
         #expect(try await store.networkEntries(sessionId: s1.id).isEmpty)
         #expect(try await store.networkEntries(sessionId: s2.id).count == 1)
     }
@@ -149,5 +152,19 @@ struct LogStoreNetworkTests {
 
         #expect(try await store.networkEntryCount(sessionId: s1.id) == 2)
         #expect(try await store.networkEntryCount(sessionId: s2.id) == 0)
+    }
+
+    @Test
+    func payloadIsFetchedByIdVerbatim() async throws {
+        let store = try LogStore(source: .inMemory)
+        let session = try await store.createSession(source: .live)
+        let a = entry("https://a.io", at: 1), b = entry("https://b.io", at: 2)
+        try await store.recordNetworkEntry(a, sessionId: session.id)
+        try await store.recordNetworkEntry(b, sessionId: session.id)
+
+        let ids = try await store.networkEntries(sessionId: session.id).map(\.id)
+        #expect(try await store.networkPayload(id: ids[1]) == b.payloadJSON)
+        #expect(try await store.networkPayload(id: 999) == nil)
+        #expect(try await store.networkPayloads(sessionId: session.id) == [a.payloadJSON, b.payloadJSON])
     }
 }

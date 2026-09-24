@@ -18,6 +18,18 @@ extension NetworkEntry {
         return parts.joined(separator: " ")
     }
 
+    /// The toast after copying the request as `what` ("cURL", "fetch"),
+    /// saying why a replay may fail: "Copied cURL: Authorization redacted
+    /// by the SDK", "Copied fetch: body truncated".
+    public func copyToast(_ what: String) -> String {
+        let redacted = requestHeaders.filter { $0.value.contains("[REDACTED]") }.keys.sorted()
+        let notes = [
+            redacted.isEmpty ? nil : redacted.joined(separator: ", ") + " redacted by the SDK",
+            isRequestBodyTruncated ? "body truncated" : nil,
+        ].compactMap { $0 }
+        return "Copied \(what)" + (notes.isEmpty ? "" : ": " + notes.joined(separator: ", "))
+    }
+
     /// A JS `fetch(...)` call reproducing the request.
     public var fetchSnippet: String {
         var lines = ["fetch(\(Self.jsLiteral(url)), {", "  method: \(Self.jsLiteral(method)),"]
@@ -88,7 +100,7 @@ extension NetworkEntry {
     /// bodies at 100 000 chars and doesn't send the real size, so live
     /// traffic tops out at "100 KB+": red means "too big to even capture".
     public var tableSizeTier: Tier {
-        guard let bytes = responseBodySize ?? responseBytes else { return .normal }
+        guard let bytes = tableSizeBytes else { return .normal }
         if bytes >= 100_000 || (isResponseBodyTruncated && responseBodySize == nil) { return .critical }
         if bytes >= 50_000 { return .attention }
         return .normal
@@ -130,11 +142,15 @@ extension NetworkEntry {
         return Self.pretty(o)
     }
 
-    /// The payload as received, pretty-printed; raw when it won't re-parse.
-    public var prettyPayloadJSON: String {
+    /// A payload as received (`LogStore.networkPayload(id:)`),
+    /// pretty-printed; raw when it won't re-parse.
+    public static func prettyPayloadJSON(_ payloadJSON: String) -> String {
         guard let o = try? JSONSerialization.jsonObject(with: Data(payloadJSON.utf8)) else { return payloadJSON }
-        return Self.pretty(o)
+        return pretty(o)
     }
+
+    /// The Size column's value and sort key: reported size, else captured bytes.
+    public var tableSizeBytes: Int? { responseBodySize ?? responseBytes }
 
     public var responseBytes: Int? {
         guard let responseBody, !responseBody.isEmpty else { return nil }

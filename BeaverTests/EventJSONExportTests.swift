@@ -22,9 +22,8 @@ struct EventJSONExportTests {
         .keychain: #"{"authToken":"abc"}"#,
     ]
 
-    private func networkEntry(url: String, status: Int) -> NetworkEntry {
-        let json = #"{"url":"\#(url)","method":"GET","status":\#(status),"timestamp":1700000000000}"#
-        return NetworkEntry.parse(json, fallbackMillis: 0)!
+    private func networkEntry(url: String, status: Int) -> String {
+        #"{"url":"\#(url)","method":"GET","status":\#(status),"timestamp":1700000000000}"#
     }
 
     // MARK: Round trip
@@ -50,8 +49,8 @@ struct EventJSONExportTests {
         let back = try EventJSON.decodeExport(data)
 
         #expect(back.network.count == 2)
-        #expect(back.network.map(\.url) == ["https://a.example/one", "https://a.example/two"])
-        #expect(back.network.map(\.status) == [200, 404])
+        #expect(back.network.map(\.entry.url) == ["https://a.example/one", "https://a.example/two"])
+        #expect(back.network.map(\.entry.status) == [200, 404])
     }
 
     @Test("Network elements are JSON objects in the file")
@@ -240,7 +239,7 @@ struct SessionExportTests {
     func everythingIncludesNetwork() async throws {
         let (store, sessionId) = try await seeded()
         try await store.recordNetworkEntry(
-            NetworkEntry.parse(#"{"url":"https://a.example","status":200}"#, fallbackMillis: 0)!,
+            NetworkCapture(#"{"url":"https://a.example","status":200}"#, fallbackMillis: 0)!,
             sessionId: sessionId
         )
 
@@ -250,14 +249,14 @@ struct SessionExportTests {
         let back = try EventJSON.decodeExport(data)
 
         #expect(back.network.count == 1)
-        #expect(back.network.first?.url == "https://a.example")
+        #expect(back.network.first?.entry.url == "https://a.example")
     }
 
     @Test("Exporting filtered still carries every network entry")
     func filteredKeepsNetworkWhole() async throws {
         let (store, sessionId) = try await seeded()
         try await store.recordNetworkEntry(
-            NetworkEntry.parse(#"{"url":"https://a.example","status":200}"#, fallbackMillis: 0)!,
+            NetworkCapture(#"{"url":"https://a.example","status":200}"#, fallbackMillis: 0)!,
             sessionId: sessionId
         )
 
@@ -279,7 +278,7 @@ struct SessionExportTests {
         let store = try LogStore(source: .inMemory)
         let session = try await store.createSession(source: .live)
         try await store.recordNetworkEntry(
-            NetworkEntry.parse(#"{"url":"https://a.example","status":200}"#, fallbackMillis: 0)!,
+            NetworkCapture(#"{"url":"https://a.example","status":200}"#, fallbackMillis: 0)!,
             sessionId: session.id
         )
 
@@ -288,6 +287,30 @@ struct SessionExportTests {
         )
 
         #expect(data != nil)
+    }
+
+    @Test("Import then export writes the same network section")
+    func importThenExportKeepsNetworkIdentical() async throws {
+        let payloads = [
+            #"{"url":"https:\/\/a.example\/one?q=1","method":"POST","status":201,"extra":{"sdk":"ios"},"requestBody":"{\"a\":\"é\"}"}"#,
+            #"{"url":"https://a.example/two","status":404,"timing":{"startTime":5,"duration":7}}"#,
+        ]
+        let original = try EventJSON.encode([], storage: [:], network: payloads)
+
+        let store = try LogStore(source: .inMemory)
+        let session = try await store.createSession(source: .imported)
+        for capture in try EventJSON.decodeExport(original).network {
+            try await store.recordNetworkEntry(capture, sessionId: session.id)
+        }
+        let exported = try #require(
+            await SessionExport.make(store: store, sessionId: session.id, scope: .everything)
+        )
+
+        func network(_ data: Data) throws -> Data {
+            let root = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+            return try JSONSerialization.data(withJSONObject: try #require(root["network"]), options: .sortedKeys)
+        }
+        #expect(try network(exported) == network(original))
     }
 }
 

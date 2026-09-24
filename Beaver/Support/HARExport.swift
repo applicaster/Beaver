@@ -27,14 +27,15 @@ public enum HARExport {
     /// that isn't a HAR decodes to `[]`. A base64-encoded `content.text`
     /// (`content.encoding == "base64"`) is decoded when it's valid UTF-8
     /// text; otherwise (binary, or bad base64) the raw text is kept as is.
-    public static func decode(_ data: Data) -> [NetworkEntry] {
+    /// Bodies over 100 000 characters are cut as the SDK cuts them.
+    public static func decode(_ data: Data) -> [NetworkCapture] {
         guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
               let entries = (root["log"] as? [String: Any])?["entries"] as? [[String: Any]]
         else { return [] }
         return entries.compactMap(payload)
     }
 
-    private static func payload(_ h: [String: Any]) -> NetworkEntry? {
+    private static func payload(_ h: [String: Any]) -> NetworkCapture? {
         guard let request = h["request"] as? [String: Any],
               let url = request["url"] as? String else { return nil }
         let response = h["response"] as? [String: Any] ?? [:]
@@ -49,14 +50,19 @@ public enum HARExport {
         if let status = (response["status"] as? NSNumber)?.intValue, status > 0 { o["status"] = status }
         if let text = response["statusText"] as? String, !text.isEmpty { o["statusText"] = text }
         if let postData = request["postData"] as? [String: Any] {
-            if let body = postData["text"] as? String { o["requestBody"] = body }
+            if let body = postData["text"] as? String {
+                o["requestBody"] = capped(body)
+                if o["requestBody"] as? String != body { o["requestBodySize"] = body.utf8.count }
+            }
             if let bodySize = (request["bodySize"] as? NSNumber)?.intValue, bodySize > 0 {
                 o["requestBodySize"] = bodySize
             }
         }
         if let content = response["content"] as? [String: Any] {
-            if let body = content["text"] as? String {
-                o["responseBody"] = bodyText(body, encoding: content["encoding"] as? String)
+            if let text = content["text"] as? String {
+                let body = bodyText(text, encoding: content["encoding"] as? String)
+                o["responseBody"] = capped(body)
+                if o["responseBody"] as? String != body { o["responseBodySize"] = body.utf8.count }
             }
             if let size = (content["size"] as? NSNumber)?.intValue, size > 0 {
                 o["responseBodySize"] = size
@@ -77,7 +83,16 @@ public enum HARExport {
         if !timing.isEmpty { o["timing"] = timing }
 
         guard let json = try? JSONSerialization.data(withJSONObject: o) else { return nil }
-        return NetworkEntry.parse(String(decoding: json, as: UTF8.self), fallbackMillis: start ?? 0)
+        return NetworkCapture(String(decoding: json, as: UTF8.self), fallbackMillis: start ?? 0)
+    }
+
+    /// Cut like the SDK cuts a live body, so an imported request gets the
+    /// same truncation marker, repair and size tiers. A body already
+    /// ending in the marker (a Beaver HAR) is left alone. The HAR's own
+    /// size, when it has one, still wins over the length measured here.
+    private static func capped(_ body: String) -> String {
+        guard !body.hasSuffix(TruncatedJSON.marker), body.count > TruncatedJSON.limit else { return body }
+        return String(body.prefix(TruncatedJSON.limit)) + TruncatedJSON.marker
     }
 
     /// Decodes a base64 `content.text` when it decodes to valid UTF-8 text;

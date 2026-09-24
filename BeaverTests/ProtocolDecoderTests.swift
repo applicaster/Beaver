@@ -176,9 +176,11 @@ struct ProtocolDecoderTests {
             "event": #"{"url":"https://a.io/x","method":"GET","status":200,"timing":{"startTime":10,"duration":5}}"#,
         ]
         let result = ProtocolDecoder.decode(try JSONSerialization.data(withJSONObject: envelope))
-        guard case .success(.network(let entry)) = result else {
+        guard case .success(.network(let capture)) = result else {
             Issue.record("expected .network, got \(result)"); return
         }
+        let entry = capture.entry
+        #expect(capture.payloadJSON == envelope["event"] as? String)
         #expect(entry.url == "https://a.io/x")
         #expect(entry.status == 200)
         #expect(entry.startMillis == 10)

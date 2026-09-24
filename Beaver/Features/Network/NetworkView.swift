@@ -9,6 +9,8 @@ import UniformTypeIdentifiers
 
 struct NetworkView: View {
     @Bindable var vm: NetworkViewModel
+    /// Switches to the Log feed at the request's start time.
+    var onShowInLogFeed: (NetworkEntry) -> Void = { _ in }
     @Environment(ToastCenter.self) private var toasts
     /// The entry open in the large detail sheet.
     @State private var expanded: NetworkEntry?
@@ -33,7 +35,9 @@ struct NetworkView: View {
                 table(rows)
                     .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
                 NetworkDetailView(entry: vm.selected, isBookmarked: vm.selection.map(vm.isBookmarked) ?? false,
+                                  payloadJSON: vm.payloadJSON,
                                   onToggleBookmark: { vm.toggleBookmark($0.id) },
+                                  onShowInLogFeed: onShowInLogFeed,
                                   onExpand: { expanded = $0 })
                     .frame(minWidth: 320, idealWidth: 360, maxHeight: .infinity)
             }
@@ -43,6 +47,7 @@ struct NetworkView: View {
         .sheet(item: $expanded) { e in
             VStack(spacing: 0) {
                 NetworkDetailView(entry: e, isBookmarked: vm.isBookmarked(e.id),
+                                  payloadJSON: vm.payloadJSON,
                                   onToggleBookmark: { vm.toggleBookmark($0.id) })
                 Divider()
                 HStack {
@@ -139,7 +144,7 @@ struct NetworkView: View {
     /// `Results (754/754)  Success 96% (720/749)  Avg 413 ms` and the
     /// Bookmarks / Clear / Pause / Export HAR buttons, as in zapp-support.
     private func resultsBar(_ rows: [NetworkEntry]) -> some View {
-        let s = NetworkStats(rows)
+        let s = vm.stats
         return HStack(spacing: 12) {
             Text("Results (\(s.count)/\(vm.entries.count))").font(.headline)
             let stats = [
@@ -153,6 +158,10 @@ struct NetworkView: View {
                     .lineLimit(1)
             }
             Spacer(minLength: 8)
+            if !vm.sortOrder.isEmpty {
+                Button { vm.sortOrder = [] } label: { Label("Arrival order", systemImage: "arrow.up.arrow.down") }
+                    .help("Drop the column sort and list requests as they arrived")
+            }
             bookmarksButton
             Button { vm.clear() } label: { Label("Clear", systemImage: "xmark.circle") }
                 .help("Hide the requests on screen and start fresh — nothing is deleted")
@@ -185,7 +194,7 @@ struct NetworkView: View {
     /// nothing to narrow to, unless it is on (so it can be turned off).
     @ViewBuilder
     private var bookmarksButton: some View {
-        let count = vm.entries.lazy.filter { vm.isBookmarked($0.id) }.count
+        let count = vm.bookmarkCount
         let button = Button { vm.showOnlyBookmarked.toggle() } label: {
             Label("Bookmarks (\(count))", systemImage: vm.showOnlyBookmarked ? "bookmark.fill" : "bookmark")
         }
@@ -200,7 +209,8 @@ struct NetworkView: View {
 
     private func exportHAR(_ rows: [NetworkEntry]) {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
-        guard let data = try? HARExport.encode(rows, creatorVersion: version) else {
+        // HAR is a timeline: arrival order even when the table is sorted.
+        guard let data = try? HARExport.encode(rows.sorted { $0.id < $1.id }, creatorVersion: version) else {
             toasts.error("Couldn't build the HAR file")
             return
         }
@@ -222,8 +232,45 @@ struct NetworkView: View {
     /// colour only where it means something (method, non-2xx status, slow,
     /// large or cut).
     private func table(_ rows: [NetworkEntry]) -> some View {
-        Table(rows, selection: $vm.selection, columnCustomization: $columnLayout) {
-            TableColumn("Method") { e in
+        ScrollViewReader { proxy in
+            tableContent(rows)
+                .background { NetworkScrollWatcher { vm.userScrolled(atBottom: $0) } }
+                // Same as the Log feed's auto-scroll: instant, and deferred
+                // one runloop so the Table commits its rows before scrolling.
+                .onChange(of: rows.last?.id) { _, id in
+                    guard let id, vm.isFollowing else { return }
+                    DispatchQueue.main.async { proxy.scrollTo(id, anchor: .bottom) }
+                }
+                .onChange(of: vm.isFollowing) { _, following in
+                    guard following, let id = vm.filtered.last?.id else { return }
+                    DispatchQueue.main.async { proxy.scrollTo(id, anchor: .bottom) }
+                }
+                .onAppear {
+                    guard vm.isFollowing, let id = rows.last?.id else { return }
+                    DispatchQueue.main.async { proxy.scrollTo(id, anchor: .bottom) }
+                }
+                .overlay(alignment: .bottom) {
+                    if !vm.isFollowing && vm.sortOrder.isEmpty && vm.unseenCount > 0 {
+                        Button { vm.isFollowing = true } label: {
+                            Text("\(vm.unseenCount) new ↓")
+                                .font(.callout.weight(.semibold))
+                                .monospacedDigit()
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 5)
+                                .foregroundStyle(.white)
+                                .background(Capsule().fill(Color.accentColor))
+                        }
+                        .buttonStyle(.plain)
+                        .help("Scroll to the newest request and keep following")
+                        .padding(.bottom, 12)
+                    }
+                }
+        }
+    }
+
+    private func tableContent(_ rows: [NetworkEntry]) -> some View {
+        Table(rows, selection: $vm.selection, sortOrder: $vm.sortOrder, columnCustomization: $columnLayout) {
+            TableColumn("Method", value: \.method) { e in
                 HStack(spacing: 4) {
                     if vm.isBookmarked(e.id) {
                         Image(systemName: "bookmark.fill")
@@ -236,25 +283,25 @@ struct NetworkView: View {
             .width(min: 64, ideal: 76, max: 96)
             .customizationID("method")
             // The status is the one pill column; the method beside it is plain text.
-            TableColumn("Status") { StatusBadge(entry: $0) }
+            TableColumn("Status", value: \.status, comparator: NilLastComparator()) { StatusBadge(entry: $0) }
             .width(min: 48, ideal: 56, max: 64)
             .customizationID("status")
-            TableColumn("Host") { Text($0.host).font(Self.rowFont).lineLimit(1) }
+            TableColumn("Host", value: \.host) { Text($0.host).font(Self.rowFont).lineLimit(1) }
                 .width(min: 100, ideal: 170, max: 260)
                 .customizationID("host")
-            TableColumn("Path") { e in
+            TableColumn("Path", value: \.path) { e in
                 Text(e.path).font(Self.rowFont).lineLimit(1).truncationMode(.middle).help(e.path)
             }
             .customizationID("path")
-            TableColumn("Duration") { DurationCell(millis: $0.durationMillis) }
+            TableColumn("Duration", value: \.durationMillis, comparator: NilLastComparator()) { DurationCell(millis: $0.durationMillis) }
                 .width(min: 60, ideal: 72, max: 90)
                 .customizationID("duration")
                 .alignment(.trailing)
-            TableColumn("Size") { SizeCell(entry: $0) }
+            TableColumn("Size", value: \.tableSizeBytes, comparator: NilLastComparator()) { SizeCell(entry: $0) }
                 .width(min: 56, ideal: 70, max: 90)
                 .customizationID("size")
                 .alignment(.trailing)
-            TableColumn("Time") { e in
+            TableColumn("Time", value: \.startMillis) { e in
                 Text(Self.time(e.startMillis))
                     .font(Self.rowFont)
                     .foregroundStyle(.secondary)
@@ -279,6 +326,7 @@ struct NetworkView: View {
         .contextMenu(forSelectionType: NetworkEntry.ID.self) { ids in
             if let id = ids.first, let e = vm.entries.first(where: { $0.id == id }) {
                 Button(vm.isBookmarked(e.id) ? "Remove bookmark" : "Bookmark") { vm.toggleBookmark(e.id) }
+                Button("Show in Log feed") { onShowInLogFeed(e) }
                 Divider()
                 Button("Only \(e.host)") { vm.filter.host = e.host }
                 Button("Hide \(e.host)") { vm.filter.excludedHosts.insert(e.host) }
@@ -294,7 +342,7 @@ struct NetworkView: View {
                 Button("Hide \(statusClass.displayName)") { vm.filter.excludedStatusClasses.insert(statusClass) }
                 Divider()
                 Button("Copy URL") { toasts.copy(e.url, "Copied URL") }
-                Button("Copy as cURL") { toasts.copy(e.curlCommand, "Copied cURL") }
+                Button("Copy as cURL") { toasts.copy(e.curlCommand, e.copyToast("cURL")) }
             }
         }
         .overlay {
@@ -334,6 +382,22 @@ struct NetworkView: View {
     static func time(_ ms: UInt64) -> String {
         Date(timeIntervalSince1970: Double(ms) / 1000)
             .formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute().second().secondFraction(.fractional(3)))
+    }
+}
+
+/// Lets an optional column drive `Table(sortOrder:)`. The VM sorts with
+/// `NetworkEntry.sorted`, which reads only the key path and order.
+private struct NilLastComparator: SortComparator {
+    var order = SortOrder.forward
+
+    func compare(_ a: Int?, _ b: Int?) -> ComparisonResult {
+        switch (a, b) {
+        case (nil, nil): .orderedSame
+        case (nil, _): .orderedDescending
+        case (_, nil): .orderedAscending
+        case let (a?, b?):
+            a == b ? .orderedSame : (a < b) == (order == .forward) ? .orderedAscending : .orderedDescending
+        }
     }
 }
 
@@ -649,5 +713,85 @@ private struct FacetPickerRow: View {
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
+    }
+}
+
+// MARK: - Scroll watcher
+
+/// Reports each user scroll of the table (trackpad, wheel, scroller
+/// drag) with whether it ended at the bottom. Programmatic `scrollTo`
+/// doesn't post `didLiveScrollNotification`, so following never turns
+/// itself off.
+// ponytail: a copy of LogFeedView's private ScrollWatcher plus the
+// bottom check; share one once the Log feed work has landed.
+private struct NetworkScrollWatcher: NSViewRepresentable {
+    let onUserScroll: (_ atBottom: Bool) -> Void
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NetworkScrollWatcherView()
+        view.onUserScroll = onUserScroll
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        (nsView as? NetworkScrollWatcherView)?.onUserScroll = onUserScroll
+    }
+}
+
+private final class NetworkScrollWatcherView: NSView {
+    var onUserScroll: ((Bool) -> Void)?
+    private weak var observed: NSScrollView?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard window != nil else { unsubscribe(); return }
+        // The Table installs its NSScrollView a runloop later.
+        DispatchQueue.main.async { [weak self] in self?.subscribe() }
+    }
+
+    deinit { unsubscribe() }
+
+    private func subscribe() {
+        guard let scrollView = findScrollView(), observed !== scrollView else { return }
+        unsubscribe()
+        observed = scrollView
+        NotificationCenter.default.addObserver(self, selector: #selector(handleScroll),
+                                               name: NSScrollView.didLiveScrollNotification, object: scrollView)
+    }
+
+    private func unsubscribe() {
+        if let observed {
+            NotificationCenter.default.removeObserver(self, name: NSScrollView.didLiveScrollNotification,
+                                                      object: observed)
+        }
+        observed = nil
+    }
+
+    @objc private func handleScroll() {
+        guard let scrollView = observed, let document = scrollView.documentView else { return }
+        // Within a few points of the end counts as the bottom.
+        onUserScroll?(scrollView.contentView.bounds.maxY >= document.frame.height - 8)
+    }
+
+    /// The Table's scroll view: an ancestor, or a sibling's descendant.
+    private func findScrollView() -> NSScrollView? {
+        var current: NSView? = superview
+        while let view = current {
+            if let scroll = view as? NSScrollView { return scroll }
+            for sibling in view.superview?.subviews ?? [] where sibling !== view {
+                if let scroll = sibling as? NSScrollView ?? sibling.firstDescendantScrollView() { return scroll }
+            }
+            current = view.superview
+        }
+        return nil
+    }
+}
+
+private extension NSView {
+    func firstDescendantScrollView() -> NSScrollView? {
+        for child in subviews {
+            if let scroll = child as? NSScrollView ?? child.firstDescendantScrollView() { return scroll }
+        }
+        return nil
     }
 }
