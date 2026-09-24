@@ -37,6 +37,11 @@ final class StoragesViewModel {
     /// any `.storageUpdated` broadcast for this session.
     private(set) var snapshots: [StorageSnapshot.Namespace: StorageSnapshot] = [:]
 
+    /// When the device last reported each layer, changed or not. Kept
+    /// apart from `snapshots` so an unchanged report moves the "as of"
+    /// time without re-rendering every row.
+    private(set) var takenAt: [StorageSnapshot.Namespace: Date] = [:]
+
     /// Per-record expansion state inside the current storage layer.
     /// Keyed by `"<wireKey>:<recordId>"` so the set survives tab
     /// switches without leaking expand state across layers.
@@ -483,6 +488,7 @@ final class StoragesViewModel {
     func clearLocalCache() {
         parsedCache.removeAll()
         snapshots.removeAll()
+        takenAt.removeAll()
         expandedRecordKeys.removeAll()
         rawModeKeys.removeAll()
         recomputeMatches()
@@ -490,7 +496,16 @@ final class StoragesViewModel {
 
     // MARK: - Loading
 
+    /// Bumped by every reload. One storage frame broadcasts once per
+    /// layer, and Reload / edits reload too, so several reloads overlap;
+    /// one that started earlier read older rows and must not land last
+    /// (stale values, and a false change-flash when the newer one lands).
+    @ObservationIgnored
+    private var reloadGeneration = 0
+
     private func reloadFromStore() async {
+        reloadGeneration += 1
+        let generation = reloadGeneration
         var fresh: [StorageSnapshot.Namespace: StorageSnapshot] = [:]
         for ns in StorageSnapshot.Namespace.allCases {
             if let snap = try? await store.latestStorageSnapshot(
@@ -500,6 +515,9 @@ final class StoragesViewModel {
                 fresh[ns] = snap
             }
         }
+        guard generation == reloadGeneration else { return }
+        let times = fresh.mapValues(\.takenAt)
+        if times != takenAt { takenAt = times }
         // The device re-reports storage about once a second, mostly
         // unchanged (one real session: 6 132 snapshots, 6 distinct).
         // Assigning anyway would re-render every row for nothing.

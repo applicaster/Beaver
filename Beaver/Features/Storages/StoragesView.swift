@@ -118,6 +118,7 @@ private struct StoragesContent: View {
             Divider()
             StoragesSearchBar(vm: vm)
             Divider()
+            StaleStorageBanner(vm: vm)
             // D31: no more right-side detail pane. Every value is
             // visible by expanding the namespace row inline; deeper
             // structures can be inspected by the row's copy-as-JSON
@@ -510,6 +511,63 @@ private struct StoragesSearchBar: View {
         .labelsHidden()
         .frame(maxWidth: 220)
         .help("Show only one group")
+    }
+}
+
+/// When the layer on screen was last reported, and a warning strip when
+/// it can't be live — no device connected, or a past session.
+private struct StaleStorageBanner: View {
+    @Bindable var vm: StoragesViewModel
+    @Environment(AppEnvironment.self) private var env
+
+    private static let timeOnly: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm:ss"
+        return f
+    }()
+
+    private static let dateAndTime: DateFormatter = {
+        let f = DateFormatter()
+        f.setLocalizedDateFormatFromTemplate("MMMd")
+        f.dateFormat += ", HH:mm:ss"
+        return f
+    }()
+
+    private var staleReason: String? {
+        guard case .clientConnected = env.serverState else { return "Disconnected" }
+        return env.currentSessionId == vm.sessionId ? nil : "Past session"
+    }
+
+    var body: some View {
+        let taken = vm.takenAt[vm.selectedNamespace]
+        let reason = staleReason
+        if reason != nil || taken != nil {
+            VStack(spacing: 0) {
+                HStack(spacing: 6) {
+                    if let reason {
+                        Image(systemName: "bolt.horizontal.circle")
+                        Text("\(reason) — cached").fontWeight(.semibold)
+                    }
+                    if let taken {
+                        Text("as of \(Self.format(taken))")
+                    }
+                    Spacer()
+                }
+                .font(.caption)
+                .foregroundStyle(reason == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(Color.orange))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 4)
+                .background(reason == nil ? Color.clear : Color.orange.opacity(0.12))
+                Divider()
+            }
+            .help(reason == nil
+                  ? "When the device last reported this storage"
+                  : "Not live: this is the last storage Beaver received")
+        }
+    }
+
+    private static func format(_ date: Date) -> String {
+        (Calendar.current.isDateInToday(date) ? timeOnly : dateAndTime).string(from: date)
     }
 }
 
