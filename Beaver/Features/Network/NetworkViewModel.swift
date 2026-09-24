@@ -33,7 +33,14 @@ final class NetworkViewModel {
     var base: [NetworkEntry] {
         showOnlyBookmarked ? entries.filter { bookmarkedIds.contains($0.id) } : entries
     }
-    var selected: NetworkEntry? { selection.flatMap { id in entries.first { $0.id == id } } }
+    /// The selected entry, but only while it is on screen: a filter, search
+    /// or bookmarks-only that hides it also empties the detail pane, instead
+    /// of showing a request the table no longer lists.
+    var selected: NetworkEntry? {
+        guard let id = selection, let e = entries.first(where: { $0.id == id }) else { return nil }
+        let visible = (!showOnlyBookmarked || bookmarkedIds.contains(id)) && filter.matches(e)
+        return visible ? e : nil
+    }
 
     /// See StoragesViewModel.subscription for why this is nonisolated(unsafe).
     private nonisolated(unsafe) var subscription: Task<Void, Never>?
