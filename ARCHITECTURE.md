@@ -522,8 +522,13 @@ An MCP server inside the app lets AI agents read what Beaver collected
 
     MCP client ──HTTP POST 127.0.0.1:9081/mcp──► MCPHTTPListener (NWListener)
         ► MCPServer (JSON-RPC, stateless) ► BeaverTools (MCPTool values)
-        ► LogStore actor + AgentUI (read-only view of AppEnvironment)
-        ► every call journaled to agent_activity ► Agent panel
+        ► ToolContext { LogStore, AgentUI (AppEnvironment), DeviceLink (WSServer), Watches }
+
+Actions reach the device through `DeviceLink` (`WSServer.send(command:)`).
+Waits follow the device across a reconnect (`DeviceWait.swift`). Notes,
+watches firing and the device dropping after a command are journal rows;
+the app reads new rows for toasts and the Dock badge, and `AgentNotifier`
+(app target) turns attention notes into macOS notifications.
 
 `AgentAccess` is the only entry point the app uses. All of it except the
 `AgentUI` conformance and the panel lives in BeaverCore and is covered by

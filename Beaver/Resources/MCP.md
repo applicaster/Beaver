@@ -2,8 +2,12 @@
 
 Beaver's MCP server lets an AI agent on this Mac read everything Beaver has
 collected from the connected app — logs, network requests, storage, commands —
-in the background. Everything the agent calls is listed in Beaver's **Agent**
-panel. Design: `plans/2026-09-23-mcp-design.md`.
+and act on it: send commands, change storage, import and export session
+files, bookmark, save filters, watch for things over time, and leave notes for
+you. It works in the background. Everything the agent calls is listed in
+Beaver's **Agent** panel; deletions and notes that need you also show a toast,
+and a macOS notification when Beaver is in the background. Design:
+`plans/2026-09-23-mcp-design.md`.
 
 ## Setup
 
@@ -44,7 +48,23 @@ or a release):
    them while the panel was closed.
 6. Turn **Agent Access (MCP)** off in the app menu: the `curl` above now fails
    to connect.
-7. Report problems with the Beaver version (Beaver → About) and the Agent
+7. Actions (with a device connected; ask the agent in plain words):
+   - "send `cmdlist` to the app and show me what it logged" → `commands_send`
+     with `collectLogsMs`; the command also appears in the command bar's
+     history (↑).
+   - "set local storage key `beaverTest` to `1`, then delete it" → the panel
+     shows both calls; the delete is highlighted and a toast says
+     "Agent: Delete …" with **Journal**.
+   - "watch for errors and tell me at the first one" → `watch_start` with
+     `notify`; trigger an error on the device: an attention note appears,
+     with a toast (Beaver in front) or a macOS notification (Beaver in the
+     background). **Show** / clicking it brings Beaver forward on the event.
+   - Notifications off? The Agent panel's strip says where to turn them on;
+     app menu → **Agent Notifications: Off — Turn On…** opens it.
+   - "export this session to ~/Desktop/beaver-test.json, import it back, then
+     delete the imported copy" → three calls; the imported session is not
+     shown until you pick it; the delete toasts.
+8. Report problems with the Beaver version (Beaver → About) and the Agent
    panel's **Copy** output.
 
 ## Tools
@@ -81,9 +101,12 @@ or a release):
 | `beaver_guide` | These recipes, by topic |
 
 Conventions: omitting `sessionId` means the live session, else the viewed one,
-else the most recent. Subsystem and category values accept `*` globs, name
+else the most recent — and during a wait it follows the device into its new
+session if the app restarts (`sessionChanged`); a given `sessionId` stays put
+(`sessionEnded`). Subsystem and category values accept `*` globs, name
 fragments and any case; results say what they matched. `since: "5m"` works
-wherever ids do. Every result ends with `Next:` suggestions.
+wherever ids do. File paths are absolute or start with `~`. Every result ends
+with `Next:` suggestions.
 
 ## Recipes
 

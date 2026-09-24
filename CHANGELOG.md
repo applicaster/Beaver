@@ -14,6 +14,19 @@ When releasing:
 
 ## [Unreleased]
 
+### Added
+- **Agent Access: agents can act, not just read.** Through Beaver's MCP
+  server an agent can send commands to the app (and collect the logs they
+  cause, following the app across a restart), set and delete storage keys
+  with the same check the Storages tab does, import, export and delete
+  session files, clear the Log feed, bookmark, save and delete filters,
+  and watch for matching logs for minutes or hours. It tells you what it
+  found with notes in the Agent panel whose links open the event, request
+  or session. Deletions and notes that need you show a toast; those notes
+  also raise a macOS notification when Beaver is in the background, and a
+  Dock badge. The Agent panel and the app menu (**Agent Notifications**)
+  say where to turn notifications on, and the panel can mute them.
+
 ### Fixed
 - **Events sent right after a device connects are no longer lost.** What
   the SDK sent the moment it connected (for example, events it buffered
