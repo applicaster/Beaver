@@ -9,8 +9,8 @@ import SwiftUI
 
 struct AgentActivityView: View {
     @Bindable var model: AgentActivityViewModel
-    /// A row's link was clicked.
-    var onOpen: (AgentLink) -> Void = { _ in }
+    /// A row's link was clicked: get the popover out of the way.
+    var onOpened: () -> Void = {}
     @Environment(ToastCenter.self) private var toasts
     @Environment(AppEnvironment.self) private var env
     @State private var showingSetup = false
@@ -71,10 +71,36 @@ struct AgentActivityView: View {
             .frame(maxHeight: .infinity)
         } else {
             List(model.visible) { entry in
-                AgentActivityRow(entry: entry, onOpen: onOpen)
+                AgentActivityRow(entry: entry) { link in
+                    // Dismiss first, so the window is visible behind it,
+                    // then show what the link points at.
+                    onOpened()
+                    Task { await open(link) }
+                }
             }
             .listStyle(.plain)
         }
+    }
+
+    /// Shows what a journal link points at, through the same path
+    /// `ui_show` uses. A person's click, not an agent call: not journaled,
+    /// and `reveal: false` — the popover closing already brings the window
+    /// into view.
+    private func open(_ link: AgentLink) async {
+        do {
+            try await env.open(link, reveal: false)
+        } catch let error as ToolError {
+            toasts.error(personFriendly(error.message))
+        } catch {
+            toasts.error(error.localizedDescription)
+        }
+    }
+
+    /// `ToolError.message` is written for an agent and ends with an
+    /// example call ("Example: ..."); a person doesn't need that part.
+    private func personFriendly(_ message: String) -> String {
+        guard let range = message.range(of: " Example:") else { return message }
+        return String(message[..<range.lowerBound])
     }
 
     // MARK: - Setup
