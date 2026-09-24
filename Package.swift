@@ -35,6 +35,9 @@ let package = Package(
                 "Features",                  // SwiftUI views, app-target only
                 "Assets.xcassets",           // Xcode resource bundle
                 "Beaver.entitlements",       // app entitlements
+            ],
+            resources: [
+                .copy("Resources/MCP.md"),   // served by beaver_guide (design M31)
             ]
         ),
         .testTarget(
