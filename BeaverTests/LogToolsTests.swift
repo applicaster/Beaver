@@ -69,4 +69,64 @@ struct LogToolsTests {
             try await LogTools.query.run(ToolArguments(["filter": ["subsystems": ["plaeyr"]]]), ctx)
         }
     }
+
+    @Test("Query with includeData: true shows truncated data and dataTruncated flag")
+    func queryWithLargeData() async throws {
+        let store = try LogStore(source: .inMemory)
+        let s = try await store.createSession(source: .live)
+
+        // Large payload: 3 KB of data
+        let largeData = String(repeating: "x", count: 3 * 1024)
+        // Small payload: 100 bytes
+        let smallData = String(repeating: "y", count: 100)
+
+        try await seed(store, session: s.id, [
+            (.info, "com.app.auth", "", "with large data"),
+        ], data: largeData)
+        try await seed(store, session: s.id, [
+            (.info, "com.app.auth", "", "with small data"),
+        ], data: smallData)
+
+        let ctx = makeContext(store, ui: HostSnapshot(liveSessionId: s.id))
+        let r = try await LogTools.query.run(ToolArguments([
+            "includeData": true, "order": "oldest"
+        ]), ctx)
+
+        let rows = r.structured["events"]?.array ?? []
+        #expect(rows.count == 2)
+
+        // First event: large data, should be truncated at 2 KB
+        let largeRow = rows[0]
+        #expect(largeRow["dataTruncated"]?.bool == true)
+        let largeDataText = largeRow["data"]?.string ?? ""
+        #expect(largeDataText.count <= 2048)
+        #expect(largeDataText.count > 0)
+
+        // Second event: small data, should not be truncated
+        let smallRow = rows[1]
+        #expect(smallRow["dataTruncated"]?.bool == false)
+        #expect(smallRow["data"]?.string == smallData)
+    }
+
+    @Test("Facets with >100 subsystems caps array at 100 and reports remainder in subsystemsMore")
+    func facetsWithManySubsystems() async throws {
+        let store = try LogStore(source: .inMemory)
+        let s = try await store.createSession(source: .live)
+
+        // Create events with 150 distinct subsystems
+        var events: [(LogLevel, String, String, String)] = []
+        for i in 0..<150 {
+            events.append((.info, "subsys.\(String(format: "%03d", i))", "", "event \(i)"))
+        }
+        try await seed(store, session: s.id, events)
+
+        let ctx = makeContext(store, ui: HostSnapshot(liveSessionId: s.id))
+        let r = try await LogTools.facets.run(ToolArguments([:]), ctx)
+
+        let subsystemsArray = r.structured["subsystems"]?.array ?? []
+        #expect(subsystemsArray.count == 100)
+
+        let subsystemsMore = r.structured["subsystemsMore"]?.int ?? 0
+        #expect(subsystemsMore == 50)
+    }
 }

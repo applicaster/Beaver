@@ -43,8 +43,10 @@ enum LogTools {
             structured: [
                 "sessionId": JSON(s.id), "matching": JSON(matching), "inRange": JSON(inRange),
                 "levels": .object(Dictionary(uniqueKeysWithValues: levels.map { ($0.key.rawValue, JSON($0.value)) })),
-                "subsystems": .array(subsystems.map { ["value": .string($0.value), "count": JSON($0.count)] }),
-                "categories": .array(categories.map { ["value": .string($0.value), "count": JSON($0.count)] }),
+                "subsystems": .array(subsystems.prefix(100).map { ["value": .string($0.value), "count": JSON($0.count)] }),
+                "subsystemsMore": JSON(max(0, subsystems.count - 100)),
+                "categories": .array(categories.prefix(100).map { ["value": .string($0.value), "count": JSON($0.count)] }),
+                "categoriesMore": JSON(max(0, categories.count - 100)),
                 "resolved": .array(notes.map(JSON.string)),
             ],
             next: (subsystems.first.map { ["logs_query(filter: {subsystems: [\"\($0.value)\"]})"] } ?? [])
@@ -101,6 +103,7 @@ enum LogTools {
                 let capped = ToolText.capped(data, maxBytes: 2048)
                 line += "\n    data: " + capped.text + (capped.truncated ? " … (logs_get for all)" : "")
                 row["data"] = .string(capped.text)
+                row["dataTruncated"] = .bool(capped.truncated)
             }
             lines.append(line)
             rows.append(.object(row))
