@@ -75,7 +75,12 @@ private func sendStorageEdit(_ edit: StoragesViewModel.Edit,
                 toasts.success("Undone")
             } else if let undo {
                 toasts.show("Applied", duration: 6, action: ToastAction(title: "Undo") {
-                    sendStorageEdit(undo, vm: vm, server: server, toasts: toasts, isUndo: true)
+                    // Undoing a Keychain edit is a Keychain write too.
+                    if undo.namespace == .keychain {
+                        vm.pendingKeychainWrite = .init(edit: undo, isUndo: true)
+                    } else {
+                        sendStorageEdit(undo, vm: vm, server: server, toasts: toasts, isUndo: true)
+                    }
                 })
             } else {
                 toasts.success("Applied — no Undo: the old value has spaces")
@@ -142,11 +147,8 @@ private struct StoragesContent: View {
     @State private var pendingInnerDelete: InnerDeleteTarget?
     @State private var pendingAdd: AddKeyContext?
     @State private var pendingFieldDelete: StorageFieldTarget?
-    /// A Keychain write waiting for the user to confirm it.
-    @State private var pendingKeychainSave: StoragesViewModel.Edit?
-
-    private func send(_ edit: StoragesViewModel.Edit) {
-        sendStorageEdit(edit, vm: vm, server: env.server, toasts: toasts)
+    private func send(_ edit: StoragesViewModel.Edit, isUndo: Bool = false) {
+        sendStorageEdit(edit, vm: vm, server: env.server, toasts: toasts, isUndo: isUndo)
     }
 
     var body: some View {
@@ -292,25 +294,32 @@ private struct StoragesContent: View {
                 StorageCommand.valueProblem($0, parent: target.parentKey)
             }
             Text(problem.map { "Can't delete this field: \($0)" }
-                 ?? "Rewrites \(target.key) on the device without this field.")
+                 ?? (target.namespace == .keychain
+                     ? "Rewrites \(target.key) in the Keychain without this field. The Keychain holds sign-in tokens; a wrong value can sign the app out."
+                     : "Rewrites \(target.key) on the device without this field."))
         }
         // The Keychain holds sign-in tokens; a slip there can log the
         // app out, so writes to it are confirmed.
         .confirmationDialog(
-            "Write \"\(pendingKeychainSave?.key ?? "")\" to the Keychain?",
+            vm.pendingKeychainWrite.map { write in
+                write.edit.value == nil
+                    ? "Delete \"\(write.edit.key)\" from the Keychain?"
+                    : "Write \"\(write.edit.key)\" to the Keychain?"
+            } ?? "",
             isPresented: Binding(
-                get: { pendingKeychainSave != nil },
-                set: { if !$0 { pendingKeychainSave = nil } }
+                get: { vm.pendingKeychainWrite != nil },
+                set: { if !$0 { vm.pendingKeychainWrite = nil } }
             ),
-            presenting: pendingKeychainSave
-        ) { edit in
-            Button("Write to Keychain", role: .destructive) {
-                pendingKeychainSave = nil
-                send(edit)
+            presenting: vm.pendingKeychainWrite
+        ) { write in
+            Button(write.isUndo ? "Undo" : "Write to Keychain", role: .destructive) {
+                vm.pendingKeychainWrite = nil
+                send(write.edit, isUndo: write.isUndo)
             }
-            Button("Cancel", role: .cancel) { pendingKeychainSave = nil }
-        } message: { _ in
-            Text("The Keychain holds sign-in tokens and credentials. A wrong value can sign the app out. Undo is offered once the device confirms.")
+            Button("Cancel", role: .cancel) { vm.pendingKeychainWrite = nil }
+        } message: { write in
+            Text("The Keychain holds sign-in tokens and credentials. A wrong value can sign the app out."
+                 + (write.isUndo ? "" : " Undo is offered once the device confirms."))
         }
         // Add-key sheet. Identifiable trigger so the same view powers
         // both top-bar "+ Add key" (parentKey = nil → top-level) and
@@ -336,7 +345,7 @@ private struct StoragesContent: View {
                     let edit = StoragesViewModel.Edit(namespace: namespace, parent: parent,
                                                       key: key, value: value)
                     if namespace == .keychain {
-                        pendingKeychainSave = edit
+                        vm.pendingKeychainWrite = .init(edit: edit, isUndo: false)
                     } else {
                         send(edit)
                     }

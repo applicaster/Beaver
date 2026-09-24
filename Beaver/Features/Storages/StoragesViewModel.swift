@@ -444,6 +444,16 @@ final class StoragesViewModel {
         }
     }
 
+    /// A Keychain write (or its Undo) waiting for the user to confirm.
+    /// Lives here, not in view state, so the toast's Undo can ask too.
+    struct PendingKeychainWrite: Identifiable {
+        let id = UUID()
+        let edit: Edit
+        let isUndo: Bool
+    }
+
+    var pendingKeychainWrite: PendingKeychainWrite?
+
     enum EditResult {
         /// The next snapshot holds what was sent. `undo` restores the
         /// previous value; nil when that value can't be sent back (it
