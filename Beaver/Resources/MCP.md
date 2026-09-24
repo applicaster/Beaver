@@ -74,6 +74,7 @@ or a release):
 | `filters_list` | The user's saved filters |
 | `filters_save` | Save a named filter (replaces one with the same name) |
 | `filters_delete` | Delete a saved filter |
+| `journal_note` | Tell the user something in the Agent panel, with clickable links; `attention` also notifies |
 | `beaver_guide` | These recipes, by topic |
 
 Conventions: omitting `sessionId` means the live session, else the viewed one,
@@ -176,3 +177,26 @@ wherever ids do. Every result ends with `Next:` suggestions.
    An existing file is never replaced unless you pass `overwrite: true`.
 4. `sessions_delete(sessionId: <id>)` when the user asks to remove it;
    `sessions_delete(all: true)` removes every session.
+
+### review-errors — go through the errors with the user
+
+1. `logs_facets(filter: {minLevel: "error"}, since: "1h")`.
+2. `logs_query(filter: {minLevel: "error"}, since: "1h", limit: 500)` — group
+   them by cause yourself.
+3. `journal_note(text: "3 causes: token expired ×41, feed 500 ×12, player timeout ×3", links: [{eventId: <first of each cause>}, …])`
+   — the user clicks a link to open that event.
+4. Found the cause and the user must look now?
+   `journal_note(level: "attention", text: "Login fails: the refresh token expired", links: [{eventId: <id>}, {networkId: <id>}])`
+   — a toast with **Show**, and a macOS notification when Beaver is in the
+   background. Use `attention` only for that.
+
+### notifications — the user doesn't get notified
+
+1. `beaver_status()` — `notifications` is `allowed`, `denied`,
+   `notDetermined` or `muted`.
+2. `journal_note(level: "attention", …)` returns `notified: false`, a
+   `reason` and `howToEnable`. Tell the user in chat, word for word:
+   System Settings → Notifications → Beaver → Allow Notifications (style:
+   Banners). The Agent panel shows the same path with a button.
+3. `muted`: the user turned agent notifications off in Beaver's Agent panel
+   on purpose; don't ask them to change it.

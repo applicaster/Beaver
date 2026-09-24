@@ -104,4 +104,13 @@ struct StatusToolsTests {
             #expect(error.message.contains("source must be live, imported or any"))
         }
     }
+
+    @Test("beaver_status reports the notification state, and how to turn it on")
+    func notifications() async throws {
+        let store = try LogStore(source: .inMemory)
+        let r = try await StatusTools.status.run(ToolArguments(),
+                                                 makeContext(store, ui: HostSnapshot(notifications: .denied)))
+        #expect(r.structured["notifications"] == "denied")
+        #expect(r.body.contains(AgentNotifications.howToEnable))
+    }
 }
