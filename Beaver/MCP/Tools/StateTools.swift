@@ -128,6 +128,24 @@ enum StateTools {
         }
     }
 
+    /// Whether `args` asks for subsystem / category resolution — checking
+    /// `filter` and, per `ToolContext.filterKeys`, the same keys lifted
+    /// from the top level — so `filtersSave` knows whether a missing
+    /// session is actually a problem.
+    private static let facetKeys = ["subsystems", "excludeSubsystems", "categories", "excludeCategories"]
+
+    private static func needsSessionToResolve(_ args: ToolArguments) throws -> Bool {
+        var merged = args["filter"]?.object ?? [:]
+        for key in facetKeys where merged[key] == nil {
+            if let value = args[key] { merged[key] = value }
+        }
+        let a = ToolArguments(merged)
+        for key in facetKeys {
+            if let patterns = try a.strings(key), !patterns.isEmpty { return true }
+        }
+        return false
+    }
+
     static let filtersSave = MCPTool(
         name: "filters_save",
         title: "Save a filter",
@@ -145,10 +163,19 @@ enum StateTools {
             throw ToolError("name is required. \(example)")
         }
         // A filter without subsystems or categories needs no session, so
-        // this works on a fresh install too.
-        let sessionId: Int64 = args["sessionId"] != nil
-            ? try await ctx.resolveSession(args).id
-            : ((try? await ctx.resolveSession(args))?.id ?? 0)
+        // this works on a fresh install too — but if it does have one of
+        // those, and there's no session to resolve it against, say so
+        // rather than silently resolving against a session id of 0.
+        let sessionId: Int64
+        if args["sessionId"] != nil {
+            sessionId = try await ctx.resolveSession(args).id
+        } else if let resolved = try? await ctx.resolveSession(args) {
+            sessionId = resolved.id
+        } else if try Self.needsSessionToResolve(args) {
+            throw ToolError("Beaver has no sessions yet, so subsystem and category patterns can't be resolved to names. Save the filter without them, or once a session exists. Example: filters_save(name: \"Errors\", filter: {minLevel: \"error\"}).")
+        } else {
+            sessionId = 0
+        }
         let f = try await ctx.resolveFilter(args, sessionId: sessionId)
         guard !f.filter.isEmpty else { throw ToolError("filter is empty: a saved filter needs at least one condition. \(example)") }
         let existed = try await ctx.store.savedFilters().contains { $0.name == name }

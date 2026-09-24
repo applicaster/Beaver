@@ -75,6 +75,24 @@ struct OrganiseToolsTests {
         #expect(try await store.savedFilters().map(\.name) == ["Errors"])
     }
 
+    @Test("filters_save on a fresh install refuses subsystem/category patterns it can't resolve, nested or lifted from the top level")
+    func savedFilterNoSessionsNeedsNames() async throws {
+        let store = try LogStore(source: .inMemory)
+        for args in [
+            ToolArguments(["name": "Auth problems", "filter": ["subsystems": ["*auth*"]]]),
+            ToolArguments(["name": "Auth problems", "filter": [:], "subsystems": ["*auth*"]]),
+        ] {
+            do {
+                _ = try await StateTools.filtersSave.run(args, makeContext(store))
+                Issue.record("expected an error")
+            } catch let error as ToolError {
+                #expect(error.message.contains("no sessions yet"))
+                #expect(error.message.contains("Example:"))
+            }
+        }
+        #expect(try await store.savedFilters().isEmpty)
+    }
+
     @Test("logs_clear hides the viewed session up to its latest event, and nothing else")
     func clear() async throws {
         let store = try LogStore(source: .inMemory)
@@ -92,6 +110,14 @@ struct OrganiseToolsTests {
         }
         await #expect(throws: ToolError.self) {
             try await LogTools.clear.run(ToolArguments(), makeContext(store))   // nothing viewed
+        }
+        let empty = try await store.createSession(source: .live)
+        ui.update { $0.viewingSessionId = empty.id }
+        do {
+            _ = try await LogTools.clear.run(ToolArguments(), makeContext(store, fakeUI: ui))
+            Issue.record("expected an error")
+        } catch let error as ToolError {
+            #expect(error.message.contains("Example:"))
         }
     }
 }

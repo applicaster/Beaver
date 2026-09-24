@@ -249,7 +249,7 @@ enum LogTools {
             throw ToolError("Clear only acts on the session the user is viewing (#\(viewing)); you passed #\(wanted). Omit sessionId, or ask the user to open session #\(wanted) first.")
         }
         guard let watermark = try await ctx.store.latestEventId(sessionId: viewing) else {
-            throw ToolError("Session #\(viewing) has no events; nothing to clear.")
+            throw ToolError("Session #\(viewing) has no events; nothing to clear. Example: logs_wait(timeoutMs: 15000) to wait for the first one.")
         }
         await ctx.ui.clearLogView(sessionId: viewing, through: watermark)
         return ToolResult(
