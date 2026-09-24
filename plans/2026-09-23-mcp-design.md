@@ -5,7 +5,7 @@ Date: 2026-09-23
 Scope: phase 1 (Beaver itself) in full; phase 2 (the app's toolbox through
 Beaver) as a direction to be researched before it is planned.
 
-Every choice below is a numbered decision in §12 (M1…M27), each with its
+Every choice below is a numbered decision in §12 (M1…M28), each with its
 reason, the alternatives, and what changing it would touch. Sections refer to
 them as *(M4)*. To change the design, change the decision and follow its
 "to change" note. When the first implementation PR lands, accepted decisions
@@ -117,6 +117,7 @@ MCP client (Claude Code / Cursor / Codex)
 | `Beaver/MCP/AgentJournal.swift` | BeaverCore | Records every tool call, agent notes and system entries; unseen count *(M17)* |
 | `Beaver/Store/Schema.swift` | BeaverCore | One migration: the `agent_activity` table (§7.2) |
 | `Beaver/Features/AgentActivity/AgentActivityView.swift` | app | The Agent panel (inspector), toolbar button with badge, Dock badge *(M17)* |
+| `Beaver/Features/AgentActivity/AgentNotifier.swift` | app | `UNUserNotificationCenter`: permission state, the prompt, System Settings deep link, coalescing, click → reveal and show *(M28)* |
 | `Beaver/MCP/AgentAccess.swift` | BeaverCore | The only entry point the app calls: `start(env:)`, `stop()`. The future access check goes here *(M24)* |
 | `Beaver/AppEnvironment.swift` | app | Conforms to `AgentUI`; gains `selectedTab`, `selection`, `reveal()` *(M12)* |
 | `Beaver/BeaverApp.swift` | app | Starts and stops the listener with the menu toggle *(M4, M22)* |
@@ -215,7 +216,7 @@ Conventions for every tool:
 
 | Tool | Args | Returns | Hints |
 |---|---|---|---|
-| `beaver_status` | — | Beaver version; WS state (`listening` / `clientConnected` / `failed(reason)`); `ws://` URLs for the device to connect to; `devices: [...]` — each with id, fingerprint (app, version, model, platform, OS) and live session id; an array even though D2 allows one *(M25)*; viewed session id; MCP port | R |
+| `beaver_status` | — | Beaver version; WS state (`listening` / `clientConnected` / `failed(reason)`); `ws://` URLs for the device to connect to; `devices: [...]` — each with id, fingerprint (app, version, model, platform, OS) and live session id; an array even though D2 allows one *(M25)*; viewed session id; MCP port; `notifications` state *(M28)* | R |
 
 ### 5.2 Sessions
 
@@ -280,7 +281,7 @@ Conventions for every tool:
 
 | Tool | Args | Returns | Hints |
 |---|---|---|---|
-| `journal_note` | `text`, `level` (`info` default / `attention`), `links[]` (each `{sessionId}`, `{eventId}`, `{networkId}` or `{savedFilter}`) | the note id | W. How the agent tells the person something ("this subsystem floods 2 000 lines/s", "here is the cause"). Notes stand out in the panel; each link is clickable |
+| `journal_note` | `text`, `level` (`info` default / `attention`), `links[]` (each `{sessionId}`, `{eventId}`, `{networkId}` or `{savedFilter}`) | the note id; `notified: true|false` and why not *(M28)* | W. How the agent tells the person something ("this subsystem floods 2 000 lines/s", "here is the cause"). Notes stand out in the panel; each link is clickable |
 
 Twenty-six tools. Adding a user-facing capability to Beaver means adding or
 extending one of them (§9).
@@ -362,12 +363,50 @@ A toolbar button **Agent** opens an inspector panel on the right:
 - An entry that points at something (session, event, request, saved filter)
   is clickable and shows it, through the same path as `ui_show`.
 
-**Signalling, without taking focus.**
-- The toolbar button shows a badge with the number of unseen entries and
-  pulses once when one arrives.
-- An `attention` note also sets the Dock icon's badge, visible while Beaver
-  is in the background. Setting a Dock badge does not activate the app.
-- Opening the panel marks everything seen and clears both badges.
+**Signalling: three volumes, none takes focus by itself** *(M17, M28)*
+
+| What happens | Journal + toolbar badge | Toast in the window | macOS notification |
+|---|---|---|---|
+| Ordinary call (read, change) | ✓ | — | — |
+| Destructive call (`sessions_delete`, `storage_delete`, `filters_delete`) | ✓ | ✓ "Agent deleted session #12" · button **Journal** | — |
+| `journal_note(level: info)` | ✓ | — | — |
+| `journal_note(level: attention)` — "look at this" | ✓ + Dock badge | ✓ the note · button **Show** | ✓ when Beaver is not frontmost |
+| `ui_show(reveal: true)` | ✓ | — | — (brings the window forward itself) |
+
+- The toolbar badge counts unseen entries and pulses once on a new one.
+  Opening the panel marks everything seen and clears the toolbar and Dock
+  badges.
+- **Show** on the toast and a click on the notification do the same thing:
+  bring Beaver forward and open what the note links to (the first link;
+  the note is highlighted in the journal). It is `ui_show(reveal: true)`, but
+  the person decides.
+- Toasts use the existing `ToastCenter` with a `ToastAction`, shown longer
+  (6 s) than ordinary confirmations.
+- Notifications are coalesced: at most one per 30 s. Notes arriving meanwhile
+  become one "3 new findings from the agent", and a click opens the journal.
+- The Dock badge and toasts need no permission, so they work even when
+  notifications are off.
+- Agents are told in `instructions` to use `attention` only for what the
+  person must see (a cause found, a decision needed, something broken).
+
+**Notification permission** *(M28)*. macOS asks only once. After a refusal the
+app cannot ask again and only System Settings can turn it back on. So Beaver
+tracks the state (`notDetermined` / `denied` / `allowed`, re-read whenever
+Beaver becomes active) and always offers the one action that works:
+
+| State | Where it shows | Button does |
+|---|---|---|
+| `notDetermined` | Asked in context: on the first `attention` note, not at launch. The macOS prompt is a corner banner and does not take focus | — |
+| still `notDetermined` (prompt ignored) or `denied` | A strip at the top of the Agent panel: "Notifications are off — the agent can't call you while Beaver is in the background." The menu item "Agent Notifications: Off — Turn On…" says the same | `notDetermined`: shows the system prompt. `denied`: opens System Settings on Beaver's notification page (`x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=com.applicaster.LoggerNext`) |
+| `allowed` | The strip disappears; the panel has a "Notifications from the agent" switch to mute them within Beaver | — |
+
+- An `attention` note that could not be delivered as a notification is marked
+  in the journal ("not notified: notifications are off"), with the same
+  button inline.
+- The agent is told too: `journal_note` returns `notified: true|false` and a
+  reason, and `beaver_status` includes `notifications: allowed|denied|
+  notDetermined|muted`. The agent can then ask the person in chat to turn
+  them on.
 
 **Storage.** Table `agent_activity` (id, at, client, tool, kind
 `read`/`change`/`destructive`/`note`/`system`, summary, level, is_error,
@@ -411,7 +450,9 @@ Three layers, each covering what the others cannot:
    > the background: use `ui_show` only to point the user at something, and
    > `reveal: true` only when they ask to see it. Everything you call is
    > shown to the user in Beaver's agent journal; use `journal_note`, with
-   > links, to tell them what you found.
+   > links, to tell them what you found. Use `level: attention` only when
+   > they must look now; it may raise a macOS notification. If the result
+   > says `notified: false`, tell them notifications are off in Beaver.
 
 2. **Tool and parameter descriptions**: what each does, defaults, limits.
 
@@ -475,6 +516,7 @@ Swift Testing, `swift test`, no device and no app host:
 | `MCPHTTPListenerTests` | one real loopback round-trip with `URLSession`; notification → 202; foreign `Origin` → 403; `GET` → 405 |
 | `BeaverToolsTests` | each group against `LogStore(databaseURL: .inMemory)` and a `FakeDeviceLink`: filter mapping equals the UI's `Filter`; pagination cursors; `logs_wait` returns on append and times out; `storage_set` rejects whitespace, reports `applied` / `notApplied` from the read-back; session resolution order *(M9)* |
 | `AgentJournalTests` | every call is recorded with the right kind; failed calls carry the error; notes keep their links; the 2 000-row trim; entries survive session delete with the link nulled; `SessionExport` output contains no journal data |
+| `AgentSignalTests` | which calls produce a toast / Dock badge / notification (the table in §7.2); coalescing to one per 30 s with a fake clock; each permission state maps to the right strip and button action; an undelivered note is marked and returns `notified: false` |
 | `FollowDeviceTests` | omitted `sessionId` carries a wait across a disconnect/reconnect and reports `sessionChanged`; a pinned session reports `sessionEnded`; no reconnect → `deviceDisconnected` |
 | `AgentAccessTests` | the menu toggle starts and stops the listener; toggled off, the port is closed |
 | `MCPDocDriftTests` | the tool names in `MCP.md`'s tables equal the registered names |
@@ -672,6 +714,9 @@ Each decision: what, why, alternatives, and what changing it touches.
   activity out of session exports, which go to customers and zapp-support.
   `journal_note` lets the agent say something to the person with clickable
   links, which a tool-call list cannot.
+- **Volumes:** journal for everything, toasts for destructive calls and
+  `attention` notes, a macOS notification for `attention` notes while Beaver
+  is in the background (M28).
 - **Alternatives:** toasts only (gone when missed, no history); synthetic
   `beaver.agent` events in the session (would end up in exports); `os_log`
   only (invisible).
@@ -776,6 +821,25 @@ Each decision: what, why, alternatives, and what changing it touches.
   changes); run the job on every PR (a notarization per push).
 - **To change:** the job's trigger in `.circleci/config.yml`.
 
+### M28. macOS notifications for `attention` notes, with a way back from "off"
+- **Why:** agreed with the user (2026-09-23). A toast is only seen if the
+  window is in view; the agent needs a way to say "look" while Beaver is in
+  the background, and a click should bring Beaver forward on what it found.
+  A notification does that without taking focus until clicked. macOS asks
+  for permission only once, so the design must lead back from a refusal: a
+  strip in the Agent panel and a menu item whose button is the system prompt
+  (`notDetermined`) or System Settings (`denied`), a mark on undelivered
+  notes, and the state reported to the agent.
+- **Details:** asked in context on the first `attention` note, not at
+  launch; re-checked on `didBecomeActive`; coalesced to one per 30 s;
+  mutable within Beaver.
+- **Alternatives:** ask at launch (people refuse prompts without context);
+  provisional authorization (quiet delivery to Notification Center only, no
+  banner, so nobody notices); no notifications (agent can't reach a person
+  whose window is hidden).
+- **To change:** `AgentNotifier` (app target) owns permission, delivery and
+  coalescing; the coalescing window is a constant.
+
 ---
 
 ## 13. Delivery
@@ -789,11 +853,13 @@ on its own. Testers check each PR on its tester bundle before merge *(M27)*.
    `filters_list`; `AgentJournal`, the `agent_activity` migration and the
    Agent panel with badges; `MCP.md` with "Testing without Xcode"; the drift
    test; the `CLAUDE.md` rule; the CI "Tester bundle" job; migration of
-   M1–M17 and M20–M27 to `DECISIONS.md` (M24 as an open decision).
+   M1–M17 and M20–M28 to `DECISIONS.md` (M24 as an open decision).
 2. **Actions.** `commands_send`, `storage_snapshot(refresh:true)`,
    `storage_set/delete`, `sessions_import/export/delete`, `logs_clear`,
    `bookmarks_set`, `filters_save/delete`, `journal_note`, follow-device
-   waits (M26) and the disconnect system entry.
+   waits (M26) and the disconnect system entry; toasts for destructive calls
+   and `attention` notes; macOS notifications with the permission strip and
+   menu item (M28).
 3. **UI.** State move (§7.1), `ui_state`, `ui_show`, clickable journal links.
 4. **Before phase 2:** settle M24 (access control). Then phase 2 research
    (§11), its own spec update and plan.
