@@ -17,6 +17,7 @@ struct AgentActivityView: View {
                 Spacer()
                 Toggle("Hide reads", isOn: $model.hideReads)
                     .toggleStyle(.checkbox)
+                    .help("Show only calls that changed something, and failed calls")
                 Button("Copy") {
                     model.copy()
                     toasts.success("Copied agent activity")
@@ -27,10 +28,21 @@ struct AgentActivityView: View {
             }
             .padding(10)
             Divider()
-            if model.visible.isEmpty {
+            if model.visible.isEmpty && !model.entries.isEmpty {
+                // Everything is hidden by the toggle, not missing.
+                ContentUnavailableView {
+                    Label("Only reads so far", systemImage: "eye.slash")
+                } description: {
+                    Text("The agent has only read data — no changes and no failed calls.")
+                } actions: {
+                    Button("Show reads") { model.hideReads = false }
+                }
+                .frame(maxHeight: .infinity)
+            } else if model.visible.isEmpty {
                 ContentUnavailableView("No agent activity",
                                        systemImage: "sparkles",
                                        description: Text("Calls from an MCP client appear here. App menu → Copy MCP Setup Command to connect one."))
+                    .frame(maxHeight: .infinity)
             } else {
                 List(model.visible) { entry in
                     AgentActivityRow(entry: entry)
@@ -38,6 +50,9 @@ struct AgentActivityView: View {
                 .listStyle(.plain)
             }
         }
+        // Fill the popover whatever the content, so the header stays at
+        // the top when the list is empty.
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 }
 
