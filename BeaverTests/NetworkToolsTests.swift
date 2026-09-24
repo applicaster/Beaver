@@ -52,12 +52,45 @@ struct NetworkToolsTests {
         #expect(r.structured["status"] == 401)
     }
 
+    @Test("Get: a >256 KB body is capped in structured too, consistent with bodiesTruncated")
+    func getCapsStructuredBody() async throws {
+        let store = try LogStore(source: .inMemory)
+        let s = try await store.createSession(source: .live)
+        let big = String(repeating: "y", count: 300 * 1024)
+        let payload = #"{"url":"https://api.x.io/big","method":"GET","status":200,"timing":{"startTime":1},"responseBody":""#
+            + big + #""}"#
+        try await store.recordNetworkEntry(try #require(NetworkCapture(payload, fallbackMillis: 0)), sessionId: s.id)
+        let id = try #require(try await store.networkEntries(sessionId: s.id).first?.id)
+        let ctx = makeContext(store, ui: HostSnapshot(liveSessionId: s.id))
+        let r = try await NetworkTools.get.run(ToolArguments(["id": .number(Double(id))]), ctx)
+        #expect(r.structured["bodiesTruncated"] == true)
+        let structuredBody = try #require(r.structured["responseBody"]?.string)
+        #expect(structuredBody.utf8.count <= ToolText.payloadCap)
+        #expect(r.body.contains("[cut at 256 KB]"))
+    }
+
     @Test("Copy as cURL carries the Copy menu's warnings")
     func copy() async throws {
         let (ctx, allIds) = try await fixture()
         let r = try await NetworkTools.copy.run(ToolArguments(["id": .number(Double(allIds[1])), "format": "curl"]), ctx)
         #expect(r.body.hasPrefix("curl -X 'POST'"))
         #expect(r.summary.contains("Authorization redacted by the SDK"))
+    }
+
+    @Test("Copy: text over 256 KB is capped, with a note and a truncated flag")
+    func copyCapsLargeText() async throws {
+        let store = try LogStore(source: .inMemory)
+        let s = try await store.createSession(source: .live)
+        let big = String(repeating: "z", count: 300 * 1024)
+        let payload = #"{"url":"https://api.x.io/big","method":"POST","status":200,"timing":{"startTime":1},"requestBody":""#
+            + big + #""}"#
+        try await store.recordNetworkEntry(try #require(NetworkCapture(payload, fallbackMillis: 0)), sessionId: s.id)
+        let id = try #require(try await store.networkEntries(sessionId: s.id).first?.id)
+        let ctx = makeContext(store, ui: HostSnapshot(liveSessionId: s.id))
+        let r = try await NetworkTools.copy.run(ToolArguments(["id": .number(Double(id)), "format": "curl"]), ctx)
+        #expect(r.body.utf8.count <= ToolText.payloadCap)
+        #expect(r.summary.contains("(cut at 256 KB)"))
+        #expect(r.structured["truncated"] == true)
     }
 
     @Test("Unknown status pick explains the forms")

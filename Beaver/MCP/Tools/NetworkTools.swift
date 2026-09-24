@@ -133,10 +133,14 @@ enum NetworkTools {
         func headers(_ h: [String: String]) -> String {
             h.isEmpty ? "  (none)" : NetworkEntry.sortedHeaders(h).map { "  \($0.name): \($0.value)" }.joined(separator: "\n")
         }
-        func body(_ b: String?, sdkTruncated: Bool) -> (String, Bool) {
-            guard let b, !b.isEmpty else { return ("  (empty)", false) }
+        // `capped` is what goes in `structuredContent` too — the same text
+        // the agent reads in `body`, not the untouched raw string, so a
+        // truncated display and an uncut structured value can never disagree.
+        func body(_ b: String?, sdkTruncated: Bool) -> (display: String, capped: String?, truncated: Bool) {
+            guard let b, !b.isEmpty else { return ("  (empty)", b, false) }
             let c = ToolText.capped(b, maxBytes: ToolText.payloadCap)
-            return (c.text + (sdkTruncated ? "\n  [cut by the SDK at 100 KB]" : "") + (c.truncated ? "\n  [cut at 256 KB]" : ""), c.truncated || sdkTruncated)
+            let display = c.text + (sdkTruncated ? "\n  [cut by the SDK at 100 KB]" : "") + (c.truncated ? "\n  [cut at 256 KB]" : "")
+            return (display, c.text, c.truncated || sdkTruncated)
         }
         var lines = ["\(e.method) \(e.url)",
                      e.status.map { "Status: \($0) \(e.statusText ?? "")" } ?? "Failed: \(e.error ?? "no response")",
@@ -145,9 +149,9 @@ enum NetworkTools {
                      "Request headers:", headers(e.requestHeaders)]
         let request = body(e.requestBody, sdkTruncated: e.isRequestBodyTruncated)
         let response = body(e.responseBody, sdkTruncated: e.isResponseBodyTruncated)
-        if includeBodies { lines += ["Request body:", request.0] }
+        if includeBodies { lines += ["Request body:", request.display] }
         lines += ["Response headers:", headers(e.responseHeaders)]
-        if includeBodies { lines += ["Response body:", response.0] }
+        if includeBodies { lines += ["Response body:", response.display] }
         return ToolResult(
             summary: "Request #\(id): \(e.method) \(e.host)\(e.path) → \(e.status.map(String.init) ?? "failed").",
             body: lines.joined(separator: "\n"),
@@ -157,9 +161,9 @@ enum NetworkTools {
                 "startMs": JSON(e.startMillis), "durationMs": JSON(e.durationMillis),
                 "requestHeaders": .object(e.requestHeaders.mapValues(JSON.string)),
                 "responseHeaders": .object(e.responseHeaders.mapValues(JSON.string)),
-                "requestBody": includeBodies ? JSON(e.requestBody) : .null,
-                "responseBody": includeBodies ? JSON(e.responseBody) : .null,
-                "bodiesTruncated": .bool(request.1 || response.1),
+                "requestBody": includeBodies ? JSON(request.capped) : .null,
+                "responseBody": includeBodies ? JSON(response.capped) : .null,
+                "bodiesTruncated": .bool(request.truncated || response.truncated),
             ],
             next: ["network_copy(id: \(id), format: \"curl\") to replay it"]
         )
@@ -199,8 +203,11 @@ enum NetworkTools {
         }
         // Same warnings as the Copy menu's toast: "Copied cURL: Authorization redacted by the SDK".
         let warnings = e.copyToast(label).dropFirst("Copied \(label)".count)
-        return ToolResult(summary: "\(label) for request #\(id)\(warnings).", body: text,
-                          structured: ["id": JSON(id), "format": .string(format), "text": .string(text)],
+        let capped = ToolText.capped(text, maxBytes: ToolText.payloadCap)
+        let cutNote = capped.truncated ? " (cut at 256 KB)" : ""
+        return ToolResult(summary: "\(label) for request #\(id)\(warnings)\(cutNote).", body: capped.text,
+                          structured: ["id": JSON(id), "format": .string(format), "text": .string(capped.text),
+                                       "truncated": .bool(capped.truncated)],
                           next: ["network_get(id: \(id)) for headers and bodies", "network_query(status: \"errors\") for other failing requests"])
     }
 }
