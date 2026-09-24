@@ -1220,6 +1220,15 @@ private struct LogFeedTable: View {
                 toasts.success(wasBookmarked ? "Bookmark removed" : "Bookmark added")
             }
         }
+        // Only when something hides rows — otherwise it's already there.
+        if !vm.filter.isEmpty {
+            Section {
+                Button("Show in Context") {
+                    vm.showInContext(event.id)
+                    toasts.info("Filter cleared")
+                }
+            }
+        }
         Section {
             Button("Copy Line")      { copyToPasteboard(event.logLine,   label: "Line") }
             Button("Copy Message")   { copyToPasteboard(event.message,   label: "Message") }

@@ -18,6 +18,7 @@ final class LogFeedViewModel {
     var filter: Filter = .none {
         didSet {
             guard oldValue != filter else { return }
+            Self.remember(filter)
             // SwiftUI Table on macOS Tahoe occasionally panics
             // (`NSRangeException: range field {N, -M}`) inside
             // NSTableView's row-height diff when the underlying
@@ -26,9 +27,9 @@ final class LogFeedViewModel {
             // empty intermediate state turns one buggy "M → N diff"
             // into two safe "M → 0 deletes" + "0 → N inserts" passes.
             //
-            // Also clear stale references that the reload would
-            // invalidate (selection / match cursor).
-            selectedEventId = nil
+            // The selection is put back once the reload lands, where
+            // its rows still match; the match cursor starts over.
+            selectionToRestore = selectedEventIds
             currentMatchIndex = nil
             feed.replace(with: [])
             watermark = nil
@@ -168,6 +169,10 @@ final class LogFeedViewModel {
         set { selectedEventIds = newValue.map { [$0] } ?? [] }
     }
 
+    /// The selection as it was when the filter changed; re-applied, to
+    /// the rows that still match, when the new snapshot lands.
+    private var selectionToRestore: Set<EventRecord.ID>?
+
     /// Bumped by ⌘F; the Search & highlight field takes focus.
     private(set) var searchFocusRequest = 0
 
@@ -253,9 +258,12 @@ final class LogFeedViewModel {
 
     // MARK: - Init
 
-    init(store: LogStore, sessionId: Int64) {
+    /// - Parameter filter: what to start with — the previous session's
+    ///   filter, so a reconnect or relaunch doesn't drop it.
+    init(store: LogStore, sessionId: Int64, filter: Filter = .none) {
         self.store = store
         self.sessionId = sessionId
+        self.filter = filter
         requestReload()
         Task { await self.subscribeToChanges() }
         Task { await self.reloadBookmarks() }
@@ -355,6 +363,7 @@ final class LogFeedViewModel {
                 self.feed.replace(with: snapshot.events)
                 self.loadedFilter = snapshotFilter
                 self.watermark = snapshot.watermark
+                self.restoreSelection()
                 // Appends announced while no watermark was set were
                 // skipped; fetch whatever landed after the read.
                 self.requestTail()
@@ -492,6 +501,48 @@ final class LogFeedViewModel {
     func resume() {
         isPaused = false
         // didSet on isPaused handles unseenCount reset + reload.
+    }
+
+    // MARK: - Selection across reloads
+
+    /// Put back the selection from before a filter change, on whichever
+    /// rows now show those events, and bring the first into view.
+    private func restoreSelection() {
+        guard let previous = selectionToRestore else { return }
+        selectionToRestore = nil
+        let kept = Set(previous.compactMap { feed.rowId(for: $0) })
+        selectedEventIds = kept
+        if let first = kept.compactMap({ feed.rowIndex(ofRow: $0) }).min() {
+            scrollTarget = (feed.rows[first].id, UUID())
+        }
+    }
+
+    /// Drop the filter and land on `eventId` among its neighbours. Clear
+    /// stays in force unless it hides the event itself.
+    func showInContext(_ eventId: EventRecord.ID) {
+        var unfiltered = Filter.none
+        if let hidden = filter.hiddenThroughEventId, eventId > hidden {
+            unfiltered.hiddenThroughEventId = hidden
+        }
+        guard unfiltered != filter else {
+            Task { await jumpTo(eventId: eventId) }
+            return
+        }
+        selectedEventIds = [eventId]
+        filter = unfiltered
+    }
+
+    // MARK: - Filter carried across sessions
+
+    private static let rememberedFilterKey = "logFeed.lastFilter"
+
+    /// The filter last used, for the first session after a launch.
+    static func rememberedFilter() -> Filter {
+        UserDefaults.standard.data(forKey: rememberedFilterKey).flatMap(Filter.restore) ?? .none
+    }
+
+    private static func remember(_ filter: Filter) {
+        UserDefaults.standard.set(filter.carriedOver.stored, forKey: rememberedFilterKey)
     }
 
     // MARK: - Copy, search focus
