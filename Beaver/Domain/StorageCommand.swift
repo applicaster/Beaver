@@ -115,6 +115,71 @@ public enum StorageCommand {
 
     // MARK: - Internals
 
+    // MARK: - Send and read back (D58)
+
+    public enum Outcome: String, Sendable {
+        /// The next snapshot holds what was sent.
+        case applied
+        /// The device reported back, still holding something else.
+        case notApplied
+        /// No snapshot arrived — disconnected, or the SDK is stuck.
+        case noAnswer
+    }
+
+    /// Sends an edit and reads it back. The SDK reports set / delete only as
+    /// a log line, so the proof is the next `storage.list` reply. A reply to
+    /// a `storage.list` sent just before the edit can still arrive after it
+    /// and show the old value, so a mismatch only counts once no matching
+    /// snapshot has shown up within ~3 s. The Storages screen and
+    /// `storage_set` / `storage_delete` both come through here (M16).
+    public static func sendAndVerify(_ command: String, layer: StorageSnapshot.Namespace, parent: String?,
+                                     key: String, expected: String?, sessionId: Int64,
+                                     store: LogStore, device: any DeviceLink) async -> Outcome {
+        let sentAt = wholeMillisecondNow()
+        await device.send(command: command)
+        await device.send(command: "storage.list")
+        var heardBack = false
+        for _ in 0..<12 {
+            try? await Task.sleep(for: .milliseconds(250))
+            guard let snap = try? await store.latestStorageSnapshot(sessionId: sessionId, namespace: layer),
+                  snap.takenAt >= sentAt else { continue }
+            heardBack = true
+            let now = storedValue(in: StorageRecord.parseTopLevel(snap.dataJSON), parent: parent, key: key)
+            if matches(stored: now, sent: expected) { return .applied }
+        }
+        return heardBack ? .notApplied : .noAnswer
+    }
+
+    /// Sends `storage.list` and waits for the answer: the layers of
+    /// `layers` that have a snapshot taken after the request. One `storage`
+    /// frame carries every layer, so once one lands the rest get 100 ms.
+    public static func refresh(_ layers: [StorageSnapshot.Namespace], sessionId: Int64, timeout: Duration,
+                               store: LogStore, device: any DeviceLink) async -> Set<StorageSnapshot.Namespace> {
+        let sentAt = wholeMillisecondNow()
+        await device.send(command: "storage.list")
+        func fresh() async -> Set<StorageSnapshot.Namespace> {
+            var found = Set<StorageSnapshot.Namespace>()
+            for layer in layers {
+                if let snap = try? await store.latestStorageSnapshot(sessionId: sessionId, namespace: layer),
+                   snap.takenAt >= sentAt { found.insert(layer) }
+            }
+            return found
+        }
+        let deadline = ContinuousClock.now + timeout
+        while ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(100))
+            guard !(await fresh()).isEmpty else { continue }
+            try? await Task.sleep(for: .milliseconds(100))
+            return await fresh()
+        }
+        return []
+    }
+
+    /// Snapshot times are stored in whole milliseconds.
+    private static func wholeMillisecondNow() -> Date {
+        Date(timeIntervalSince1970: (Date().timeIntervalSince1970 * 1000).rounded(.down) / 1000)
+    }
+
     private static func command(_ action: Action, _ layer: StorageSnapshot.Namespace,
                                 _ args: [String], _ parent: String?) -> String {
         ([name(action, in: layer)] + args + (normalized(parent).map { [$0] } ?? []))

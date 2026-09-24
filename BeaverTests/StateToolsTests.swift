@@ -12,14 +12,14 @@ struct StateToolsTests {
         try await store.recordStorageSnapshot(sessionId: s.id, namespace: .local,
                                               dataJSON: #"{"applicaster.v2":{"onboardingDone":"true"}}"#)
         let ctx = makeContext(store, ui: HostSnapshot(liveSessionId: s.id))
-        let local = try await StateTools.storageSnapshot.run(ToolArguments(["layer": "local"]), ctx)
+        let local = try await StorageTools.snapshot.run(ToolArguments(["layer": "local"]), ctx)
         #expect(local.structured["layers"]?["local"]?["data"]?["applicaster.v2"]?["onboardingDone"] == "true")
-        let all = try await StateTools.storageSnapshot.run(ToolArguments(), ctx)
+        let all = try await StorageTools.snapshot.run(ToolArguments(), ctx)
         #expect(all.body.contains("Keychain: no snapshot"))
         await #expect(throws: ToolError.self) {
-            try await StateTools.storageSnapshot.run(ToolArguments(["layer": "cookies"]), ctx)
+            try await StorageTools.snapshot.run(ToolArguments(["layer": "cookies"]), ctx)
         }
-        let secure = try await StateTools.storageSnapshot.run(ToolArguments(["layer": "secure"]), ctx)
+        let secure = try await StorageTools.snapshot.run(ToolArguments(["layer": "secure"]), ctx)
         #expect(secure.body == "Keychain: no snapshot")
     }
 
@@ -64,7 +64,7 @@ struct StateToolsTests {
         let largeJSON = "{\"applicaster.v2\":" + chunk + "}"
         try await store.recordStorageSnapshot(sessionId: s.id, namespace: .local, dataJSON: largeJSON)
         let ctx = makeContext(store, ui: HostSnapshot(liveSessionId: s.id))
-        let result = try await StateTools.storageSnapshot.run(ToolArguments(["layer": "local"]), ctx)
+        let result = try await StorageTools.snapshot.run(ToolArguments(["layer": "local"]), ctx)
         #expect(result.structured["layers"]?["local"]?["dataTruncated"] == true)
         // Verify the structured data is a string (truncated) and ≤256 KB
         if let dataJSON = result.structured["layers"]?["local"]?["data"]?.string {

@@ -60,7 +60,9 @@ or a release):
 | `network_query` | Requests by status, method, host, text |
 | `network_get` | One request with headers and bodies |
 | `network_copy` | A request as cURL, fetch() or JSON, with replay warnings |
-| `storage_snapshot` | Latest session / local / keychain storage snapshot |
+| `storage_snapshot` | Session / local / keychain storage, fresh from the app when connected |
+| `storage_set` | Set a storage key; Beaver re-reads storage and says whether the app applied it |
+| `storage_delete` | Delete a storage key, with the same check |
 | `commands_list` | Commands the connected app accepts |
 | `commands_send` | Send a command to the app; optionally collect the logs it causes, following a restart |
 | `bookmarks_list` | Events and requests the user bookmarked |
@@ -105,11 +107,18 @@ wherever ids do. Every result ends with `Next:` suggestions.
 3. `network_copy(id: <id>, format: "curl")` — to replay it; the result says
    which headers were redacted and whether the body was cut.
 
-### storage — what the app has stored
+### storage — read and change what the app has stored
 
 1. `storage_snapshot(layer: "local")` — or `"session"`, `"secure"`, `"all"`.
-2. No snapshot? Ask the user to open Beaver's Storages tab while the device is
-   connected.
+   With a device connected Beaver asks the app for fresh storage first;
+   `refresh: false` reads the last stored snapshot (past and imported
+   sessions always do).
+2. `storage_set(layer: "local", key: "onboardingDone", value: "false")` —
+   `applied` means Beaver re-read storage and saw it; `notApplied` means the
+   app kept the old value; `noAnswer` means it didn't send storage back.
+   Values can't contain spaces: pick another value.
+3. `storage_delete(layer: "local", key: "onboardingDone")`.
+4. `logs_wait(filter: {search: "onboardingDone"})` — what the app did with it.
 
 ### commands — what the app accepts, and sending one
 
