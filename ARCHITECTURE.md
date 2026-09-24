@@ -74,7 +74,7 @@ this document gets updated.
 ┌──────────────────────────────────────────────────────────────────────┐
 │                     WSServer (actor, Network.fwk)                    │
 │   • start(port:)   • accept(client) (single-client policy from D2)   │
-│   • send(command:) • inbound: AsyncStream<Data>                      │
+│   • send(command:) • inbound: AsyncStream<Inbound>                   │
 └──────────────────────────────────────────────────────────────────────┘
                                   ▲
                                   │  WebSocket frames (mobile SDK)
@@ -95,7 +95,7 @@ this document gets updated.
 
 | Component             | Isolation                | Notes                                  |
 |-----------------------|--------------------------|----------------------------------------|
-| `WSServer`            | `actor`                  | Owns `NWListener` + current `NWConnection`. Inbound frames published as `AsyncStream<Data>`. |
+| `WSServer`            | `actor`                  | Owns `NWListener` + current `NWConnection`. Inbound frames published as `AsyncStream<Inbound>`, bracketed by `.connected` / `.disconnected`. |
 | `ProtocolDecoder`     | Free function / struct   | Pure. Stateless. Called from WSServer's consumer task. |
 | `LogStore`            | `actor`                  | Owns a single GRDB `DatabaseQueue`. All reads and writes go through it. Publishes `AsyncStream<StoreChange>` notifications. |
 | `LogFeedViewModel`    | `@MainActor @Observable` | Subscribes to `LogStore` snapshots, owns visible-window state, manages follow-tail/auto-pause. Owned by `MainWindow` (see D32), keyed by `env.viewingSessionId`. |
@@ -300,7 +300,7 @@ Built on `Network.framework` (`NWListener`, `NWProtocolWebSocket`).
 actor WSServer {
   private var listener: NWListener?
   private var current: NWConnection?
-  let inbound: AsyncStream<InboundFrame>
+  let inbound: AsyncStream<Inbound>  // .connected, .frame(Data), .disconnected
 
   // New connection while current != nil → cancel with close code 1008
   // ("policy violation") plus a short reason payload.
@@ -312,9 +312,13 @@ actor WSServer {
 IPv4 otherwise).
 
 **Inbound flow.**
-1. `NWConnection.receiveMessage` → `Data` → published to `inbound`.
-2. A consumer task on `WSServer` (or owned by the parent) decodes each
-   frame via `ProtocolDecoder`, then dispatches to `LogStore`.
+1. `NWConnection.receiveMessage` → `Data` → published to `inbound` as
+   `.frame`, between the connection's `.connected` and `.disconnected`.
+   Reading starts only after `.connected` is yielded.
+2. One consumer task (in `BeaverApp`) opens the live session on
+   `.connected`, decodes each frame via `ProtocolDecoder` into it, and
+   ends it on `.disconnected`. One ordered stream is what guarantees the
+   session exists before the first frame; `state` is for the UI only.
 
 **Outbound flow.**
 - `send(command: String) async throws` encodes a `WSCommand` and writes

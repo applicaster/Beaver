@@ -126,13 +126,7 @@ struct BeaverApp: App {
             for await state in env.server.state {
                 env.serverState = state
 
-                switch state {
-                case .clientConnected:
-                    if env.currentSessionId == nil {
-                        if let session = try? await env.store.createSession(source: .live) {
-                            env.didConnectSession(session.id)
-                        }
-                    }
+                if case .clientConnected = state {
                     // Ask the SDK for its command list so the command-bar
                     // help popover has something to show. Brief delay so
                     // the SDK has finished registering its handlers.
@@ -140,21 +134,30 @@ struct BeaverApp: App {
                         try? await Task.sleep(for: .milliseconds(500))
                         await env.server.send(command: "cmdlist")
                     }
-                case .clientDisconnected:
-                    if let sid = env.currentSessionId {
-                        try? await env.store.endSession(sid)
-                        env.didDisconnectSession()
-                    }
-                default:
-                    break
                 }
             }
         }
 
-        // Forward inbound frames into the decoder + store.
-        Task {
-            for await frame in env.server.inbound {
-                await Self.handleInbound(frame: frame, env: env)
+        // Open and end live sessions in the same loop that stores frames,
+        // so the session exists before the first frame and outlives the
+        // last one. Driven from `server.state` instead, frames sent right
+        // after the handshake were dropped.
+        Task { @MainActor in
+            for await item in env.server.inbound {
+                switch item {
+                case .connected:
+                    if env.currentSessionId == nil,
+                       let session = try? await env.store.createSession(source: .live) {
+                        env.didConnectSession(session.id)
+                    }
+                case .frame(let frame):
+                    await Self.handleInbound(frame: frame, env: env)
+                case .disconnected:
+                    if let sid = env.currentSessionId {
+                        try? await env.store.endSession(sid)
+                        env.didDisconnectSession()
+                    }
+                }
             }
         }
 

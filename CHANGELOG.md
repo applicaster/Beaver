@@ -94,6 +94,11 @@ When releasing:
   layers are dimmed.
 
 ### Fixed
+- **Events sent right after a device connects are no longer lost.** What
+  the SDK sent the moment it connected (for example, events it buffered
+  while disconnected) could arrive before Beaver had opened the live
+  session and was silently dropped. The session now always exists
+  before the first event is stored.
 - **Log feed: live streaming no longer refetches the session.** Each
   append fetches only the new rows and merges them in place, including
   events that arrive late with an earlier timestamp. On a 100k-event
