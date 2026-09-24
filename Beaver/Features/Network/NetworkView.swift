@@ -230,7 +230,7 @@ struct NetworkView: View {
                             .font(.caption2)
                             .foregroundStyle(.yellow)
                     }
-                    MethodText(method: e.method)
+                    Pill(text: e.method, tint: MethodBadge.tint(e.method), minWidth: 44, strong: true)
                 }
             }
             .width(min: 64, ideal: 76, max: 96)
@@ -437,6 +437,9 @@ struct Pill: View {
     let tint: Color
     /// Keeps a column of pills one width (GET/POST/PUT), text centred.
     var minWidth: CGFloat?
+    /// A denser fill and darker text, for the method column, so a full
+    /// column of pills reads solid instead of washed out.
+    var strong = false
     @Environment(\.colorScheme) private var scheme
     /// `.increased` inside a selected table row (blue background).
     @Environment(\.backgroundProminence) private var prominence
@@ -456,11 +459,14 @@ struct Pill: View {
     // they sit near 2:1 contrast and read as blurry. Darken (light mode) or
     // lighten (dark mode) the text, and go white on a selected row.
     private var textColor: Color {
-        prominence == .increased ? .white : tint.readableText(in: scheme)
+        if prominence == .increased { return .white }
+        if strong { return scheme == .dark ? tint.mix(with: .white, by: 0.35) : tint.mix(with: .black, by: 0.55) }
+        return tint.readableText(in: scheme)
     }
 
     private var fill: Color {
         if prominence == .increased { return .white.opacity(0.22) }
+        if strong { return tint.opacity(scheme == .dark ? 0.38 : 0.30) }
         return tint.opacity(scheme == .dark ? 0.25 : 0.18)
     }
 }
