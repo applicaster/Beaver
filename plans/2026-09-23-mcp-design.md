@@ -582,6 +582,7 @@ Each decision: what, why, alternatives, and what changing it touches.
 - **To change:** one call site in the tool dispatcher.
 
 ### M18. Phase 2 exposes the device through two generic tools
+- **Status:** deferred to phase 2; not reviewed yet.
 - **Why:** the device's tool set differs per platform, SDK version and
   connection. Mirroring it as individual Beaver tools needs
   `notifications/tools/list_changed`, which needs the SSE stream M2 leaves
@@ -591,6 +592,7 @@ Each decision: what, why, alternatives, and what changing it touches.
 - **To change:** needs M2's SSE extension first.
 
 ### M19. Phase 2 speaks the existing WS `mcp` envelope and rewrites JSON-RPC ids
+- **Status:** deferred to phase 2; not reviewed yet.
 - **Why:** it is what both SDKs already implement (Android #2848, iOS #2864),
   so there is no SDK change. Rewriting ids keeps two agents' calls from
   colliding on one device connection.
@@ -646,8 +648,11 @@ on its own.
    Default in this spec: no, just send it.
 2. Is 9081 free of conflicts with other Applicaster tooling? (The SDK uses
    11434 on the device and 9080 for Beaver.)
-3. How do customers get Beaver today: the same Sparkle feed as us? If yes, a
-   customer build (M24, build level) needs its own feed or signing step.
-   Otherwise the policy level is the practical way to turn it off for them.
-   Should Agent Access default to off for customer installs, and how do we
-   tell those installs apart?
+3. ~~How do customers get Beaver?~~ **Answered (2026-09-23):** the same
+   build, downloaded from
+   `https://github.com/applicaster/Beaver/releases/latest/download/Beaver.zip`.
+   So phase 1 ships Agent Access to customers too, on by default. That is
+   accepted for phase 1: the server is loopback only and reads only data
+   already on the customer's own Mac. How to keep information from customers
+   is discussed in phase 2 or 3, when the device toolbox makes the stakes
+   higher. M24's build level is not used until then.
