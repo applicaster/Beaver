@@ -158,6 +158,7 @@ private struct StoragesContent: View {
             StoragesTopBar(
                 vm: vm,
                 onExport: { scope in Task { await prepareExport(scope: scope) } },
+                onExportStorage: prepareStorageExport,
                 onAddKey: {
                     pendingAdd = AddKeyContext(
                         namespace: vm.selectedNamespace,
@@ -400,7 +401,10 @@ private struct StoragesTopBar: View {
     @Bindable var vm: StoragesViewModel
     @Environment(AppEnvironment.self) private var env
     let onExport: (SessionExport.Scope) -> Void
+    let onExportStorage: () -> Void
     let onAddKey: () -> Void
+
+    @AppStorage(storageExportRedactKey) private var redactKeychain = true
 
     var body: some View {
         HStack(spacing: 10) {
@@ -483,13 +487,18 @@ private struct StoragesTopBar: View {
                 Button("Export all") {
                     onExport(.everything)
                 }
+                Divider()
+                Button("Export storage only") {
+                    onExportStorage()
+                }
+                Toggle("Redact Keychain values", isOn: $redactKeychain)
             } label: {
                 Label("Export", systemImage: "square.and.arrow.up")
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
             .disabled(!vm.hasAnyData)
-            .help("Save the session to a JSON file — the device storage plus its events")
+            .help("Save the session to a JSON file — the device storage plus its events — or the storage alone")
 
             Button(role: .destructive) {
                 vm.clearLocalCache()
