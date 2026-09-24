@@ -154,8 +154,8 @@ final class LogFeedViewModel {
         }
     }
 
-    /// The selected row when exactly one is — what the detail pane and
-    /// `j` / `k` work from.
+    /// The selected row when exactly one is — what the detail pane,
+    /// `j` / `k` and the Δ column work from.
     var selectedEventId: EventRecord.ID? {
         get { selectedEventIds.count == 1 ? selectedEventIds.first : nil }
         set { selectedEventIds = newValue.map { [$0] } ?? [] }
@@ -553,7 +553,7 @@ final class LogFeedViewModel {
         UserDefaults.standard.set(filter.carriedOver.stored, forKey: rememberedFilterKey)
     }
 
-    // MARK: - Copy, search focus
+    // MARK: - Copy, search focus, Δ
 
     /// The rows as clipboard lines, in table order.
     func logLines(for rowIds: Set<EventRecord.ID>) -> String {
@@ -565,6 +565,19 @@ final class LogFeedViewModel {
 
     func focusSearch() {
         searchFocusRequest += 1
+    }
+
+    /// Milliseconds from the selected row to `row`, or with nothing
+    /// selected from the row above it. `nil` for the first row.
+    func timeDelta(for row: FeedRow) -> Int64? {
+        let reference: FeedRow
+        if let selected = selectedEventId, let index = feed.rowIndex(ofRow: selected) {
+            reference = feed.rows[index]
+        } else {
+            guard let index = feed.rowIndex(ofRow: row.id), index > 0 else { return nil }
+            reference = feed.rows[index - 1]
+        }
+        return Int64(row.event.timestampMillis) - Int64(reference.event.timestampMillis)
     }
 
     // MARK: - Clearing the view

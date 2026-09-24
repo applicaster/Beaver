@@ -984,6 +984,18 @@ private struct LogFeedTable: View {
                         Text(highlighted(row.event.message))
                             .lineLimit(2)
                             .truncationMode(.tail)
+                        // Two lines show; say how many there are.
+                        let lines = row.event.lineCount
+                        if lines > 2 {
+                            Text("⏎ \(lines) lines")
+                                .font(.caption2.weight(.semibold).monospacedDigit())
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 1)
+                                .background(Capsule().fill(Color.secondary.opacity(0.12)))
+                                .foregroundStyle(.secondary)
+                                .fixedSize()
+                                .help("The message has \(lines) lines — the detail pane shows all of them")
+                        }
                         if row.count > 1 {
                             // ×N badge for collapsed groups.
                             Text("×\(row.count)")
@@ -1023,13 +1035,26 @@ private struct LogFeedTable: View {
                 .width(70)
                 .customizationID("size")
 
-                TableColumn("Time") { (row: LogFeedViewModel.CollapsedRow) in
+                // Times are local; the header says which zone that is.
+                TableColumn("Time (\(Self.timeZoneName))") { (row: LogFeedViewModel.CollapsedRow) in
                     Text(row.event.timeOfDayWithMillis)
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
                 .width(120)
                 .customizationID("time")
+
+                // Off by default; right-click the header to show it.
+                TableColumn(vm.selectedEventId == nil ? "+Δ prev" : "Δ selected") { (row: LogFeedViewModel.CollapsedRow) in
+                    if let delta = vm.timeDelta(for: row) {
+                        Text(TimeDelta.text(milliseconds: delta))
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .width(90)
+                .customizationID("delta")
+                .defaultVisibility(.hidden)
             }
             // j / k mirror the arrow keys, and Esc closes the detail
             // pane — the shortcuts the web viewer documents.
@@ -1132,6 +1157,10 @@ private struct LogFeedTable: View {
         DispatchQueue.main.async {
             proxy.scrollTo(lastId, anchor: .bottom)
         }
+    }
+
+    private static var timeZoneName: String {
+        TimeZone.current.abbreviation() ?? TimeZone.current.identifier
     }
 
     private func sizeTint(_ sizeClass: EventRecord.SizeClass) -> Color {
