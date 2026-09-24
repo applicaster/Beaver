@@ -34,10 +34,15 @@ struct AgentAccessTests {
     func port() throws {
         let defaults = try #require(UserDefaults(suiteName: "AgentAccessTests"))
         defaults.removePersistentDomain(forName: "AgentAccessTests")
+        defer { defaults.removePersistentDomain(forName: "AgentAccessTests") }
         #expect(AgentAccess.configuredPort(defaults) == 9081)
         defaults.set(9090, forKey: AgentAccess.portKey)
         #expect(AgentAccess.configuredPort(defaults) == 9090)
         defaults.set(70_000, forKey: AgentAccess.portKey)
+        #expect(AgentAccess.configuredPort(defaults) == 9081)
+        defaults.set(0, forKey: AgentAccess.portKey)
+        #expect(AgentAccess.configuredPort(defaults) == 9081)
+        defaults.set(-1, forKey: AgentAccess.portKey)
         #expect(AgentAccess.configuredPort(defaults) == 9081)
     }
 
@@ -64,28 +69,88 @@ struct AgentAccessTests {
         }
     }
 
-    @Test("Review focus: stop() racing an in-flight start() wins", .timeLimit(.minutes(1)))
+    /// Runs `body`, turning a thrown error into `.failure` instead of
+    /// propagating it, so a racing `start()` can be awaited and inspected
+    /// without `try?` throwing away which error it was.
+    private func attempt(_ body: () async throws -> UInt16) async -> Result<UInt16, Error> {
+        do { return .success(try await body()) } catch { return .failure(error) }
+    }
+
+    @Test("Review focus: stop() racing an in-flight start() wins")
     func stopWhileStartInFlightWins() async throws {
-        // A stop() landing while start() is still awaiting its bind must
-        // not be lost (the controller-ruling bug this test guards
-        // against): whichever port start() ends up returning, once both
-        // calls have settled nothing may still be listening on it.
-        // The 1ms head start is only to give the async-let task a chance
-        // to actually claim `self.listener` before we call stop() —
-        // without it, stop() sometimes runs before start() has begun at
-        // all, which is a benign ordering (start() then legitimately
-        // keeps serving), not the race this test targets. Repeated
-        // because the exact interleaving beyond that point is
-        // timing-dependent.
+        // Deterministic handshake instead of a sleep: `beforeBind` pauses
+        // start() right after it has claimed its listener (so `stop()`
+        // has something to find) and right before the bind. We wait for
+        // that signal, call stop() (bumping the generation start() is
+        // about to check), then release start() to prove the race is
+        // decided by the generation counter, not by timing.
         let store = try LogStore(source: .inMemory)
-        for _ in 0..<20 {
-            let access = AgentAccess(store: store, ui: FakeUI(value: HostSnapshot()))
-            async let started: UInt16? = try? await access.start(port: 0)
-            try? await Task.sleep(for: .milliseconds(1))
-            await access.stop()
-            if let port = await started {
-                await #expect(throws: (any Error).self) { try await post(port, "{}") }
-            }
+        let (reached, reachedContinuation) = AsyncStream<Void>.makeStream()
+        let (gate, gateContinuation) = AsyncStream<Void>.makeStream()
+        let access = AgentAccess(store: store, ui: FakeUI(value: HostSnapshot())) {
+            reachedContinuation.yield(())
+            var iterator = gate.makeAsyncIterator()
+            _ = await iterator.next()
+        }
+
+        async let outcome = attempt { try await access.start(port: 0) }
+        var reachedIterator = reached.makeAsyncIterator()
+        _ = await reachedIterator.next()
+
+        await access.stop()
+        gateContinuation.yield(())
+
+        switch await outcome {
+        case .failure(let error):
+            #expect(error is CancellationError)
+        case .success(let port):
+            Issue.record("start() should have lost the race to the concurrent stop()")
+            await #expect(throws: (any Error).self) { try await post(port, "{}") }
         }
     }
+
+    @Test("Review focus: stop() racing a second start()'s in-flight prelude wins")
+    func stopDuringSecondStartWins() async throws {
+        // Finding 1's exact shape: a listener is already serving, and a
+        // second start() — mid-flight, past the point where it has
+        // drained the first listener and claimed its own — races a
+        // stop(). The old bug was that a stop() landing during that
+        // drain could see nothing to stop and return believing the
+        // server was off, while the in-flight start() went on to serve
+        // anyway.
+        let store = try LogStore(source: .inMemory)
+        let (reached, reachedContinuation) = AsyncStream<Void>.makeStream()
+        let (gate, gateContinuation) = AsyncStream<Void>.makeStream()
+        let calls = Counter()
+        let access = AgentAccess(store: store, ui: FakeUI(value: HostSnapshot())) {
+            guard await calls.increment() == 2 else { return }
+            reachedContinuation.yield(())
+            var iterator = gate.makeAsyncIterator()
+            _ = await iterator.next()
+        }
+
+        let firstPort = try await access.start(port: 0)
+        _ = try await post(firstPort, "{}")
+
+        async let secondOutcome = attempt { try await access.start(port: 0) }
+        var reachedIterator = reached.makeAsyncIterator()
+        _ = await reachedIterator.next()
+
+        await access.stop()
+        gateContinuation.yield(())
+
+        switch await secondOutcome {
+        case .failure(let error):
+            #expect(error is CancellationError)
+        case .success(let port):
+            Issue.record("the second start() should have lost the race to the concurrent stop()")
+            await #expect(throws: (any Error).self) { try await post(port, "{}") }
+        }
+        await #expect(throws: (any Error).self) { try await post(firstPort, "{}") }
+    }
+}
+
+private actor Counter {
+    private var value = 0
+    func increment() -> Int { value += 1; return value }
 }

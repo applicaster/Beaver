@@ -14,33 +14,52 @@ public actor AgentAccess {
 
     private let server: MCPServer
     private var listener: MCPHTTPListener?
+    /// Bumped by every `start()`/`stop()`; the value a `start()` bumped it
+    /// to is its ticket — if it's no longer current when checked, a later
+    /// call has already decided the outcome and this one backs off. See
+    /// `start()`.
+    private var generation: UInt64 = 0
+    /// Test seam only (production callers pass nothing): invoked once a
+    /// `start()` has claimed its listener, before that listener is bound,
+    /// so a test can pause a `start()` there and race a `stop()` against
+    /// it deterministically.
+    private let beforeBind: (@Sendable () async -> Void)?
 
-    public init(store: LogStore, ui: any AgentUI) {
+    public init(store: LogStore, ui: any AgentUI, beforeBind: (@Sendable () async -> Void)? = nil) {
         server = MCPServer(tools: BeaverTools.all,
                            context: ToolContext(store: store, ui: ui),
                            journal: AgentJournal(store: store))
+        self.beforeBind = beforeBind
     }
 
     /// Starts (or restarts) the listener; returns the bound port.
     ///
-    /// Reentrancy-safe the same way `MCPHTTPListener.start`/`stop` are
-    /// (see that actor): claim `self.listener` before the awaited bind, so
-    /// a `stop()` landing while this is in flight can find and cancel it;
-    /// check identity after the await, since another `start()` (or that
-    /// `stop()`) may have already superseded us, in which case we cancel
-    /// our own orphaned listener instead of publishing it.
+    /// Reentrancy-safe the same way `MCPHTTPListener.start`/`stop` are,
+    /// one level up, via a generation counter rather than a raw identity
+    /// check alone: a `stop()` (or a later `start()`) that lands anywhere
+    /// during this call — including while it is draining the previous
+    /// listener — bumps `generation` and wins; this call notices the
+    /// mismatch (checked right after draining, and again after the bind)
+    /// and throws `CancellationError` instead of publishing, or leaving
+    /// bound, a listener nobody asked for. Overlapping `start()`s are
+    /// last-call-wins. Callers that only care about the latest
+    /// `start()`/`stop()` should ignore a `CancellationError` thrown by a
+    /// superseded `start()`.
     @discardableResult
     public func start(port: UInt16) async throws -> UInt16 {
-        while listener != nil { await stop() }
+        generation &+= 1
+        let mine = generation
+        await drain()
+        guard generation == mine else { throw CancellationError() }
         let server = self.server
         let listener = MCPHTTPListener { body, headers in
             await server.handle(body, client: headers["user-agent"], protocolVersion: headers["mcp-protocol-version"])
         }
         self.listener = listener
+        await beforeBind?()
         do {
             let bound = try await listener.start(port: port)
-            guard self.listener === listener else {
-                await listener.stop()
+            guard generation == mine, self.listener === listener else {
                 throw CancellationError()
             }
             return bound
@@ -52,6 +71,14 @@ public actor AgentAccess {
     }
 
     public func stop() async {
+        generation &+= 1
+        await drain()
+    }
+
+    /// Stops and clears whatever listener is currently claimed. Looped
+    /// because a listener that shows up while we're awaiting a stop
+    /// (another call raced in) must be stopped too before we're done.
+    private func drain() async {
         while let listener {
             self.listener = nil
             await listener.stop()
