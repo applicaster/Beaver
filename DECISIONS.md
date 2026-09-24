@@ -2115,7 +2115,9 @@ won't decode, and the feed starts unfiltered once.
   100k-event session. Id cursors are stable while events stream in.
   Reusing `Filter` means the agent and the UI can never disagree on
   what a filter matches.
-- **To change:** caps are constants in `BeaverTools.swift`.
+- **To change:** caps live in `ToolText` (`Beaver/MCP/ToolInput.swift`),
+  plus a few per-tool literals (e.g. `logs_query`'s 2 KB `includeData`
+  cap) — not `BeaverTools.swift`, which is only the tool registry.
 - **Implemented:** facet structured lists (`logs_facets`) are capped
   at 100 subsystems / 100 categories, with `subsystemsMore` /
   `categoriesMore` counting the rest. Payloads everywhere are capped
@@ -2159,6 +2161,9 @@ won't decode, and the feed starts unfiltered once.
   tools.
 - **To change:** the `AgentUI` protocol is the boundary; new UI tools
   add members to it.
+- **Implemented:** from PR 3 (not in PR 1) — `AgentUI` in PR 1 is
+  read-only (`snapshot()`); the `ui_show` members this decision
+  describes don't exist yet.
 
 ---
 
@@ -2243,7 +2248,10 @@ won't decode, and the feed starts unfiltered once.
   — `AgentJournal.record(toolName:kind:client:result:error:)`. Only a
   request with no tool name at all (a malformed JSON-RPC params
   object) skips the journal, since there is no tool to attribute it
-  to.
+  to. The journal itself, above, is what PR 1 ships. Toasts for
+  destructive calls, `attention` notes, `journal_note` and the macOS
+  notification (M28) are **from PR 2/3 (not in PR 1)** — PR 1 has no
+  destructive tools and no `journal_note`.
 
 ---
 
@@ -2353,6 +2361,10 @@ won't decode, and the feed starts unfiltered once.
 - **To change:** the follow logic lives in
   `ToolContext.resolveSession` and the wait helper shared by
   `logs_wait` and `commands_send`.
+- **Implemented:** from PR 2 (not in PR 1). `resolveSession` in PR 1
+  resolves once per call; there is no `commands_send`, and `logs_wait`
+  does not re-resolve or report `sessionChanged` / `sessionEnded` if
+  the device disconnects and reconnects mid-wait.
 
 ---
 
@@ -2406,6 +2418,9 @@ won't decode, and the feed starts unfiltered once.
   notifications (agent can't reach a person whose window is hidden).
 - **To change:** `AgentNotifier` (app target) owns permission,
   delivery and coalescing; the coalescing window is a constant.
+- **Implemented:** from PR 2/3 (not in PR 1). There is no `attention`
+  note, `AgentNotifier`, or permission UI yet — PR 1's tools are all
+  read-only and never need to get the person's attention.
 
 ---
 
@@ -2427,6 +2442,8 @@ won't decode, and the feed starts unfiltered once.
   matters, and it survives).
 - **To change:** watches are a dictionary in one actor; persisting
   them is a table.
+- **Implemented:** from PR 2/3 (not in PR 1). There is no
+  `watch_status` or any other watch tool yet.
 
 ---
 
