@@ -14,6 +14,16 @@ When releasing:
 
 ## [Unreleased]
 
+## [2.0.1] - 2026-09-24
+
+### Fixed
+- **No more "decode failed: notJSON" every 20 seconds.** The SDK's keepalive
+  ping reached the decoder as if it were a log frame and showed up as a
+  `loggernext.protocol` warning in the feed. Beaver now answers pings and
+  ignores control frames.
+
+## [2.0.0] - 2026-09-24
+
 ### Added
 - **Agent Access (MCP).** An AI agent on this Mac (Claude Code, Cursor,
   Codex) can read what Beaver collected — sessions, logs, network requests,
@@ -94,10 +104,6 @@ When releasing:
   layers are dimmed.
 
 ### Fixed
-- **No more "decode failed: notJSON" every 20 seconds.** The SDK's keepalive
-  ping reached the decoder as if it were a log frame and showed up as a
-  `loggernext.protocol` warning in the feed. Beaver now answers pings and
-  ignores control frames.
 - **Log feed: live streaming no longer refetches the session.** Each
   append fetches only the new rows and merges them in place, including
   events that arrive late with an earlier timestamp. On a 100k-event
@@ -336,7 +342,9 @@ end-to-end. No code-visible changes versus 1.0.0.
 
 Initial Beaver release. See `DECISIONS.md` D1–D20 for the design history.
 
-[Unreleased]: https://github.com/applicaster/Beaver/compare/1.0.2...HEAD
+[Unreleased]: https://github.com/applicaster/Beaver/compare/2.0.1...HEAD
+[2.0.1]: https://github.com/applicaster/Beaver/releases/tag/2.0.1
+[2.0.0]: https://github.com/applicaster/Beaver/releases/tag/2.0.0
 [1.0.2]: https://github.com/applicaster/Beaver/releases/tag/1.0.2
 [1.0.1]: https://github.com/applicaster/Beaver/releases/tag/1.0.1
 [1.0]: https://github.com/applicaster/Beaver/releases/tag/1.0.0
