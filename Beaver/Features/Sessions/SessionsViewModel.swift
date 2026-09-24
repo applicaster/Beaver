@@ -78,7 +78,7 @@ final class SessionsViewModel {
                     // next `reload()`.
                     break
                 case .storageUpdated, .bookmarksChanged, .savedFiltersChanged, .networkAppended,
-                     .networkBookmarksChanged:
+                     .networkBookmarksChanged, .writeFailed:
                     break
                 }
             }

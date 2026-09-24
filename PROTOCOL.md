@@ -86,8 +86,37 @@ Sent in response to user action in the command bar or storages screen.
 | Command         | Meaning                                                       | Sender                                |
 |-----------------|---------------------------------------------------------------|---------------------------------------|
 | `storage.list`  | Request a snapshot of session/local/keychain storage.         | Storages screen reload button         |
+| `storage.<layer>.set <key> <value> [namespace]` | Write one key. `<layer>` is `session`, `local` or `secure`. | Storages screen add / edit / field edit / Undo |
+| `storage.<layer>.delete <key> [namespace]` | Remove one key.                      | Storages screen delete / Undo         |
 | `cmdlist`       | Request the list of commands the SDK currently supports.      | Sent automatically on connect; ⟳ in command popover |
 | (anything else) | Free-form command text typed by the user in the command bar.  | Command bar submit                    |
+
+**Storage set / delete (confirmed against the SDK sources, 2026-09).**
+
+- Both SDKs (iOS `StorageCommandsHandler.unpackSetArgs`, Android
+  `StorageCmdHandler`) split the argument string on single spaces,
+  drop empty pieces, and read `key`, `value`, `namespace` by position.
+  Extra pieces are ignored.
+- `namespace` is the SDK's subscope inside the layer — the top-level
+  keys of the `storage` frame (§4.2). Omitted, both SDKs use
+  `applicaster.v2`.
+- **Limitation: no quoting.** A value with a space shifts every later
+  argument: `storage.local.set title Hello World ns` stores `Hello` in
+  a namespace named `World` and ignores `ns`. Beaver can't fix this
+  from its side, so it refuses to send a value containing whitespace
+  and says what would happen instead. JSON values are sent compact
+  (whitespace outside strings removed); a JSON string that itself
+  contains a space still can't be sent. A value can't be empty either
+  (the SDK needs two arguments).
+- **No acknowledgement.** The SDK logs the result (`Set: …`, `deleted:
+  true for args: …`) as an ordinary event. Beaver sends `storage.list`
+  right after the edit and compares the key in the next snapshot with
+  what it sent, then reports "Applied" (with Undo) or "Device didn't
+  apply this".
+- **Discovery.** The commands appear in the `cmdlist` reply as
+  `storage.session.set`, `storage.local.delete`, `storage.secure.set`,
+  …; Beaver hides edit / delete for a layer whose command isn't listed
+  (nothing is hidden before a reply arrives).
 
 #### 3.2.1 `cmdlist` response shape (confirmed 2026-05-16)
 
@@ -96,13 +125,16 @@ dedicated message type. The desktop side identifies it by subsystem +
 message prefix:
 
 - **Level:** `info`
-- **Subsystem:** `DebugFeatures/ConsoleCommands/GeneralHandler`
+- **Subsystem:** `DebugFeatures/ConsoleCommands/GeneralHandler`. Some
+  builds log it as subsystem `ApplicasterSDK`, category
+  `ConsoleCommands` instead; Beaver accepts `ConsoleCommands` in
+  either field.
 - **Category:** empty
 - **Message:** `"Registered commands:\n<name1>\n<name2>\n…"` — a header
   line followed by one command name per line, no syntax, no
   descriptions.
 
-Beaver's parser drops the header line, trims each remaining line,
+Beaver's parser (`CommandHints.cmdListNames`) drops the header line, trims each remaining line,
 and feeds the names through `CommandHints.merge` to add Beaver's
 known syntax (`CommandRegistry`) where available. See `DECISIONS.md`
 D17 for the registry-as-scaffold rationale.
@@ -125,12 +157,13 @@ remove the event-feed pollution from the discovery side-channel.
 
 **Open questions for the SDK team:**
 
-1. **`storage.set` (or equivalent)** — for D6 (edit-and-push-back), we need
-   a command to write a single key. Does it exist? If so:
-   - Command name and full payload shape
-   - Per-namespace support (can we write to keychain?)
-   - Error response on failure
+1. ~~**`storage.set` (or equivalent)**~~ **Closed** — `storage.<layer>.set`
+   / `.delete`, keychain included; see "Storage set / delete" above.
+   Still wanted: a quoting or JSON-arguments form so values can hold
+   spaces.
 2. **Acknowledgements** — does the SDK confirm receipt of any command?
+   For storage edits: no, only a log line (see above). A structured
+   result would replace Beaver's read-back check.
 3. **Command discovery** — what does the SDK actually return in response
    to `cmdlist`? **(inferred to be an event-shaped message, but format
    undocumented.)**
@@ -232,6 +265,13 @@ A snapshot of the client's storage namespaces, sent in response to
   - `session` — in-memory session storage
   - `local` — persistent local storage
   - `secure` — keychain (rendered in the UI as "keychain")
+- Inside each layer, the top-level keys are the SDK's namespaces
+  (subscopes) — the optional last argument of `storage.<layer>.set` /
+  `.delete` (§3.2). Keys written without one live in `applicaster.v2`.
+
+Beaver stores a layer's snapshot only when its JSON differs from the
+latest one stored for that session; an unchanged report just moves
+that row's `taken_at`, which the Storages screen shows as "as of".
 
 **Open questions for the SDK team:**
 
@@ -403,8 +443,10 @@ These should live as raw JSON files under
 
 Tracked for follow-up with the SDK team:
 
-1. **§3.2** — Does `storage.set` (or equivalent) exist? What's its payload?
-2. **§3.2** — Are commands acknowledged?
+1. ~~**§3.2** — Does `storage.set` (or equivalent) exist?~~ **Closed** —
+   yes; values can't contain spaces (see §3.2).
+2. **§3.2** — Are commands acknowledged? (Storage edits: only by a log
+   line.)
 3. ~~**§3.2** — What does the SDK return for `cmdlist`?~~ **Closed** — see §3.2.1.
 4. **§4.1** — Is the SDK's `id` on event frames used downstream?
 5. **§4.2** — What's the real shape of storage `data` values?

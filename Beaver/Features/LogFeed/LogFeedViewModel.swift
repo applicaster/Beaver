@@ -18,6 +18,7 @@ final class LogFeedViewModel {
     var filter: Filter = .none {
         didSet {
             guard oldValue != filter else { return }
+            Self.remember(filter)
             // SwiftUI Table on macOS Tahoe occasionally panics
             // (`NSRangeException: range field {N, -M}`) inside
             // NSTableView's row-height diff when the underlying
@@ -26,11 +27,16 @@ final class LogFeedViewModel {
             // empty intermediate state turns one buggy "M → N diff"
             // into two safe "M → 0 deletes" + "0 → N inserts" passes.
             //
-            // Also clear stale references that the reload would
-            // invalidate (selection / match cursor).
-            selectedEventId = nil
+            // The selection is put back once the reload lands, where
+            // its rows still match; the match cursor starts over.
+            selectionToRestore = selectedEventIds
             currentMatchIndex = nil
-            page = []
+            // New rows, new count: an "N new" from the old filter means
+            // nothing here. Unpaused, the new rows open at the tail (or
+            // at the restored selection, which stops following again).
+            if !isPaused { follow.resume() }
+            feed.replace(with: [])
+            watermark = nil
             requestReload()
             scheduleMatchRecompute()
             scheduleFacetRefresh(after: reloadDebounceInterval)
@@ -44,26 +50,38 @@ final class LogFeedViewModel {
     /// "shown / total" and make the filter's effect visible.
     private(set) var unfilteredCount: Int = 0
 
-    /// In-memory window of events for the visible range.
-    private(set) var page: [EventRecord] = []
+    /// The loaded events and the table rows built from them. A live
+    /// append extends both in place instead of refetching the session.
+    private(set) var feed = FeedRows(collapse: true)
+
+    /// Loaded events, oldest first, without payloads.
+    var page: [EventRecord] { feed.events }
 
     /// True when the table content is frozen — new events still
     /// arrive and persist in the store, but they don't enter `page`
     /// so the user can scroll / select / read without interference.
-    /// Resuming clears the unseen counter and triggers a reload.
+    /// Resuming follows the tail again and fetches what arrived.
     var isPaused: Bool = false {
         didSet {
-            if oldValue && !isPaused {
-                // Resuming — catch up to whatever arrived while paused.
-                unseenCount = 0
-                requestReload()
+            guard oldValue != isPaused else { return }
+            if isPaused {
+                follow.stop()
+            } else {
+                follow.resume()
+                requestTail()
             }
         }
     }
 
-    /// Number of new events that arrived while paused. Drives the
-    /// "↓ N new events" pill next to the Pause/Resume button.
-    private(set) var unseenCount: Int = 0
+    /// Follow-the-tail state (D3): at the bottom means following; away
+    /// from it, arrivals are counted for the "N new ↓" pill.
+    private(set) var follow = TailFollow()
+
+    /// Events that arrived while not following or paused.
+    var unseenCount: Int { follow.unseen }
+
+    /// Bumped to make the table scroll to the newest row.
+    private(set) var latestScrollToken = UUID()
 
     /// When on, consecutive events with identical (subsystem, category,
     /// message, level) collapse to one visible row showing ×N. Display
@@ -71,23 +89,10 @@ final class LogFeedViewModel {
     /// Default ON because noisy clients (loops, polling, retries)
     /// make uncollapsed feeds unreadable; users who want strict
     /// chronology can toggle off.
-    var collapseRepeats: Bool = true
-
-    /// Tail-following toggle. When ON, every new event scrolls the
-    /// table to the bottom; when OFF, new events still appear in
-    /// the page but the user's current scroll position is left
-    /// alone.
-    ///
-    /// Defaults to OFF: during high-volume streaming (e.g., video
-    /// playback that fires ~4 events/sec) the constant pull-to-bottom
-    /// prevents the user from reading older events. Opt-in is the
-    /// right default for a debugger.
-    ///
-    /// Auto-disabled by `ScrollWatcher` when the user manually
-    /// scrolls — so flipping it ON for live-tailing doesn't trap
-    /// them; the moment they scroll away, the toggle turns itself
-    /// off and the table stops chasing the tail.
-    var autoScrollEnabled: Bool = false
+    var collapseRepeats: Bool {
+        get { feed.collapse }
+        set { feed.collapse = newValue }
+    }
 
     /// Cached set of bookmarked event IDs in this session; refreshed
     /// via the store's `.bookmarksChanged` change stream.
@@ -145,13 +150,27 @@ final class LogFeedViewModel {
 
     var matchCount: Int { matchIds.count }
 
-    /// Selected row id (for the detail pane).
-    var selectedEventId: EventRecord.ID? {
+    /// Selected row ids. Several can be selected for copying.
+    var selectedEventIds: Set<EventRecord.ID> = [] {
         didSet {
-            guard oldValue != selectedEventId else { return }
+            guard oldValue != selectedEventIds else { return }
             loadSelectedEvent()
         }
     }
+
+    /// The selected row when exactly one is — what the detail pane,
+    /// `j` / `k` and the Δ column work from.
+    var selectedEventId: EventRecord.ID? {
+        get { selectedEventIds.count == 1 ? selectedEventIds.first : nil }
+        set { selectedEventIds = newValue.map { [$0] } ?? [] }
+    }
+
+    /// The selection as it was when the filter changed; re-applied, to
+    /// the rows that still match, when the new snapshot lands.
+    private var selectionToRestore: Set<EventRecord.ID>?
+
+    /// Bumped by ⌘F; the Search & highlight field takes focus.
+    private(set) var searchFocusRequest = 0
 
     /// The selected row *with* its JSON payloads. Rows in `page` are
     /// fetched without payloads (see `reload`), so the detail pane reads
@@ -181,7 +200,22 @@ final class LogFeedViewModel {
     /// virtualization internally. Was previously a sliding 200-row
     /// window, which caused new events (past index 200) to never
     /// appear even though `totalCount` updated.
+    ///
+    /// A snapshot keeps the *newest* this many. Live appends may run a
+    /// tenth past it before a fresh snapshot trims the oldest, so a
+    /// busy stream at the cap doesn't refetch on every append.
     private let maxEventsPerFetch: Int = 1_000_000
+
+    /// Highest event id the loaded rows account for — every row past it
+    /// is new. `nil` while a snapshot is pending.
+    private var watermark: Int64?
+
+    /// The filter `feed` was loaded with. A tail uses this, not `filter`,
+    /// which may already hold an edit whose reload hasn't run yet.
+    private var loadedFilter: Filter = .none
+
+    /// Set when an append lands while a tail fetch is in flight.
+    private var tailPending = false
 
     /// Marked `nonisolated(unsafe)` so the nonisolated `deinit` can
     /// cancel them. `Task<Void, Never>` is Sendable and the
@@ -200,6 +234,7 @@ final class LogFeedViewModel {
     private nonisolated(unsafe) var matchTask: Task<Void, Never>?
     private nonisolated(unsafe) var facetTask: Task<Void, Never>?
     private nonisolated(unsafe) var selectionTask: Task<Void, Never>?
+    private nonisolated(unsafe) var tailTask: Task<Void, Never>?
 
     /// Bumped by every `reload`. A queued reload compares it before
     /// issuing SQL and skips the query outright if a newer one has
@@ -219,9 +254,12 @@ final class LogFeedViewModel {
 
     // MARK: - Init
 
-    init(store: LogStore, sessionId: Int64) {
+    /// - Parameter filter: what to start with — the previous session's
+    ///   filter, so a reconnect or relaunch doesn't drop it.
+    init(store: LogStore, sessionId: Int64, filter: Filter = .none) {
         self.store = store
         self.sessionId = sessionId
+        self.filter = filter
         requestReload()
         Task { await self.subscribeToChanges() }
         Task { await self.reloadBookmarks() }
@@ -238,6 +276,7 @@ final class LogFeedViewModel {
         matchTask?.cancel()
         facetTask?.cancel()
         selectionTask?.cancel()
+        tailTask?.cancel()
     }
 
     // MARK: - Debounced reload
@@ -257,34 +296,13 @@ final class LogFeedViewModel {
 
     // MARK: - Row presentation
 
-    /// A row as the table sees it. When `collapseRepeats` is off this
-    /// is one CollapsedRow per page event with count=1. When it's on
-    /// consecutive identical events fold into a single row whose
-    /// `count` is the run length.
-    struct CollapsedRow: Identifiable, Hashable {
-        let event: EventRecord
-        let count: Int
-        var id: EventRecord.ID { event.id }
-    }
+    /// A row as the table sees it — one event, or with Collapse on a
+    /// run of identical events shown once with its count (D8). Kept up
+    /// to date by `feed`; this used to be recomputed from the whole page
+    /// on every body pass.
+    typealias CollapsedRow = FeedRow
 
-    var collapsedRows: [CollapsedRow] {
-        guard collapseRepeats else {
-            return page.map { CollapsedRow(event: $0, count: 1) }
-        }
-        var result: [CollapsedRow] = []
-        result.reserveCapacity(page.count)
-        for event in page {
-            if let last = result.last, isSameKind(last.event, event) {
-                result[result.count - 1] = CollapsedRow(
-                    event: last.event,
-                    count: last.count + 1
-                )
-            } else {
-                result.append(CollapsedRow(event: event, count: 1))
-            }
-        }
-        return result
-    }
+    var collapsedRows: [FeedRow] { feed.rows }
 
     /// The row that actually displays `eventId`.
     ///
@@ -294,45 +312,14 @@ final class LogFeedViewModel {
     /// nothing, which is what made match navigation look dead — the
     /// counter advanced while the table never moved.
     func displayedRowId(for eventId: EventRecord.ID) -> EventRecord.ID {
-        guard collapseRepeats else { return eventId }
-        var representative: EventRecord?
-        for event in page {
-            if let last = representative, isSameKind(last, event) {
-                // Same group: the representative still stands.
-            } else {
-                representative = event
-            }
-            if event.id == eventId { return representative?.id ?? eventId }
-        }
-        return eventId
-    }
-
-
-    /// `displayedRowId(for:)` for every event in the page, in one pass.
-    private func displayedRowIds() -> [EventRecord.ID: EventRecord.ID] {
-        var map: [EventRecord.ID: EventRecord.ID] = [:]
-        map.reserveCapacity(page.count)
-        var representative: EventRecord?
-        for event in page {
-            if let last = representative, isSameKind(last, event) {
-                // Same group: the representative still stands.
-            } else {
-                representative = event
-            }
-            map[event.id] = representative?.id
-        }
-        return map
-    }
-
-    private func isSameKind(_ a: EventRecord, _ b: EventRecord) -> Bool {
-        a.level == b.level &&
-        a.subsystem == b.subsystem &&
-        a.category == b.category &&
-        a.message == b.message
+        feed.rowId(for: eventId) ?? eventId
     }
 
     // MARK: - Reload
 
+    /// A full reload: filter changes, Clear, and catching up past the
+    /// cap. Live appends don't come here — see `requestTail`.
+    ///
     /// A reload materialises the whole filtered result set in one array,
     /// so two things have to hold or memory explodes:
     ///
@@ -358,31 +345,28 @@ final class LogFeedViewModel {
         let limit = maxEventsPerFetch
         let task = Task { [weak self, store, sessionId] in
             _ = await previous?.value
-            guard let self, await self.isCurrentReload(generation) else { return }
+            guard let self, self.isCurrentReload(generation) else { return }
             do {
-                let count = try await store.eventCount(
-                    sessionId: sessionId,
-                    filter: snapshotFilter
-                )
-                // Only worth a second COUNT when a filter is
-                // actually hiding something.
-                let unfiltered = snapshotFilter.isEmpty
-                    ? count
-                    : try await store.eventCount(sessionId: sessionId, filter: .none)
-                guard await self.isCurrentReload(generation) else { return }
-                await MainActor.run {
-                    self.totalCount = count
-                    self.unfilteredCount = unfiltered
-                }
-                let events = try await store.events(
+                // Rows and both counts in one read, newest rows first.
+                let snapshot = try await store.feedSnapshot(
                     sessionId: sessionId,
                     filter: snapshotFilter,
-                    offset: 0,
-                    limit: limit,
-                    includePayloads: false
+                    limit: limit
                 )
-                guard await self.isCurrentReload(generation) else { return }
-                await MainActor.run { self.page = events }
+                guard self.isCurrentReload(generation) else { return }
+                self.totalCount = snapshot.total
+                self.unfilteredCount = snapshot.unfiltered
+                self.feed.replace(with: snapshot.events)
+                self.loadedFilter = snapshotFilter
+                self.watermark = snapshot.watermark
+                self.restoreSelection()
+                // The table went through empty, which drops its scroll
+                // offset; the last row may be unchanged, so its onChange
+                // won't re-anchor. Do it explicitly.
+                if self.follow.isFollowing { self.latestScrollToken = UUID() }
+                // Appends announced while no watermark was set were
+                // skipped; fetch whatever landed after the read.
+                self.requestTail()
             } catch {
                 // TODO: surface to UI as a banner.
                 print("LogFeedViewModel.reload: \(error)")
@@ -442,7 +426,7 @@ final class LogFeedViewModel {
                 case .appended(let sid, let count) where sid == self.sessionId:
                     await self.handleAppended(count: count)
                 case .cleared(let sid) where sid == self.sessionId:
-                    self.unseenCount = 0
+                    self.follow.resume()
                     self.requestReload()
                     if self.facetPopoverOpen > 0 { await self.reloadFacetValues() }
                 case .bookmarksChanged(let sid) where sid == self.sessionId:
@@ -464,18 +448,144 @@ final class LogFeedViewModel {
             // Frozen view — don't pull the new events into `page`.
             // Just track the gap so the UI shows the user how much
             // is waiting for them when they resume.
-            unseenCount += count
+            follow.appended(count)
             return
         }
-        // Debounce: high event rates coalesce into one reload.
-        requestReload()
+        requestTail()
+    }
+
+    // MARK: - Live tail
+
+    /// Fetch the rows past the watermark and merge them in. Appends that
+    /// arrive while a fetch is in flight fold into one follow-up, so a
+    /// fast stream costs one small query at a time, never a queue.
+    private func requestTail() {
+        guard watermark != nil, !isPaused else { return }
+        guard tailTask == nil else {
+            tailPending = true
+            return
+        }
+        tailTask = Task { [weak self] in
+            while let self, !Task.isCancelled {
+                self.tailPending = false
+                await self.fetchTail()
+                guard self.tailPending else { break }
+            }
+            self?.tailTask = nil
+        }
+    }
+
+    private func fetchTail() async {
+        guard let after = watermark else { return }
+        let generation = reloadGeneration
+        do {
+            let tail = try await store.feedTail(sessionId: sessionId, filter: loadedFilter, after: after)
+            // A snapshot replaced the rows meanwhile; it tails itself.
+            guard generation == reloadGeneration, watermark == after else { return }
+            watermark = tail.watermark
+            unfilteredCount += tail.unfiltered
+            guard !tail.events.isEmpty else { return }
+            totalCount += tail.events.count
+            if feed.events.count + tail.events.count > maxEventsPerFetch + maxEventsPerFetch / 10 {
+                requestReload()
+                return
+            }
+            feed.merge(tail.events)
+            follow.appended(tail.events.count)
+        } catch {
+            print("LogFeedViewModel.fetchTail: \(error)")
+        }
     }
 
     /// Resume the live feed. Identical to setting `isPaused = false`;
     /// kept as a named action so the UI (pill click) reads cleanly.
     func resume() {
         isPaused = false
-        // didSet on isPaused handles unseenCount reset + reload.
+        // didSet on isPaused handles following + catching up.
+    }
+
+    /// The "N new ↓" pill: unpause, follow, and go to the newest row.
+    func jumpToLatest() {
+        isPaused = false
+        follow.resume()
+        latestScrollToken = UUID()
+    }
+
+    /// Reported by the table on user scrolls. Reaching the bottom
+    /// resumes following; leaving it stops. An explicit pause holds.
+    func userScrolled(atBottom: Bool) {
+        guard !isPaused, atBottom != follow.isFollowing else { return }
+        follow.scrolled(atBottom: atBottom)
+    }
+
+    // MARK: - Selection across reloads
+
+    /// Put back the selection from before a filter change, on whichever
+    /// rows now show those events, and bring the first into view.
+    private func restoreSelection() {
+        guard let previous = selectionToRestore else { return }
+        selectionToRestore = nil
+        let kept = Set(previous.compactMap { feed.rowId(for: $0) })
+        selectedEventIds = kept
+        if let first = kept.compactMap({ feed.rowIndex(ofRow: $0) }).min() {
+            follow.stop()
+            scrollTarget = (feed.rows[first].id, UUID())
+        }
+    }
+
+    /// Drop the filter and land on `eventId` among its neighbours. Clear
+    /// stays in force unless it hides the event itself.
+    func showInContext(_ eventId: EventRecord.ID) {
+        var unfiltered = Filter.none
+        if let hidden = filter.hiddenThroughEventId, eventId > hidden {
+            unfiltered.hiddenThroughEventId = hidden
+        }
+        guard unfiltered != filter else {
+            Task { await jumpTo(eventId: eventId) }
+            return
+        }
+        selectedEventIds = [eventId]
+        filter = unfiltered
+    }
+
+    // MARK: - Filter carried across sessions
+
+    private static let rememberedFilterKey = "logFeed.lastFilter"
+
+    /// The filter last used, for the first session after a launch.
+    static func rememberedFilter() -> Filter {
+        UserDefaults.standard.data(forKey: rememberedFilterKey).flatMap(Filter.restore) ?? .none
+    }
+
+    private static func remember(_ filter: Filter) {
+        UserDefaults.standard.set(filter.carriedOver.stored, forKey: rememberedFilterKey)
+    }
+
+    // MARK: - Copy, search focus, Δ
+
+    /// The rows as clipboard lines, in table order.
+    func logLines(for rowIds: Set<EventRecord.ID>) -> String {
+        rowIds.compactMap { feed.rowIndex(ofRow: $0) }
+            .sorted()
+            .map { feed.rows[$0].event.logLine }
+            .joined(separator: "\n")
+    }
+
+    func focusSearch() {
+        searchFocusRequest += 1
+    }
+
+    /// Milliseconds from the selected row to `row`, or with nothing
+    /// selected from the row above it. `nil` for the first row.
+    func timeDelta(for row: FeedRow) -> Int64? {
+        let reference: FeedRow
+        if let selected = selectedEventId, let index = feed.rowIndex(ofRow: selected) {
+            reference = feed.rows[index]
+        } else {
+            guard let index = feed.rowIndex(ofRow: row.id), index > 0 else { return nil }
+            reference = feed.rows[index - 1]
+        }
+        return Int64(row.event.timestampMillis) - Int64(reference.event.timestampMillis)
     }
 
     // MARK: - Clearing the view
@@ -508,22 +618,40 @@ final class LogFeedViewModel {
     func selectNextRow() { moveSelection(by: 1) }
     func selectPreviousRow() { moveSelection(by: -1) }
 
+    /// `e` / `⇧E`: the next / previous error row. Doesn't wrap.
+    func selectNextError() { stepError(forward: true) }
+    func selectPreviousError() { stepError(forward: false) }
+
     private func moveSelection(by delta: Int) {
         let rows = collapsedRows
         guard !rows.isEmpty else { return }
         guard let current = selectedEventId,
-              let index = rows.firstIndex(where: { $0.id == current })
+              let index = feed.rowIndex(ofRow: current)
         else {
             // Nothing selected yet: enter from the end you came from.
-            let entry = delta > 0 ? rows.first : rows.last
-            selectedEventId = entry?.id
-            if let entry { scrollTarget = (entry.id, UUID()) }
+            select(rowAt: delta > 0 ? 0 : rows.count - 1)
             return
         }
         let next = index + delta
         guard rows.indices.contains(next) else { return }
-        selectedEventId = rows[next].id
-        scrollTarget = (rows[next].id, UUID())
+        select(rowAt: next)
+    }
+
+    private func stepError(forward: Bool) {
+        let current = selectedEventId.flatMap { feed.rowIndex(ofRow: $0) }
+        guard let index = feed.rowIndex(after: current, forward: forward,
+                                         where: { $0.event.level == .error })
+        else { return }
+        select(rowAt: index)
+    }
+
+    /// Select and reveal a row. Anywhere but the last row takes the view
+    /// off the tail, so the next append doesn't scroll it away.
+    private func select(rowAt index: Int) {
+        let id = feed.rows[index].id
+        if index != feed.rows.count - 1 { follow.stop() }
+        selectedEventId = id
+        scrollTarget = (id, UUID())
     }
 
     // MARK: - Bookmarks
@@ -564,8 +692,8 @@ final class LogFeedViewModel {
     /// (live session today, imported session from last month — same
     /// behavior). Wraps around midnight.
     ///
-    /// Pauses follow-tail so the jump isn't immediately undone by
-    /// tail-scroll. See D27.
+    /// Stops following the tail so the jump isn't immediately undone
+    /// by tail-scroll. See D27.
     func jumpToTime(_ target: Date) {
         // Compute UTC milliseconds since UTC midnight. The user typed
         // a local time, the popover built a Date by combining that
@@ -585,7 +713,6 @@ final class LogFeedViewModel {
                     targetMillisSinceMidnight: targetMod,
                     filter: filter
                 ) else { return }
-                isPaused = true
                 await jumpTo(eventId: id)
             } catch {
                 print("jumpToTime: \(error)")
@@ -714,7 +841,7 @@ final class LogFeedViewModel {
 
     // MARK: - Search & highlight: match navigation
 
-    /// Step to the next matching event (wraps). Pauses Follow so the
+    /// Step to the next matching event (wraps). Stops following so the
     /// jump isn't immediately undone by tail-scroll.
     func nextMatch() { stepMatch(by: 1) }
     func previousMatch() { stepMatch(by: -1) }
@@ -731,14 +858,13 @@ final class LogFeedViewModel {
         let count = matchIds.count
         let currentRow = selectedEventId
         var index = currentMatchIndex ?? (delta > 0 ? -1 : 0)
-        // One pass over the page, not one per candidate: walking a ×1000
-        // group of matches was 1000 full scans per keypress.
-        let rowIds = collapseRepeats ? displayedRowIds() : [:]
 
         for _ in 0..<count {
             index = ((index + delta) % count + count) % count
             let candidate = matchIds[index]
-            guard (rowIds[candidate] ?? candidate) != currentRow else { continue }
+            // An indexed lookup — walking a ×1000 group of matches
+            // used to rescan the page per candidate.
+            guard displayedRowId(for: candidate) != currentRow else { continue }
             currentMatchIndex = index
             Task { await jumpTo(eventId: candidate) }
             return
@@ -787,10 +913,11 @@ final class LogFeedViewModel {
     /// there yet (a filter change just emptied the page, or the event
     /// arrived while paused).
     private func jumpTo(eventId: Int64) async {
-        // Pause first so incoming events neither scroll us off the match
-        // nor keep superseding the reload below.
-        isPaused = true
-        if !page.contains(where: { $0.id == eventId }) {
+        // Off the tail first, so incoming events don't scroll us off the
+        // match. (This used to pause; appends are cheap tails now and no
+        // longer supersede the reload below.)
+        follow.stop()
+        if !feed.contains(eventId: eventId) {
             await reload()
         }
         // Resolved after the reload, because `page` has to hold the

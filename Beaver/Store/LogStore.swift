@@ -31,6 +31,8 @@ public actor LogStore {
         case savedFiltersChanged
         case networkAppended(sessionId: Int64)
         case networkBookmarksChanged(sessionId: Int64)
+        /// A batch of live events could not be written and is lost.
+        case writeFailed(message: String)
     }
 
     public enum Source {
@@ -397,10 +399,10 @@ public actor LogStore {
                 broadcast(.appended(sessionId: sessionId, count: items.count))
             }
         } catch {
-            // Surface via a dedicated error stream in a future iteration.
-            // TODO: append a synthetic error event tagged
-            // 'loggernext.store' so the user sees write failures in-feed.
             print("LogStore flush failed: \(error)")
+            broadcast(.writeFailed(
+                message: "Couldn't save \(batch.count) event\(batch.count == 1 ? "" : "s"): \(error.localizedDescription)"
+            ))
         }
     }
 
@@ -490,15 +492,8 @@ public actor LogStore {
     ) async throws -> [EventRecord] {
         try await dbQueue.read { db in
             let (whereClause, args) = Self.where(filter: filter, sessionId: sessionId)
-            let payloadColumns = includePayloads
-                ? "data_json, context_json"
-                : "NULL AS data_json, NULL AS context_json"
             let sql = """
-                SELECT id, session_id, timestamp_ms, level, subsystem,
-                       category, message, \(payloadColumns),
-                       COALESCE(octet_length(data_json), 0)
-                     + COALESCE(octet_length(context_json), 0)
-                       AS payload_bytes
+                SELECT \(Self.eventColumns(includePayloads: includePayloads))
                 FROM event
                 \(whereClause)
                 ORDER BY timestamp_ms ASC, id ASC
@@ -509,6 +504,114 @@ public actor LogStore {
             let rows = try Row.fetchAll(db, sql: sql, arguments: StatementArguments(fullArgs))
             return rows.map(Self.makeEventRecord)
         }
+    }
+
+    private static func eventColumns(includePayloads: Bool) -> String {
+        let payloadColumns = includePayloads
+            ? "data_json, context_json"
+            : "NULL AS data_json, NULL AS context_json"
+        return """
+            id, session_id, timestamp_ms, level, subsystem,
+            category, message, \(payloadColumns),
+            COALESCE(octet_length(data_json), 0)
+          + COALESCE(octet_length(context_json), 0)
+            AS payload_bytes
+        """
+    }
+
+    // MARK: - Events: Log feed
+
+    /// What the Log feed shows for a filter, read in one go.
+    public struct FeedSnapshot: Sendable {
+        /// The newest `limit` matching rows, oldest first, without payloads.
+        public let events: [EventRecord]
+        /// Rows matching the filter.
+        public let total: Int
+        /// Rows in the session.
+        public let unfiltered: Int
+        /// Highest event id in the store at read time — every row after
+        /// it is new to this snapshot. Store-wide rather than per session
+        /// so a session with no rows yet still has a tight bound.
+        public let watermark: Int64
+    }
+
+    /// Rows added after a snapshot or an earlier tail.
+    public struct FeedTail: Sendable {
+        /// New rows matching the filter, ordered like the feed.
+        public let events: [EventRecord]
+        /// New rows in the session, matching or not.
+        public let unfiltered: Int
+        public let watermark: Int64
+    }
+
+    /// Newest-first with a cap, so a session past `limit` rows loses its
+    /// oldest rows rather than the ones arriving. `total` is only
+    /// counted when the cap was hit; otherwise it's the rows in hand.
+    public func feedSnapshot(sessionId: Int64, filter: Filter, limit: Int) async throws -> FeedSnapshot {
+        try await dbQueue.read { db in
+            // One read on the single connection: no write lands between
+            // the watermark and the rows.
+            let watermark = try Int64.fetchOne(db, sql: "SELECT MAX(id) FROM event") ?? 0
+            let (whereClause, args) = Self.where(filter: filter, sessionId: sessionId)
+            let newestFirst = try Row.fetchAll(
+                db,
+                sql: """
+                    SELECT \(Self.eventColumns(includePayloads: false))
+                    FROM event
+                    \(whereClause)
+                    ORDER BY timestamp_ms DESC, id DESC
+                    LIMIT ?
+                """,
+                arguments: StatementArguments(args + [limit])
+            )
+            let events = newestFirst.reversed().map(Self.makeEventRecord)
+            let total = events.count < limit
+                ? events.count
+                : try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM event \(whereClause)",
+                                   arguments: StatementArguments(args)) ?? 0
+            let unfiltered = filter.isEmpty
+                ? total
+                : try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM event WHERE session_id = ?",
+                                   arguments: [sessionId]) ?? 0
+            return FeedSnapshot(events: events, total: total, unfiltered: unfiltered, watermark: watermark)
+        }
+    }
+
+    /// Rows past `watermark`. Both queries walk the rowid range of the
+    /// new rows only, so the cost follows what arrived, not the session.
+    public func feedTail(sessionId: Int64, filter: Filter, after watermark: Int64) async throws -> FeedTail {
+        try await dbQueue.read { db in
+            let (rangeSQL, rangeArgs) = Self.tailRangeQuery(sessionId: sessionId, after: watermark)
+            let range = try Row.fetchOne(db, sql: rangeSQL, arguments: StatementArguments(rangeArgs))
+            let newWatermark = (range?[0] as Int64?) ?? watermark
+            let unfiltered = (range?[1] as Int?) ?? 0
+            guard unfiltered > 0 else {
+                return FeedTail(events: [], unfiltered: 0, watermark: newWatermark)
+            }
+            let (sql, args) = Self.tailEventsQuery(sessionId: sessionId, filter: filter, after: watermark)
+            let events = try Row.fetchAll(db, sql: sql, arguments: StatementArguments(args))
+                .map(Self.makeEventRecord)
+            return FeedTail(events: events, unfiltered: unfiltered, watermark: newWatermark)
+        }
+    }
+
+    static func tailRangeQuery(sessionId: Int64, after watermark: Int64)
+        -> (String, [any DatabaseValueConvertible]) {
+        ("SELECT MAX(id), COALESCE(SUM(session_id = ?), 0) FROM event WHERE id > ?",
+         [sessionId, watermark])
+    }
+
+    /// `NOT INDEXED` keeps the planner off the `(session_id, …)` indexes,
+    /// which would walk the whole session; the rowid range stays usable.
+    static func tailEventsQuery(sessionId: Int64, filter: Filter, after watermark: Int64)
+        -> (String, [any DatabaseValueConvertible]) {
+        let (whereClause, args) = Self.where(filter: filter, sessionId: sessionId)
+        return ("""
+            SELECT \(eventColumns(includePayloads: false))
+            FROM event NOT INDEXED
+            \(whereClause) AND id > ?
+            ORDER BY timestamp_ms ASC, id ASC
+        """, args + [watermark])
     }
 
     /// Full rows — payloads included — for a specific set of ids. The feed
@@ -664,19 +767,16 @@ public actor LogStore {
         isRegex: Bool
     ) async throws -> [Int64] {
         try await dbQueue.read { db in
-            let (whereClause, args) = Self.where(filter: filter, sessionId: sessionId)
-            var sql = "SELECT id FROM event \(whereClause)"
-            var fullArgs = args
-            if isRegex {
-                sql += " AND (message REGEXP ? OR subsystem REGEXP ? OR category REGEXP ?)"
-                fullArgs.append(contentsOf: [highlight, highlight, highlight])
-            } else {
-                let likeTerm = "%\(highlight)%"
-                sql += " AND (message LIKE ? OR subsystem LIKE ? OR category LIKE ?)"
-                fullArgs.append(contentsOf: [likeTerm, likeTerm, likeTerm])
+            // What the row shows is what gets highlighted, so no payloads.
+            guard let (match, matchArgs) = Self.textMatch(highlight, isRegex: isRegex, payloads: false) else {
+                return []
             }
-            sql += " ORDER BY timestamp_ms ASC, id ASC"
-            return try Int64.fetchAll(db, sql: sql, arguments: StatementArguments(fullArgs))
+            let (whereClause, args) = Self.where(filter: filter, sessionId: sessionId)
+            return try Int64.fetchAll(
+                db,
+                sql: "SELECT id FROM event \(whereClause) AND \(match) ORDER BY timestamp_ms ASC, id ASC",
+                arguments: StatementArguments(args + matchArgs)
+            )
         }
     }
 
@@ -728,7 +828,7 @@ public actor LogStore {
                 db,
                 sql: """
                     SELECT id, name, min_level, search, search_rx, exclude, exclude_rx,
-                           subsystems, excluded_subsystems, categories, excluded_categories
+                           search_payloads, subsystems, excluded_subsystems, categories, excluded_categories
                     FROM saved_filter
                     ORDER BY name COLLATE NOCASE
                 """
@@ -762,14 +862,16 @@ public actor LogStore {
                 sql: """
                     INSERT INTO saved_filter
                       (name, min_level, search, search_rx, exclude, exclude_rx,
+                       search_payloads,
                        subsystems, excluded_subsystems, categories, excluded_categories)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(name) DO UPDATE SET
                       min_level           = excluded.min_level,
                       search              = excluded.search,
                       search_rx           = excluded.search_rx,
                       exclude             = excluded.exclude,
                       exclude_rx          = excluded.exclude_rx,
+                      search_payloads     = excluded.search_payloads,
                       subsystems          = excluded.subsystems,
                       excluded_subsystems = excluded.excluded_subsystems,
                       categories          = excluded.categories,
@@ -782,6 +884,7 @@ public actor LogStore {
                     filter.searchIsRegex ? 1 : 0,
                     filter.exclude,
                     filter.excludeIsRegex ? 1 : 0,
+                    filter.searchPayloads ? 1 : 0,
                     Self.encodeChips(filter.subsystems),
                     Self.encodeChips(filter.excludedSubsystems),
                     Self.encodeChips(filter.categories),
@@ -817,6 +920,7 @@ public actor LogStore {
             searchIsRegex: ((row["search_rx"] as Int?) ?? 0) != 0,
             exclude: row["exclude"] as String?,
             excludeIsRegex: ((row["exclude_rx"] as Int?) ?? 0) != 0,
+            searchPayloads: ((row["search_payloads"] as Int?) ?? 0) != 0,
             subsystems: decodeChips(row["subsystems"]),
             excludedSubsystems: decodeChips(row["excluded_subsystems"]),
             categories: decodeChips(row["categories"]),
@@ -851,23 +955,43 @@ public actor LogStore {
         namespace: StorageSnapshot.Namespace,
         dataJSON: String
     ) async throws {
-        let now = Date()
-        try await dbQueue.write { db in
+        let nowMillis = Int(Date().timeIntervalSince1970 * 1000)
+        // The device re-reports storage every refresh, nearly always
+        // unchanged. Storing each copy grew this table by thousands of
+        // rows an hour, so an unchanged frame only moves the latest
+        // row's `taken_at` — it stays "as of" the last report.
+        let inserted = try await dbQueue.write { db -> Bool in
+            let latest = try Row.fetchOne(
+                db,
+                sql: """
+                    SELECT id, data_json FROM storage_snapshot
+                    WHERE session_id = ? AND namespace = ?
+                    ORDER BY taken_at DESC, id DESC
+                    LIMIT 1
+                """,
+                arguments: [sessionId, namespace.rawValue]
+            )
+            if let latest, latest["data_json"] as String == dataJSON {
+                try db.execute(
+                    sql: "UPDATE storage_snapshot SET taken_at = MAX(taken_at, ?) WHERE id = ?",
+                    arguments: [nowMillis, latest["id"] as Int64]
+                )
+                return false
+            }
             try db.execute(
                 sql: """
                     INSERT INTO storage_snapshot
                       (session_id, taken_at, namespace, data_json)
                     VALUES (?, ?, ?, ?)
                 """,
-                arguments: [
-                    sessionId,
-                    Int(now.timeIntervalSince1970 * 1000),
-                    namespace.rawValue,
-                    dataJSON,
-                ]
+                arguments: [sessionId, nowMillis, namespace.rawValue, dataJSON]
             )
+            return true
         }
+        // Broadcast either way: a screen waiting on a reload (or an
+        // edit check) needs to hear that the device answered.
         broadcast(.storageUpdated(sessionId: sessionId, namespace: namespace))
+        guard inserted else { return }
 
         // Opportunistically harvest device + app metadata out of the
         // session-storage snapshot. The SDK writes a well-known
@@ -920,12 +1044,22 @@ public actor LogStore {
                     SELECT id, session_id, taken_at, namespace, data_json
                     FROM storage_snapshot
                     WHERE session_id = ? AND namespace = ?
-                    ORDER BY taken_at DESC
+                    ORDER BY taken_at DESC, id DESC
                     LIMIT 1
                 """,
                 arguments: [sessionId, namespace.rawValue]
             )
             return row.map(Self.makeStorageSnapshot)
+        }
+    }
+
+    func storageSnapshotCount(sessionId: Int64) async throws -> Int {
+        try await dbQueue.read { db in
+            try Int.fetchOne(
+                db,
+                sql: "SELECT COUNT(*) FROM storage_snapshot WHERE session_id = ?",
+                arguments: [sessionId]
+            ) ?? 0
         }
     }
 
@@ -1084,7 +1218,7 @@ public actor LogStore {
     /// Translate a `Filter` into a SQL WHERE clause + bound arguments.
     ///
     /// Substring search uses `LIKE '%x%'` across message/subsystem/
-    /// category. Regex uses the custom `REGEXP` function registered in
+    /// category, plus `data_json` when `searchPayloads` is on. Regex uses the custom `REGEXP` function registered in
     /// `init`. FTS5 was tried first but its prefix-match semantics
     /// (`'l*'` returns every word starting with `l`) produced huge
     /// candidate sets for short terms, making `NOT IN` exclude queries
@@ -1107,36 +1241,19 @@ public actor LogStore {
             args.append(contentsOf: allowed)
         }
 
-        // Search
-        if let search = filter.search {
-            if filter.searchIsRegex {
-                clauses.append(
-                    "(message REGEXP ? OR subsystem REGEXP ? OR category REGEXP ?)"
-                )
-                args.append(contentsOf: [search, search, search])
-            } else {
-                let likeTerm = "%\(search)%"
-                clauses.append(
-                    "(message LIKE ? OR subsystem LIKE ? OR category LIKE ?)"
-                )
-                args.append(contentsOf: [likeTerm, likeTerm, likeTerm])
-            }
+        // Search / exclude. A regex that doesn't compile constrains
+        // nothing; the UI flags the field.
+        if let search = filter.search,
+           let (match, matchArgs) = textMatch(search, isRegex: filter.searchIsRegex,
+                                              payloads: filter.searchPayloads) {
+            clauses.append(match)
+            args.append(contentsOf: matchArgs)
         }
-
-        // Exclude
-        if let exclude = filter.exclude {
-            if filter.excludeIsRegex {
-                clauses.append(
-                    "NOT (message REGEXP ? OR subsystem REGEXP ? OR category REGEXP ?)"
-                )
-                args.append(contentsOf: [exclude, exclude, exclude])
-            } else {
-                let likeTerm = "%\(exclude)%"
-                clauses.append(
-                    "NOT (message LIKE ? OR subsystem LIKE ? OR category LIKE ?)"
-                )
-                args.append(contentsOf: [likeTerm, likeTerm, likeTerm])
-            }
+        if let exclude = filter.exclude,
+           let (match, matchArgs) = textMatch(exclude, isRegex: filter.excludeIsRegex,
+                                              payloads: filter.searchPayloads) {
+            clauses.append("NOT " + match)
+            args.append(contentsOf: matchArgs)
         }
 
         // "Clear" hides what's on screen without deleting it.
@@ -1163,6 +1280,41 @@ public actor LogStore {
         )
 
         return ("WHERE " + clauses.joined(separator: " AND "), args)
+    }
+
+    /// `(message … OR subsystem … OR category … [OR data …])` for one
+    /// term, or `nil` for a regex that doesn't compile.
+    ///
+    /// `data_json` is coalesced: a NULL would make the whole OR NULL
+    /// when nothing else matched, and `NOT NULL` drops the row from an
+    /// exclude it has nothing to do with.
+    static func textMatch(_ term: String, isRegex: Bool, payloads: Bool)
+        -> (String, [any DatabaseValueConvertible])? {
+        var columns = ["message", "subsystem", "category"]
+        if payloads { columns.append("COALESCE(data_json, '')") }
+        let test: String
+        let argument: String
+        if isRegex {
+            guard Filter.isValidRegex(term) else { return nil }
+            test = "REGEXP ?"
+            argument = Filter.caseInsensitive(term)
+        } else {
+            test = #"LIKE ? ESCAPE '\'"#
+            argument = "%" + likeEscaped(term) + "%"
+        }
+        let sql = "(" + columns.map { "\($0) \(test)" }.joined(separator: " OR ") + ")"
+        return (sql, Array(repeating: argument, count: columns.count))
+    }
+
+    /// `%` and `_` are wildcards to LIKE; a user typing `100%` means the
+    /// characters.
+    static func likeEscaped(_ term: String) -> String {
+        var escaped = ""
+        for character in term {
+            if character == #"\"# || character == "%" || character == "_" { escaped.append(#"\"#) }
+            escaped.append(character)
+        }
+        return escaped
     }
 
     private static func appendChip(
