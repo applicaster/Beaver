@@ -71,11 +71,11 @@ extension NetworkEntry {
         return value < 9.95 ? String(format: "%.1f ", value) + unit : "\(Int(value.rounded())) \(unit)"
     }
 
-    /// The table's Size cell stands out from 1 MB, or when it shows the
+    /// The table's Size cell stands out from 100 KB, or when it shows the
     /// `+` of a body the SDK cut and no reported size says how big it was.
     public var isTableSizeWarning: Bool {
         guard let bytes = responseBodySize ?? responseBytes else { return false }
-        return bytes >= 1_000_000 || (isResponseBodyTruncated && responseBodySize == nil)
+        return bytes >= 100_000 || (isResponseBodyTruncated && responseBodySize == nil)
     }
 
     /// Duration colour tier: quiet under 1 s, slow to 3 s, very slow after.

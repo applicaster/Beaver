@@ -429,8 +429,8 @@ struct NetworkCopyTests {
     func sizeWarnsFromOneMegabyteOrOnAnUnreportedCut() {
         #expect(!e(#"{"url":"https://a.io","responseBody":"ok"}"#).isTableSizeWarning)
         #expect(!e(#"{"url":"https://a.io"}"#).isTableSizeWarning)
-        #expect(!e(#"{"url":"https://a.io","responseBodySize":999999,"responseBody":"x"}"#).isTableSizeWarning)
-        #expect(e(#"{"url":"https://a.io","responseBodySize":1000000,"responseBody":"x"}"#).isTableSizeWarning)
+        #expect(!e(#"{"url":"https://a.io","responseBodySize":99999,"responseBody":"x"}"#).isTableSizeWarning)
+        #expect(e(#"{"url":"https://a.io","responseBodySize":100000,"responseBody":"x"}"#).isTableSizeWarning)
         #expect(e(#"{"url":"https://a.io","responseBody":"{\"a\":1... [TRUNCATED]"}"#).isTableSizeWarning)
         // A reported size replaces the "+": only its own size counts.
         #expect(!e(#"{"url":"https://a.io","responseBodySize":5000,"responseBody":"x... [TRUNCATED]"}"#).isTableSizeWarning)

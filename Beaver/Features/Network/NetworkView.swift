@@ -237,11 +237,8 @@ struct NetworkView: View {
             .customizationID("method")
             TableColumn("Status") { e in
                 if e.statusClass == .success, let status = e.status {
-                    // 2xx is the norm: plain text, centred where the pills' digits sit.
-                    Text(String(status))
-                        .font(Self.rowFont)
-                        .foregroundStyle(.secondary)
-                        .frame(minWidth: StatusBadge.minWidth)
+                    // 2xx is the norm: light green text, no pill, centred where the pills' digits sit.
+                    SuccessStatusText(status: status)
                 } else {
                     StatusBadge(entry: e)
                 }
@@ -365,18 +362,41 @@ private struct DurationCell: View {
 private struct SizeCell: View {
     let entry: NetworkEntry
     @Environment(\.backgroundProminence) private var prominence
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         let text = Text(NetworkView.size(entry))
             .font(NetworkView.rowFont)
             .foregroundStyle(prominence == .increased ? .white
-                             : entry.isTableSizeWarning ? .orange : .secondary)
+                             : entry.isTableSizeWarning ? Color.sizeWarning(scheme) : .secondary)
             .frame(maxWidth: .infinity, alignment: .trailing)
         if entry.isResponseBodyTruncated && entry.responseBodySize == nil {
             text.help(NetworkView.sizeHelp(entry))
         } else {
             text
         }
+    }
+}
+
+/// 2xx in the table: quiet green text instead of a pill.
+private struct SuccessStatusText: View {
+    let status: Int
+    @Environment(\.backgroundProminence) private var prominence
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        Text(String(status))
+            .font(NetworkView.rowFont)
+            .foregroundStyle(prominence == .increased ? .white
+                             : scheme == .dark ? Color.green.mix(with: .white, by: 0.2) : Color.green.mix(with: .black, by: 0.25))
+            .frame(minWidth: StatusBadge.minWidth)
+    }
+}
+
+extension Color {
+    /// System yellow is unreadable as text on white; darken it in light mode.
+    static func sizeWarning(_ scheme: ColorScheme) -> Color {
+        scheme == .dark ? .yellow : Color.yellow.mix(with: .black, by: 0.4)
     }
 }
 
@@ -407,8 +427,7 @@ extension NetworkEntry.StatusClass {
         switch self {
         case .success: .green
         case .redirect: .blue
-        case .clientError: .orange
-        case .serverError, .failed: .red
+        case .clientError, .serverError, .failed: .red
         case .other: .gray
         }
     }
@@ -493,9 +512,17 @@ struct MethodBadge: View {
 
     var body: some View { Pill(text: method, tint: Self.tint(method), minWidth: 44) }
 
-    /// One calm colour; only the destructive verb stands out.
+    /// A muted colour per verb so GET and POST read apart at a glance;
+    /// Pill darkens the text and keeps the fill light.
     static func tint(_ method: String) -> Color {
-        method == "DELETE" ? .red : .blue
+        switch method {
+        case "GET": .blue
+        case "POST": .teal
+        case "PUT": .orange
+        case "PATCH": .purple
+        case "DELETE": .red
+        default: .gray
+        }
     }
 }
 
