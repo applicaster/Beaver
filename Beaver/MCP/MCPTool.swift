@@ -22,11 +22,14 @@ public struct ToolResult: Sendable {
     public var next: [String]
     /// The session the call was about, for the journal's link.
     public var sessionId: Int64?
+    /// What the call pointed at (an event, a request), for the journal's
+    /// clickable links. Empty: the row links to `sessionId`.
+    public var links: [AgentLink]
 
     public init(summary: String, body: String = "", structured: JSON = .object([:]),
-                next: [String] = [], sessionId: Int64? = nil) {
+                next: [String] = [], sessionId: Int64? = nil, links: [AgentLink] = []) {
         self.summary = summary; self.body = body; self.structured = structured
-        self.next = next; self.sessionId = sessionId
+        self.next = next; self.sessionId = sessionId; self.links = links
     }
 
     public var text: String {

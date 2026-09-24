@@ -57,6 +57,58 @@ public struct NewAgentActivity: Sendable {
     }
 }
 
+/// What a journal entry points at (design §5.9, §7.2): one of the fields
+/// is set. Stored in `links_json` as `[{"eventId":48211}]` — the shape
+/// `journal_note(links:)` takes — and opened through `ui_show`'s path
+/// (`UITools.open`).
+public struct AgentLink: Codable, Hashable, Sendable {
+    public var sessionId: Int64?
+    public var eventId: Int64?
+    public var networkId: Int64?
+    public var savedFilter: String?
+
+    public init(sessionId: Int64? = nil, eventId: Int64? = nil,
+                networkId: Int64? = nil, savedFilter: String? = nil) {
+        self.sessionId = sessionId; self.eventId = eventId
+        self.networkId = networkId; self.savedFilter = savedFilter
+    }
+
+    /// `Event #48211`, `Request #391`, `Filter “Auth”`, `Session #13`.
+    public var label: String {
+        if let eventId { return "Event #\(eventId)" }
+        if let networkId { return "Request #\(networkId)" }
+        if let savedFilter { return "Filter “\(savedFilter)”" }
+        if let sessionId { return "Session #\(sessionId)" }
+        return "Link"
+    }
+
+    /// `nil` for no links, so the column stays NULL.
+    public static func encode(_ links: [AgentLink]) -> String? {
+        guard !links.isEmpty else { return nil }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        return (try? encoder.encode(links)).map { String(decoding: $0, as: UTF8.self) }
+    }
+
+    /// Unreadable JSON is no links, never a crash: rows outlive app versions.
+    public static func decode(_ json: String?) -> [AgentLink] {
+        guard let data = json?.data(using: .utf8),
+              let links = try? JSONDecoder().decode([AgentLink].self, from: data)
+        else { return [] }
+        return links.filter { $0 != AgentLink() }
+    }
+}
+
+extension AgentActivity {
+    /// What the row links to: its stored links, else the session the call
+    /// was about.
+    public var links: [AgentLink] {
+        let stored = AgentLink.decode(linksJSON)
+        if !stored.isEmpty { return stored }
+        return sessionId.map { [AgentLink(sessionId: $0)] } ?? []
+    }
+}
+
 public enum AgentActivityText {
     public static func visible(_ entries: [AgentActivity], hideReads: Bool) -> [AgentActivity] {
         hideReads ? entries.filter { $0.kind != .read || $0.isError } : entries

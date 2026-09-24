@@ -21,6 +21,7 @@ public struct AgentJournal: Sendable {
             summary: String(summary.prefix(300)),
             isError: error != nil,
             error: error,
+            linksJSON: AgentLink.encode(result?.links ?? []),
             sessionId: result?.sessionId
         ))
     }
