@@ -36,6 +36,11 @@ When releasing:
 ## [3.0.0] - 2026-09-24
 
 ### Added
+- **Agent panel: what an agent can do.** The ⓘ button in the Agent
+  panel's toolbar opens a tour of Beaver's MCP capabilities — logs,
+  network, storage, commands, watches, sessions, bookmarks and filters —
+  each with a prompt to copy. **Hide reads** moved to the end of the
+  panel's toolbar and its tooltip explains what a read is.
 - **Agent Access: agents can act, not just read.** Through Beaver's MCP
   server an agent can send commands to the app (and collect the logs they
   cause, following the app across a restart), set and delete storage keys

@@ -13,14 +13,18 @@ struct AgentActivityView: View {
     var onOpened: () -> Void = {}
     @Environment(ToastCenter.self) private var toasts
     @Environment(AppEnvironment.self) private var env
-    @State private var showingSetup = false
+    @State private var screen = Screen.activity
+    @State private var hoveringHideReads = false
+    @State private var showingHideReadsHint = false
+
+    private enum Screen { case activity, setup, capabilities }
 
     var body: some View {
         VStack(spacing: 0) {
-            if showingSetup {
-                setup
-            } else {
-                activity
+            switch screen {
+            case .activity: activity
+            case .setup: setup
+            case .capabilities: capabilities
             }
         }
         // Fill the popover whatever the content, so the header stays at
@@ -35,11 +39,9 @@ struct AgentActivityView: View {
         HStack {
             Text("Agent activity").font(.headline)
             Spacer()
-            Button("Connect agent") { showingSetup = true }
+            Button("Connect agent") { screen = .setup }
                 .help("How to connect Claude Code, Cursor or another MCP client to Beaver")
-            Toggle("Hide reads", isOn: $model.hideReads)
-                .toggleStyle(.checkbox)
-                .help("Show only calls that changed something, and failed calls")
+            capabilitiesButton
             Button("Copy") {
                 model.copy()
                 toasts.success("Copied agent activity")
@@ -47,6 +49,25 @@ struct AgentActivityView: View {
             .disabled(model.visible.isEmpty)
             Button("Clear", role: .destructive) { model.clear() }
                 .disabled(model.entries.isEmpty)
+            Toggle("Hide reads", isOn: $model.hideReads)
+                .toggleStyle(.checkbox)
+                // .help() tooltips don't show inside this popover; a hover popover stands in.
+                .onHover { hovering in
+                    hoveringHideReads = hovering
+                    if !hovering { showingHideReadsHint = false; return }
+                    Task {
+                        try? await Task.sleep(for: .milliseconds(600))
+                        if hoveringHideReads { showingHideReadsHint = true }
+                    }
+                }
+                .popover(isPresented: $showingHideReadsHint, arrowEdge: .bottom) {
+                    Text(Self.hideReadsHint)
+                        .font(.callout)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(width: 260)
+                        .padding(10)
+                }
+                .accessibilityHint(Self.hideReadsHint)
         }
         .padding(10)
         Divider()
@@ -67,7 +88,11 @@ struct AgentActivityView: View {
             } description: {
                 Text("Calls from an MCP client appear here.")
             } actions: {
-                Button("How to connect an agent") { showingSetup = true }
+                HStack {
+                    Button("How to connect an agent") { screen = .setup }
+                    capabilitiesButton
+                }
+                .fixedSize()
             }
             .frame(maxHeight: .infinity)
         } else {
@@ -102,14 +127,56 @@ struct AgentActivityView: View {
 
     private var port: UInt16 { env.agentAccessPort ?? AgentAccess.configuredPort() }
 
+    private static let hideReadsHint = "Reads are calls where the agent only looked — at logs, requests or storage. Turn on to list only calls that changed something, and failed calls."
+
+    private var capabilitiesButton: some View {
+        Button { screen = .capabilities } label: {
+            Image(systemName: "info.circle")
+        }
+        .help("What an agent can do in Beaver")
+        .accessibilityLabel("What an agent can do in Beaver")
+    }
+
+    private var back: some View {
+        Button {
+            screen = .activity
+        } label: {
+            Label("Back", systemImage: "chevron.left")
+        }
+    }
+
+    @ViewBuilder
+    private var capabilities: some View {
+        HStack {
+            back
+            Text("What an agent can do").font(.headline)
+            Spacer()
+            Button("Connect agent") { screen = .setup }
+        }
+        .padding(10)
+        Divider()
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Through Beaver's MCP server an agent reads everything Beaver collected from the app and acts on it. Ask in plain words — every call shows up in this panel, and deletions and notes that need you also show a toast.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                ForEach(AgentAccess.capabilities, id: \.title) { capability in
+                    CapabilityCard(capability: capability) {
+                        copy(capability.example)
+                        toasts.success("Copied the prompt")
+                    }
+                }
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
     @ViewBuilder
     private var setup: some View {
         HStack {
-            Button {
-                showingSetup = false
-            } label: {
-                Label("Back", systemImage: "chevron.left")
-            }
+            back
             Text("Connect an agent").font(.headline)
             Spacer()
             Button("Copy all") {
@@ -173,6 +240,47 @@ private struct SetupCard: View {
                 .background(RoundedRectangle(cornerRadius: 6).fill(.quaternary))
         }
         .padding(12)
+        .background(RoundedRectangle(cornerRadius: 10).fill(.background.secondary))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.separator))
+    }
+}
+
+private struct CapabilityCard: View {
+    let capability: AgentAccess.Capability
+    let onCopy: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: capability.icon)
+                .font(.title2)
+                .foregroundStyle(.tint)
+                .frame(width: 28)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(capability.title).font(.title3.weight(.semibold))
+                Text(capability.note)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(alignment: .firstTextBaseline) {
+                    Text(capability.example)
+                        .font(.callout.italic())
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer()
+                    Button("Copy", action: onCopy)
+                        .controlSize(.small)
+                        .help("Copy this prompt")
+                }
+                .padding(8)
+                .background(RoundedRectangle(cornerRadius: 6).fill(.quaternary))
+                Text(capability.tools.joined(separator: " · "))
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+                    .textSelection(.enabled)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 10).fill(.background.secondary))
         .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.separator))
     }
