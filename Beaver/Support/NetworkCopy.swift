@@ -71,6 +71,32 @@ extension NetworkEntry {
         return value < 9.95 ? String(format: "%.1f ", value) + unit : "\(Int(value.rounded())) \(unit)"
     }
 
+    /// The table's Size cell stands out from 1 MB, or when it shows the
+    /// `+` of a body the SDK cut and no reported size says how big it was.
+    public var isTableSizeWarning: Bool {
+        guard let bytes = responseBodySize ?? responseBytes else { return false }
+        return bytes >= 1_000_000 || (isResponseBodyTruncated && responseBodySize == nil)
+    }
+
+    /// Duration colour tier: quiet under 1 s, slow to 3 s, very slow after.
+    public enum DurationTier: Sendable {
+        case normal, slow, verySlow
+
+        public init(millis: Int?) {
+            switch millis ?? 0 {
+            case ..<1000: self = .normal
+            case ..<3000: self = .slow
+            default: self = .verySlow
+            }
+        }
+    }
+
+    /// Headers by name, ignoring case (ties broken by the exact name), for
+    /// the detail pane's grid and its Raw lines.
+    public static func sortedHeaders(_ h: [String: String]) -> [(name: String, value: String)] {
+        h.sorted { ($0.key.lowercased(), $0.key) < ($1.key.lowercased(), $1.key) }.map { ($0.key, $0.value) }
+    }
+
     public var requestJSON: String {
         var o: [String: Any] = ["method": method, "url": url]
         if !requestHeaders.isEmpty { o["headers"] = requestHeaders }

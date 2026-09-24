@@ -15,6 +15,10 @@ struct NetworkView: View {
     @State private var harDocument: JSONExportDocument?
     @State private var harDefaultFilename = ""
     @State private var showingHARExporter = false
+    /// Column widths / order / visibility, remembered between launches —
+    /// the Log feed's pattern (`TableColumnCustomization` is Codable).
+    @AppStorage("network.columnLayout") private var storedColumnLayout = ""
+    @State private var columnLayout = TableColumnCustomization<NetworkEntry>()
 
     var body: some View {
         let rows = vm.filtered
@@ -207,8 +211,11 @@ struct NetworkView: View {
 
     // MARK: Table
 
+    /// One type style per row: 12 pt monospaced, numbers right-aligned,
+    /// colour only where it means something (method, non-2xx status, slow,
+    /// large or cut).
     private func table(_ rows: [NetworkEntry]) -> some View {
-        Table(rows, selection: $vm.selection) {
+        Table(rows, selection: $vm.selection, columnCustomization: $columnLayout) {
             TableColumn("Method") { e in
                 HStack(spacing: 4) {
                     if vm.isBookmarked(e.id) {
@@ -220,34 +227,56 @@ struct NetworkView: View {
                 }
             }
             .width(min: 64, ideal: 76, max: 96)
-            TableColumn("Status") { StatusBadge(entry: $0) }
-                .width(min: 48, ideal: 56, max: 64)
-            TableColumn("Host") { Text($0.host).lineLimit(1) }
-                .width(min: 80, ideal: 140)
-            TableColumn("Path") { Text($0.path).lineLimit(1).truncationMode(.middle) }
-            TableColumn("Duration") { e in
-                Text(e.durationMillis.map { "\($0) ms" } ?? "—")
-                    .foregroundStyle(Self.durationColor(e.durationMillis)).monospacedDigit()
-            }
-            .width(min: 60, ideal: 70, max: 90)
-            TableColumn("Size") { e in
-                // The reported size when the SDK sent one (exact, no "+");
-                // Content-Length is never used here — compressed, it would
-                // read as a wrong body size.
-                if let bytes = e.responseBodySize ?? e.responseBytes {
-                    let pill = Pill(text: Self.size(e), tint: bytes < 50_000 ? .green : .orange)
-                    if e.isResponseBodyTruncated && e.responseBodySize == nil {
-                        pill.help(Self.sizeHelp(e))
-                    } else {
-                        pill
-                    }
+            .customizationID("method")
+            TableColumn("Status") { e in
+                if e.statusClass == .success, let status = e.status {
+                    // 2xx is the norm: plain text, centred where the pills' digits sit.
+                    Text(String(status))
+                        .font(Self.rowFont)
+                        .foregroundStyle(.secondary)
+                        .frame(minWidth: StatusBadge.minWidth)
                 } else {
-                    Text("—").foregroundStyle(.secondary)
+                    StatusBadge(entry: e)
                 }
             }
-            .width(min: 56, ideal: 70, max: 90)
-            TableColumn("Time") { Text(Self.time($0.startMillis)).monospacedDigit() }
-                .width(min: 90, ideal: 100, max: 110)
+            .width(min: 48, ideal: 56, max: 64)
+            .customizationID("status")
+            TableColumn("Host") { Text($0.host).font(Self.rowFont).lineLimit(1) }
+                .width(min: 100, ideal: 170, max: 260)
+                .customizationID("host")
+            TableColumn("Path") { e in
+                Text(e.path).font(Self.rowFont).lineLimit(1).truncationMode(.middle).help(e.path)
+            }
+            .customizationID("path")
+            TableColumn("Duration") { DurationCell(millis: $0.durationMillis) }
+                .width(min: 60, ideal: 72, max: 90)
+                .customizationID("duration")
+                .alignment(.trailing)
+            TableColumn("Size") { SizeCell(entry: $0) }
+                .width(min: 56, ideal: 70, max: 90)
+                .customizationID("size")
+                .alignment(.trailing)
+            TableColumn("Time") { e in
+                Text(Self.time(e.startMillis))
+                    .font(Self.rowFont)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+            .width(min: 96, ideal: 104, max: 120)
+            .customizationID("time")
+            .alignment(.trailing)
+        }
+        .onAppear {
+            guard let data = storedColumnLayout.data(using: .utf8),
+                  let saved = try? JSONDecoder().decode(TableColumnCustomization<NetworkEntry>.self, from: data)
+            else { return }
+            columnLayout = saved
+        }
+        .onChange(of: columnLayout) { _, layout in
+            guard let data = try? JSONEncoder().encode(layout),
+                  let text = String(data: data, encoding: .utf8)
+            else { return }
+            storedColumnLayout = text
         }
         .contextMenu(forSelectionType: NetworkEntry.ID.self) { ids in
             if let id = ids.first, let e = vm.entries.first(where: { $0.id == id }) {
@@ -280,9 +309,15 @@ struct NetworkView: View {
         }
     }
 
+    /// The table's single row font.
+    static let rowFont = Font.system(size: 12, design: .monospaced)
+
     static func durationColor(_ ms: Int?) -> Color {
-        guard let ms else { return .secondary }
-        return ms < 100 ? .green : ms < 500 ? .orange : .red
+        switch NetworkEntry.DurationTier(millis: ms) {
+        case .normal: .secondary
+        case .slow: .orange
+        case .verySlow: .red
+        }
     }
 
     /// The reported (real) size when the SDK sent one; otherwise the
@@ -300,6 +335,41 @@ struct NetworkView: View {
     static func time(_ ms: UInt64) -> String {
         Date(timeIntervalSince1970: Double(ms) / 1000)
             .formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute().second().secondFraction(.fractional(3)))
+    }
+}
+
+/// `512 ms`, right-aligned; orange from 1 s, red from 3 s, white on a
+/// selected row.
+private struct DurationCell: View {
+    let millis: Int?
+    @Environment(\.backgroundProminence) private var prominence
+
+    var body: some View {
+        Text(millis.map { "\($0) ms" } ?? "—")
+            .font(NetworkView.rowFont)
+            .foregroundStyle(prominence == .increased ? .white : NetworkView.durationColor(millis))
+            .frame(maxWidth: .infinity, alignment: .trailing)
+    }
+}
+
+/// The reported size when the SDK sent one (exact, no "+"), else the
+/// captured bytes. Content-Length is never used here — compressed, it would
+/// read as a wrong body size. Orange from 1 MB or on a cut body.
+private struct SizeCell: View {
+    let entry: NetworkEntry
+    @Environment(\.backgroundProminence) private var prominence
+
+    var body: some View {
+        let text = Text(NetworkView.size(entry))
+            .font(NetworkView.rowFont)
+            .foregroundStyle(prominence == .increased ? .white
+                             : entry.isTableSizeWarning ? .orange : .secondary)
+            .frame(maxWidth: .infinity, alignment: .trailing)
+        if entry.isResponseBodyTruncated && entry.responseBodySize == nil {
+            text.help(NetworkView.sizeHelp(entry))
+        } else {
+            text
+        }
     }
 }
 
@@ -341,6 +411,8 @@ extension NetworkEntry.StatusClass {
 struct Pill: View {
     let text: String
     let tint: Color
+    /// Keeps a column of pills one width (GET/POST/PUT), text centred.
+    var minWidth: CGFloat?
     @Environment(\.colorScheme) private var scheme
     /// `.increased` inside a selected table row (blue background).
     @Environment(\.backgroundProminence) private var prominence
@@ -352,6 +424,7 @@ struct Pill: View {
             .lineLimit(1)
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
+            .frame(minWidth: minWidth)
             .background(fill, in: RoundedRectangle(cornerRadius: 4))
     }
 
@@ -403,25 +476,20 @@ private struct NetworkChip: View {
 struct MethodBadge: View {
     let method: String
 
-    var body: some View { Pill(text: method, tint: Self.tint(method)) }
+    var body: some View { Pill(text: method, tint: Self.tint(method), minWidth: 44) }
 
+    /// One calm colour; only the destructive verb stands out.
     static func tint(_ method: String) -> Color {
-        switch method {
-        case "GET": .blue
-        case "POST": .green
-        case "PUT": .orange
-        case "PATCH": .purple
-        case "DELETE": .red
-        default: .gray
-        }
+        method == "DELETE" ? .red : .blue
     }
 }
 
 struct StatusBadge: View {
     let entry: NetworkEntry
+    static let minWidth: CGFloat = 34
 
     var body: some View {
-        Pill(text: entry.status.map(String.init) ?? "—", tint: entry.statusClass.color)
+        Pill(text: entry.status.map(String.init) ?? "—", tint: entry.statusClass.color, minWidth: Self.minWidth)
     }
 }
 
