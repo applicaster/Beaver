@@ -42,9 +42,14 @@ or a release):
    the calls it made.
 5. Open the **Agent** toolbar button: every call is listed; the badge counted
    them while the panel was closed.
-6. Turn **Agent Access (MCP)** off in the app menu: the `curl` above now fails
+6. With another app in front, ask the agent: "in Beaver, show the failed
+   requests — don't bring it forward". Beaver's Network tab changes while
+   the other app stays in front. Then "show me": Beaver comes forward.
+7. In the **Agent** panel, click a row's link (**Session #…**,
+   **Request #…**): the popover closes and Beaver shows it.
+8. Turn **Agent Access (MCP)** off in the app menu: the `curl` above now fails
    to connect.
-7. Report problems with the Beaver version (Beaver → About) and the Agent
+9. Report problems with the Beaver version (Beaver → About) and the Agent
    panel's **Copy** output.
 
 ## Tools

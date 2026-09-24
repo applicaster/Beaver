@@ -522,12 +522,18 @@ An MCP server inside the app lets AI agents read what Beaver collected
 
     MCP client ──HTTP POST 127.0.0.1:9081/mcp──► MCPHTTPListener (NWListener)
         ► MCPServer (JSON-RPC, stateless) ► BeaverTools (MCPTool values)
-        ► LogStore actor + AgentUI (read-only view of AppEnvironment)
+        ► LogStore actor + AgentUI (AppEnvironment: read the window state, show(UIChange))
         ► every call journaled to agent_activity ► Agent panel
 
 `AgentAccess` is the only entry point the app uses. All of it except the
 `AgentUI` conformance and the panel lives in BeaverCore and is covered by
 `swift test`.
+
+The window state an agent can set (`UIState`: tab, session, filters,
+storage layer and search, selection) lives in `AppEnvironment`;
+`UIStateSync` on `MainWindow` keeps the per-session view models equal to
+it both ways. `AppEnvironment.reveal()` is the only code that takes focus
+(D54).
 
 ---
 

@@ -2161,9 +2161,21 @@ won't decode, and the feed starts unfiltered once.
   tools.
 - **To change:** the `AgentUI` protocol is the boundary; new UI tools
   add members to it.
-- **Implemented:** from PR 3 (not in PR 1) — `AgentUI` in PR 1 is
-  read-only (`snapshot()`); the `ui_show` members this decision
-  describes don't exist yet.
+- **Implemented (PR 3):** `UIState` (BeaverCore) is the window state an
+  agent reads and sets; `AppEnvironment` holds its fields
+  (`selectedTab`, `viewingSessionId`, `activeFilter`, `networkFilter`,
+  `storageLayer`, `storageSearch`, `selectedEventId`,
+  `selectedNetworkId`) and applies `AgentUI.show(UIChange)`.
+  `reveal()` is a method on `AppEnvironment`, not a counter, and the
+  only code that activates Beaver. The view models keep their own
+  properties: they start from env, and `UIStateSync` (a modifier on
+  `MainWindow`) keeps both sides equal — env → models for an agent,
+  models → env for the person — as `activeFilter` already did (D26).
+  Two selection fields, not one, because the Log feed and Network each
+  keep theirs. A row hidden by a filter fails for an agent with the call
+  that shows it; `filter: {}` shows every event, including cleared ones.
+  `BeaverUITests/AgentFocusUITests` checks that nothing takes focus
+  without `reveal: true`.
 
 ---
 
@@ -2252,6 +2264,13 @@ won't decode, and the feed starts unfiltered once.
   destructive calls, `attention` notes, `journal_note` and the macOS
   notification (M28) are **from PR 2/3 (not in PR 1)** — PR 1 has no
   destructive tools and no `journal_note`.
+  **PR 3:** entries link to what they point at. Links are
+  `[AgentLink]` in `links_json`, JSON `[{"eventId":…}]` — the shape
+  `journal_note(links:)` takes — and a row without stored links links to
+  its `session_id`. A click runs `UITools.open`, the `ui_show` path, in
+  context (a hiding filter is cleared, like Show in Context), and is not
+  journaled. PR 2's toast "Show" and notification click use the same
+  entry, `AppEnvironment.open(_:reveal: true)`.
 
 ---
 
