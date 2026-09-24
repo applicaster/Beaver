@@ -43,7 +43,24 @@ final class NetworkViewModel {
     /// The table's column sort; empty keeps arrival order. In memory
     /// only: a `KeyPathComparator` isn't Codable for `@AppStorage`.
     var sortOrder: [KeyPathComparator<NetworkEntry>] = [] {
-        didSet { if sortOrder != oldValue { recompute() } }
+        didSet {
+            guard sortOrder != oldValue else { return }
+            // New rows land anywhere in a sorted table: no tail to follow.
+            isFollowing = sortOrder.isEmpty
+            recompute()
+        }
+    }
+
+    /// Follow the tail: while the table sits at the bottom, new requests
+    /// keep it there. Scrolling up stops it and `unseenCount` counts the
+    /// rows that arrived since, for the "N new ↓" pill. Off while sorted.
+    var isFollowing = true { didSet { if isFollowing { unseenCount = 0 } } }
+    private(set) var unseenCount = 0
+
+    /// A user scroll (not a programmatic one) ended `atBottom` or not.
+    func userScrolled(atBottom: Bool) {
+        guard sortOrder.isEmpty, atBottom != isFollowing else { return }
+        isFollowing = atBottom
     }
 
     /// What the table shows (filtered, then sorted), and its results bar. Stored, not computed:
@@ -122,6 +139,7 @@ final class NetworkViewModel {
         entries = []
         recompute()
         selection = nil
+        unseenCount = 0
     }
 
     func togglePause() {
@@ -159,6 +177,7 @@ final class NetworkViewModel {
         maxLoadedId = max(maxLoadedId, newOnes.map(\.id).max() ?? 0)
         let shown = newOnes.filter(isShown)
         guard !shown.isEmpty else { return }
+        if !isFollowing && sortOrder.isEmpty { unseenCount += shown.count }
         filtered = sortOrder.isEmpty ? filtered + shown : NetworkEntry.sorted(filtered + shown, using: sortOrder)
         stats = NetworkStats(filtered)
     }
