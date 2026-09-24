@@ -55,6 +55,14 @@ public actor Watches {
 
     func setTask(_ task: Task<Void, Never>, for name: String) { tasks[name] = task }
 
+    /// commands_send's disconnect watcher: one at a time, the latest command wins.
+    private var disconnectWatcher: Task<Void, Never>?
+
+    func setDisconnectWatcher(_ task: Task<Void, Never>) {
+        disconnectWatcher?.cancel()
+        disconnectWatcher = task
+    }
+
     /// `false` when the watch is gone, was replaced (a different
     /// `startedAt` — the caller's stale copy lost the race to `add`), or
     /// already fired.
@@ -90,19 +98,6 @@ extension ToolContext {
             segments += later.map(\.id).sorted().map { (sessionId: $0, afterId: Int64(0)) }
         }
         return segments
-    }
-
-    /// Matches and the first one — all a notify check needs.
-    func matches(of w: Watches.Watch) async throws -> (total: Int, first: EventRecord?) {
-        var total = 0
-        var first: EventRecord?
-        for s in try await segments(of: w) {
-            let page = try await store.eventPage(sessionId: s.sessionId, filter: w.filter, afterId: s.afterId,
-                                                 limit: 1, newestFirst: false)
-            total += page.total
-            if first == nil { first = page.events.first }
-        }
-        return (total, first)
     }
 
     func status(of w: Watches.Watch) async throws -> WatchStatus {
@@ -149,27 +144,51 @@ extension ToolContext {
     /// Polls until the watch reaches its count, then tells the person: an
     /// attention note in the journal and a notification (design §5.10).
     /// Beaver can't wake the agent (M2); it sees it in watch_status.
+    ///
+    /// Incremental, since it shares the store's queue with live ingest for
+    /// hours: each poll counts only the matches after a per-segment cursor,
+    /// and a following watch picks up the device's new live session from the
+    /// UI snapshot, not the session list.
     func startNotifyTask(for w: Watches.Watch) -> Task<Void, Never> {
         Task { [self] in
             guard let threshold = w.notifyAt else { return }
+            var segments = [WaitSegment(sessionId: w.sessionId, afterId: w.startId)]
+            var total = 0
+            var first: EventRecord?
             while !Task.isCancelled {
                 try? await Task.sleep(for: Self.watchPollInterval)
                 guard let current = await watches.get(w.name), current.startedAt == w.startedAt,
                       current.firedAt == nil else { return }
-                guard let m = try? await matches(of: current), m.total >= threshold else { continue }
-                // `matches(of:)` awaited the store; a replacing watch_start
+                if w.follows, let live = await ui.snapshot().liveSessionId, live > w.sessionId,
+                   !segments.contains(where: { $0.sessionId == live }) {
+                    segments.append(WaitSegment(sessionId: live, afterId: 0))
+                }
+                for (i, s) in segments.enumerated() {
+                    // The newest match after the cursor, and how many there are.
+                    guard let page = try? await store.eventPage(sessionId: s.sessionId, filter: w.filter,
+                                                                afterId: s.afterId, limit: 1, newestFirst: true),
+                          let newest = page.events.first else { continue }
+                    if first == nil {
+                        first = try? await store.eventPage(sessionId: s.sessionId, filter: w.filter,
+                                                           afterId: s.afterId, limit: 1, newestFirst: false).events.first
+                    }
+                    total += page.total
+                    segments[i] = WaitSegment(sessionId: s.sessionId, afterId: newest.id)
+                }
+                guard total >= threshold else { continue }
+                // The count awaited the store; a replacing watch_start
                 // (or watch_stop) could have landed while it did. `cancel()`
                 // doesn't interrupt that await, so re-check both explicitly
                 // before publishing what could otherwise be the old watch's
                 // count under the new watch's name.
                 guard !Task.isCancelled, await watches.markFired(w.name, startedAt: w.startedAt, at: now()) else { return }
-                let text = "Watch “\(w.name)”: \(m.total) match\(m.total == 1 ? "" : "es") (\(w.filterText))."
-                let links = m.first.map { [JournalLink.event($0.id)] } ?? []
+                let text = "Watch “\(w.name)”: \(total) match\(total == 1 ? "" : "es") (\(w.filterText))."
+                let links = first.map { [JournalLink.event($0.id)] } ?? []
                 let outcome = await ui.notify(AgentNote(text: text, links: links))
                 await AgentJournal(store: store).post(
                     .note, text, tool: "watch_start", level: AgentActivity.attention, links: links,
                     notice: outcome.notified ? nil : "Not notified: \(outcome.reason ?? "")",
-                    sessionId: m.first?.sessionId)
+                    sessionId: first?.sessionId)
                 return
             }
         }

@@ -2369,7 +2369,7 @@ won't decode, and the feed starts unfiltered once.
   `expectDisconnect: true` (needs a list of disconnecting commands
   nobody has); leave it to the agent.
 - **To change:** the follow logic lives in
-  `ToolContext.resolveSession` and the wait helper shared by
+  `ToolContext.waitForEvents` (`DeviceWait.swift`), the wait shared by
   `logs_wait` and `commands_send`.
 - **Implemented:** PR 2. `ToolContext.waitForEvents` (in
   `DeviceWait.swift`) is the wait shared by `logs_wait` and
@@ -2464,8 +2464,12 @@ won't decode, and the feed starts unfiltered once.
   is `{ name, filter, follows, sessionId, startId, startedAt, notifyAt,
   firedAt }`. A following watch counts its start session after
   `startId` plus every later live session (session ids grow), computed
-  when asked. `notify` polls every 500 ms and fires once; turning Agent
-  Access off stops every watch.
+  when asked. `notify` checks every 500 ms and fires once; each check
+  counts only the matches after a per-segment cursor (the newest match
+  it has counted) and adds them to a running total, and a following
+  watch adds the device's new live session when the UI reports one — so
+  a watch left running for hours costs the ingest queue next to
+  nothing. Turning Agent Access off stops every watch.
 
 ---
 

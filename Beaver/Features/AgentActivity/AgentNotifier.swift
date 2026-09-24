@@ -50,6 +50,13 @@ final class AgentNotifier {
         muted ? .muted : authorization
     }
 
+    /// The Agent panel's strip. After a failed request macOS never showed a
+    /// prompt, so asking again is pointless: it reads like `.denied` and
+    /// sends the person to System Settings.
+    var strip: AgentNotifications.Strip? {
+        AgentNotifications.strip(for: state == .notDetermined && lastRequestError != nil ? .denied : state)
+    }
+
     @ObservationIgnored private var throttle = NotificationThrottle()
     @ObservationIgnored private var summaryTask: Task<Void, Never>?
     /// One in-flight permission request at a time; the latest note that

@@ -36,7 +36,7 @@ enum SessionTools {
         }
         guard let r = try await SessionImport.run(data, label: url.deletingPathExtension().lastPathComponent,
                                                   store: ctx.store) else {
-            throw ToolError("\(url.lastPathComponent) isn't a session file Beaver can open: expected a Beaver or zapp-support JSON export, or a HAR file.")
+            throw ToolError("\(url.lastPathComponent) isn't a session file Beaver can open: expected a Beaver or zapp-support JSON export, or a HAR file. Example: sessions_import(path: \"~/Downloads/session.json\"); beaver_guide(topic: \"files\") describes the formats.")
         }
         let id = r.session.id
         return ToolResult(
@@ -82,7 +82,9 @@ enum SessionTools {
                 throw ToolError("filter works with format: \"json\" only; a HAR holds every request. Example: sessions_export(path: \"~/Desktop/requests.har\", format: \"har\").")
             }
             let entries = try await ctx.store.networkEntries(sessionId: s.id)
-            guard !entries.isEmpty else { throw ToolError("Session \(s.label) has no network requests to export as HAR.") }
+            guard !entries.isEmpty else {
+                throw ToolError("Session \(s.label) has no network requests to export as HAR. Export its logs as JSON instead. Example: sessions_export(sessionId: \(s.id), path: \"~/Desktop/session.json\", format: \"json\").")
+            }
             let version = await ctx.ui.snapshot().beaverVersion
             data = try HARExport.encode(entries, creatorVersion: version)
             counts["requests"] = JSON(entries.count)
@@ -131,6 +133,10 @@ enum SessionTools {
         case (let id?, false):
             guard let s = sessions.first(where: { $0.id == id }) else {
                 throw ToolError("No session #\(id). Example: sessions_list() shows the ids that exist.")
+            }
+            // Same rule as the Sessions list: the inbound writer is still using it.
+            if id == (await ctx.ui.snapshot().liveSessionId) {
+                throw ToolError("Session #\(id) is the live one; Beaver won't delete it while the device is connected. Ask the user to disconnect the app first, or pick another id: sessions_list().")
             }
             let events = try await ctx.store.eventCount(sessionId: id, filter: .none)
             try await ctx.store.deleteSession(id: id)

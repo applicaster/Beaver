@@ -518,7 +518,7 @@ These are deliberately deferred until first running build:
 ## 12a. Agent Access (MCP)
 
 An MCP server inside the app lets AI agents read what Beaver collected
-(D43–D71, `Beaver/Resources/MCP.md`):
+(D43–D72, `Beaver/Resources/MCP.md`):
 
     MCP client ──HTTP POST 127.0.0.1:9081/mcp──► MCPHTTPListener (NWListener)
         ► MCPServer (JSON-RPC, stateless) ► BeaverTools (MCPTool values)

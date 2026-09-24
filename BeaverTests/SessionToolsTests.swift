@@ -156,4 +156,19 @@ struct SessionToolsTests {
         #expect(try await store.sessions().isEmpty)
         #expect(SessionTools.delete.kind == .destructive)
     }
+
+    @Test("Like the Sessions list, delete refuses the live session while the device is connected")
+    func deleteRefusesLive() async throws {
+        let store = try LogStore(source: .inMemory)
+        let live = try await store.createSession(source: .live)
+        let ctx = makeContext(store, fakeUI: FakeUI(value: HostSnapshot(deviceConnected: true, liveSessionId: live.id)))
+        do {
+            _ = try await SessionTools.delete.run(ToolArguments(["sessionId": JSON(live.id)]), ctx)
+            Issue.record("expected an error")
+        } catch let error as ToolError {
+            #expect(error.message.contains("is the live one"))
+            #expect(error.message.contains("sessions_list()"))
+        }
+        #expect(try await store.sessions().map(\.id) == [live.id])
+    }
 }

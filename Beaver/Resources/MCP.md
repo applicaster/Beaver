@@ -201,7 +201,8 @@ with `Next:` suggestions.
 3. `sessions_export(sessionId: <id>, path: "~/Desktop/errors-only.json", filter: {minLevel: "error"})`
    — the same file format, both ways. `format: "har"` writes the requests.
    An existing file is never replaced unless you pass `overwrite: true`.
-4. `sessions_delete(sessionId: <id>)` when the user asks to remove it;
+4. `sessions_delete(sessionId: <id>)` when the user asks to remove it
+   (not the live session while the device is connected);
    `sessions_delete(all: true)` removes every session.
 
 ### review-errors — go through the errors with the user

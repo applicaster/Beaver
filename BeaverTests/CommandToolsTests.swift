@@ -75,7 +75,7 @@ struct CommandToolsTests {
     func disconnectEntry() async throws {
         let (store, a, ui) = try await live()
         let ctx = makeContext(store, fakeUI: ui)
-        ctx.watchForDisconnect(after: "restart", sessionId: a.id, window: .seconds(3))
+        await ctx.watchForDisconnect(after: "restart", sessionId: a.id, window: .seconds(3))
         try await Task.sleep(for: .milliseconds(300))
         ui.update { $0.deviceConnected = false; $0.liveSessionId = nil }
         try await Task.sleep(for: .milliseconds(400))
@@ -89,5 +89,21 @@ struct CommandToolsTests {
         #expect(rows.count == 1)
         #expect(rows.first?.summary == "Device disconnected after \"restart\" → session #\(b.id)")
         #expect(rows.first?.sessionId == b.id)
+    }
+
+    @Test("Two quick commands before a drop make one entry, naming the latest command")
+    func disconnectEntryLatestWins() async throws {
+        let (store, a, ui) = try await live()
+        let ctx = makeContext(store, fakeUI: ui)
+        await ctx.watchForDisconnect(after: "prepare", sessionId: a.id, window: .seconds(3))
+        await ctx.watchForDisconnect(after: "restart", sessionId: a.id, window: .seconds(3))
+        try await Task.sleep(for: .milliseconds(300))
+        ui.update { $0.deviceConnected = false; $0.liveSessionId = nil }
+        try await Task.sleep(for: .milliseconds(400))
+        let b = try await store.createSession(source: .live)
+        ui.update { $0.deviceConnected = true; $0.liveSessionId = b.id }
+        try await Task.sleep(for: .milliseconds(1000))
+        let rows = try await store.agentActivity().filter { $0.kind == .system }
+        #expect(rows.map(\.summary) == ["Device disconnected after \"restart\" → session #\(b.id)"])
     }
 }

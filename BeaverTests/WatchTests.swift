@@ -74,6 +74,27 @@ struct WatchTests {
         #expect(byName["pinned"]?["total"] == 0)
     }
 
+    @Test("notify counts across the device's new session and links the first match")
+    func notifyFollows() async throws {
+        let (store, a, ui, ctx) = try await live()
+        _ = try await WatchTools.start.run(ToolArguments(["name": "errs", "filter": ["minLevel": "error"],
+                                                          "notify": ["atCount": 2]]), ctx)
+        try await seed(store, session: a.id, [(.error, "a", "", "before restart")])
+        let firstId = try #require(try await store.latestEventId(sessionId: a.id))
+        try await Task.sleep(for: .milliseconds(700))
+        let b = try await store.createSession(source: .live)
+        ui.update { $0.liveSessionId = b.id }
+        try await seed(store, session: b.id, [(.info, "a", "", "noise"), (.error, "a", "", "after restart")])
+        var notes: [AgentActivity] = []
+        for _ in 0..<50 where notes.isEmpty {
+            try await Task.sleep(for: .milliseconds(100))
+            notes = try await store.agentActivity().filter(\.isAttention)
+        }
+        #expect(notes.map(\.summary).first?.hasPrefix("Watch “errs”: 2 matches") == true)
+        #expect(notes.first?.links == [.event(firstId)])
+        #expect(ui.notes.count == 1)
+    }
+
     @Test("watch_stop returns the final status and forgets the watch; missing names are not errors")
     func stop() async throws {
         let (_, _, _, ctx) = try await live()

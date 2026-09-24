@@ -36,7 +36,7 @@ enum CommandTools {
 
         await ctx.device.send(command: command)
         await ctx.ui.didSendCommand(command)
-        ctx.watchForDisconnect(after: command, sessionId: session.id)
+        await ctx.watchForDisconnect(after: command, sessionId: session.id)
 
         guard collect > 0 else {
             return ToolResult(

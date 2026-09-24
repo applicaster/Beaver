@@ -30,12 +30,18 @@ public enum SessionImport {
         }
         // A new "imported" session per D7 — never the live one.
         let session = try await store.createSession(source: .imported, clientLabel: label)
-        try await store.appendBulk(imported.events, to: session.id)
-        for (namespace, json) in imported.storage {
-            try await store.recordStorageSnapshot(sessionId: session.id, namespace: namespace, dataJSON: json)
-        }
-        for capture in imported.network {
-            try await store.recordNetworkEntry(capture, sessionId: session.id)
+        // A write that fails (disk full…) takes the half-filled session with it.
+        do {
+            try await store.appendBulk(imported.events, to: session.id)
+            for (namespace, json) in imported.storage {
+                try await store.recordStorageSnapshot(sessionId: session.id, namespace: namespace, dataJSON: json)
+            }
+            for capture in imported.network {
+                try await store.recordNetworkEntry(capture, sessionId: session.id)
+            }
+        } catch {
+            try? await store.deleteSession(id: session.id)
+            throw error
         }
         return Result(session: session, events: imported.events.count,
                       storageLayers: imported.storage.count, requests: imported.network.count)

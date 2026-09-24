@@ -132,23 +132,28 @@ extension ToolContext {
     /// Design §7.2: when the device drops within `window` after an agent's
     /// command, one system entry says so — written when it is back (with
     /// its new session) or when it hasn't come back within another `window`.
-    func watchForDisconnect(after command: String, sessionId: Int64, window: Duration = .seconds(30)) {
-        Task { [self] in
+    /// Replaces any earlier command's watcher, so N commands before a restart
+    /// write one entry, naming the last.
+    func watchForDisconnect(after command: String, sessionId: Int64, window: Duration = .seconds(30)) async {
+        await watches.setDisconnectWatcher(Task { [self] in
             let dropDeadline = ContinuousClock.now + window
             while ContinuousClock.now < dropDeadline {
                 try? await Task.sleep(for: Self.pollInterval)
+                guard !Task.isCancelled else { return }
                 guard await ui.snapshot().liveSessionId != sessionId else { continue }
                 let backDeadline = ContinuousClock.now + window
                 var back = await ui.snapshot().liveSessionId
                 while back == nil, ContinuousClock.now < backDeadline {
                     try? await Task.sleep(for: Self.pollInterval)
+                    guard !Task.isCancelled else { return }
                     back = await ui.snapshot().liveSessionId
                 }
+                guard !Task.isCancelled else { return }
                 let outcome = back.map { " → session #\($0)" } ?? "; not back after \(window.components.seconds) s"
                 await AgentJournal(store: store).post(.system, "Device disconnected after \"\(command)\"\(outcome)",
                                                       sessionId: back ?? sessionId)
                 return
             }
-        }
+        })
     }
 }

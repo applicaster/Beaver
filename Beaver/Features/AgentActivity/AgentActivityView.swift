@@ -198,7 +198,7 @@ private struct AgentActivityRow: View {
             if !entry.isError, let notice = entry.error {
                 HStack(spacing: 6) {
                     Label(notice, systemImage: "bell.slash").font(.caption).foregroundStyle(.orange)
-                    if let strip = AgentNotifications.strip(for: AgentNotifier.shared.state) {
+                    if let strip = AgentNotifier.shared.strip {
                         Button(strip.button) { AgentNotifier.shared.perform(strip.action) }
                             .controlSize(.small)
                     }
@@ -226,11 +226,7 @@ private struct AgentActivityRow: View {
 private struct NotificationStrip: View {
     var body: some View {
         let notifier = AgentNotifier.shared
-        if let strip = AgentNotifications.strip(for: notifier.state) {
-            // A failed request (round 2 finding): macOS never showed a
-            // prompt, so the button stops offering to ask again and goes
-            // straight to System Settings instead.
-            let failed = notifier.lastRequestError != nil
+        if let strip = notifier.strip {
             VStack(alignment: .leading, spacing: 6) {
                 Label(strip.title, systemImage: "bell.slash")
                     .font(.callout.weight(.medium))
@@ -247,9 +243,7 @@ private struct NotificationStrip: View {
                 }
                 HStack {
                     Spacer()
-                    Button(failed ? "Open System Settings" : strip.button) {
-                        notifier.perform(failed ? .openSettings : strip.action)
-                    }
+                    Button(strip.button) { notifier.perform(strip.action) }
                 }
             }
             .padding(10)
