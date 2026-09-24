@@ -162,4 +162,42 @@ struct LogToolsTests {
         let store = try LogStore(source: .inMemory)
         await #expect(throws: ToolError.self) { try await LogTools.get.run(ToolArguments(), makeContext(store)) }
     }
+
+    @Test("Wait returns as soon as a match arrives")
+    func waitArrives() async throws {
+        let store = try LogStore(source: .inMemory)
+        let s = try await store.createSession(source: .live)
+        try await seed(store, session: s.id, [(.info, "a", "", "before")])
+        let ctx = makeContext(store, ui: HostSnapshot(liveSessionId: s.id))
+        Task {
+            try await Task.sleep(for: .milliseconds(300))
+            try await seed(store, session: s.id, [(.info, "a", "", "noise"), (.error, "a", "", "App started")])
+        }
+        let started = ContinuousClock.now
+        let r = try await LogTools.wait.run(ToolArguments(["filter": ["search": "started"], "timeoutMs": 5000]), ctx)
+        #expect(r.structured["timedOut"] == false)
+        #expect(r.structured["events"]?.array?.count == 1)
+        #expect(ContinuousClock.now - started < .seconds(3))
+    }
+
+    @Test("Wait times out with a cursor to resume from")
+    func waitTimesOut() async throws {
+        let store = try LogStore(source: .inMemory)
+        let s = try await store.createSession(source: .live)
+        try await seed(store, session: s.id, [(.info, "a", "", "x")])
+        let latest = try #require(try await store.latestEventId(sessionId: s.id))
+        let r = try await LogTools.wait.run(ToolArguments(["timeoutMs": 300]), makeContext(store))
+        #expect(r.structured["timedOut"] == true)
+        #expect(r.structured["afterId"]?.int64 == latest)
+        #expect(r.next.first?.contains("afterId: \(latest)") == true)
+    }
+
+    @Test("Wait clamps the timeout to 60 s")
+    func waitClamp() async throws {
+        let store = try LogStore(source: .inMemory)
+        _ = try await store.createSession(source: .live)
+        let r = try await LogTools.wait.run(ToolArguments(["timeoutMs": 0]), makeContext(store))
+        #expect(r.structured["timeoutMs"] == 0)
+        #expect(LogTools.maxWaitMillis == 60_000)
+    }
 }

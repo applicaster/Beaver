@@ -6,7 +6,9 @@
 import Foundation
 
 enum LogTools {
-    static var all: [MCPTool] { [facets, query, get] }
+    static var all: [MCPTool] { [facets, query, get, wait] }
+
+    static let maxWaitMillis = 60_000
 
     static let facets = MCPTool(
         name: "logs_facets",
@@ -170,6 +172,61 @@ enum LogTools {
             structured: ["events": .array(rows), "missing": .array(missing.map { JSON($0) })],
             next: events.last.map { ["logs_query(afterId: \($0.id), order: \"oldest\") for what came after"] } ?? ["logs_query()"],
             sessionId: events.first?.sessionId
+        )
+    }
+
+    static let wait = MCPTool(
+        name: "logs_wait",
+        title: "Wait for logs",
+        description: "Use after you or the user do something on the device, to wait until a matching event is logged. Returns as soon as one arrives, or when timeoutMs passes (default 15000, max 60000). Pass afterId from an earlier result; without it, only events from now on count. For minutes or longer, ask the user to tell you when to look again.",
+        kind: .read,
+        inputSchema: ToolSchema.object([
+            "sessionId": ToolSchema.sessionId,
+            "filter": ToolSchema.filter,
+            "afterId": ToolSchema.integer("Only events after this id. Default: the latest event now."),
+            "timeoutMs": ToolSchema.integer("How long to wait. Default 15000, max 60000."),
+            "limit": ToolSchema.integer("Most events to return. Default 50, max 500."),
+        ])
+    ) { args, ctx in
+        let s = try await ctx.resolveSession(args)
+        let f = try await ctx.resolveFilter(args["filter"], sessionId: s.id)
+        let requested = try args.int("timeoutMs") ?? 15_000
+        let timeout = min(maxWaitMillis, max(0, requested))
+        let limit = try args.limit(default: 50, max: 500)
+        let afterIdArg = try args.int64("afterId")
+        let start: Int64
+        if let afterIdArg {
+            start = afterIdArg
+        } else {
+            start = try await ctx.store.latestEventId(sessionId: s.id) ?? 0
+        }
+        let deadline = ContinuousClock.now + .milliseconds(timeout)
+
+        while true {
+            let page = try await ctx.store.eventPage(sessionId: s.id, filter: f.filter, afterId: start,
+                                                     limit: limit, newestFirst: false)
+            if let last = page.events.last {
+                return ToolResult(
+                    summary: "\(page.total) new event(s) matched in session \(s.label) after #\(start) (\(ToolText.describe(f.filter))).",
+                    body: page.events.map(ToolText.eventLine).joined(separator: "\n"),
+                    structured: ["sessionId": JSON(s.id), "timedOut": false, "afterId": JSON(start),
+                                 "timeoutMs": JSON(timeout), "lastId": JSON(last.id),
+                                 "events": .array(page.events.map { ["id": JSON($0.id), "line": .string(ToolText.eventLine($0))] })],
+                    next: ["logs_get(ids: [\(page.events[0].id)])", "logs_wait(afterId: \(last.id), …) for the next one"],
+                    sessionId: s.id
+                )
+            }
+            if ContinuousClock.now >= deadline || Task.isCancelled { break }
+            // ponytail: polls the store (appends land in 50 ms batches anyway);
+            // switch to LogStore.changes() if 250 ms latency ever matters.
+            try? await Task.sleep(for: .milliseconds(250))
+        }
+        return ToolResult(
+            summary: "Nothing matched in \(timeout / 1000) s (session \(s.label), after #\(start), \(ToolText.describe(f.filter))).",
+            structured: ["sessionId": JSON(s.id), "timedOut": true, "afterId": JSON(start),
+                         "timeoutMs": JSON(timeout), "events": []],
+            next: ["logs_wait(afterId: \(start), …) to keep waiting", "logs_query(afterId: \(start)) to see what did arrive"],
+            sessionId: s.id
         )
     }
 }
