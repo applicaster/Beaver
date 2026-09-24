@@ -47,7 +47,12 @@ struct MCPDocTests {
         #expect(list.body.contains("overview"))
         let one = try await GuideTool.tool.run(ToolArguments(["topic": "investigate"]), ctx)
         #expect(one.body.contains("logs_facets"))
-        await #expect(throws: ToolError.self) { try await GuideTool.tool.run(ToolArguments(["topic": "nope"]), ctx) }
+        do {
+            _ = try await GuideTool.tool.run(ToolArguments(["topic": "nope"]), ctx)
+            #expect(Bool(false), "Expected ToolError")
+        } catch let error as ToolError {
+            #expect(error.message.contains("Example: beaver_guide(topic:"))
+        }
     }
 
     @Test("Every tool description starts with Use")

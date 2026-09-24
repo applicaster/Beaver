@@ -41,6 +41,9 @@ enum GuideTool {
         inputSchema: ToolSchema.object(["topic": ToolSchema.string("A topic from the list; omit for the list.")])
     ) { args, _ in
         let topics = AgentGuide.topics(in: AgentGuide.markdown)
+        guard !topics.isEmpty else {
+            throw ToolError("Beaver's guide is missing from this build. Report it with the Beaver version; meanwhile call beaver_status().")
+        }
         guard let wanted = try args.string("topic")?.lowercased() else {
             return ToolResult(
                 summary: "\(topics.count) topics.",
@@ -50,7 +53,8 @@ enum GuideTool {
             )
         }
         guard let topic = topics.first(where: { $0.key == wanted }) else {
-            throw ToolError("No topic \"\(wanted)\". Topics: \(topics.map(\.key).joined(separator: ", ")).")
+            let exampleKey = topics.first(where: { $0.key == "overview" })?.key ?? topics.first?.key ?? "overview"
+            throw ToolError("No topic \"\(wanted)\". Example: beaver_guide(topic: \"\(exampleKey)\"). Topics: \(topics.map(\.key).joined(separator: ", ")).")
         }
         return ToolResult(summary: "Recipe: \(topic.heading).", body: topic.body,
                           structured: ["topic": .string(topic.key), "markdown": .string(topic.body)],
