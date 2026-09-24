@@ -111,4 +111,37 @@ public actor AgentAccess {
     public static func setupCommand(port: UInt16) -> String {
         "claude mcp add --scope user --transport http beaver http://127.0.0.1:\(port)/mcp"
     }
+
+    /// How to hand Beaver to an agent, shown behind the Agent panel's
+    /// "Connect agent" button. README.md → "Agent Access (MCP)" carries the
+    /// same steps for the default port.
+    public static func setupInstructions(port: UInt16) -> String {
+        let url = "http://127.0.0.1:\(port)/mcp"
+        return """
+        Connect an AI agent to Beaver
+
+        Beaver runs an MCP server on this Mac at \(url) (loopback only). \
+        Keep Beaver open with Agent Access (MCP) turned on in the app menu.
+
+        1. Claude Code — run once in Terminal; it works in every project:
+           \(setupCommand(port: port))
+           Remove later with: claude mcp remove beaver
+
+        2. Cursor — add to ~/.cursor/mcp.json:
+           { "mcpServers": { "beaver": { "url": "\(url)" } } }
+
+        3. Any other MCP client — add a Streamable HTTP server at:
+           \(url)
+
+        Check it answers:
+           curl -s -X POST \(url) -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+
+        First prompt to try:
+           Use the beaver MCP server. Call beaver_status, then tell me what the app \
+        logged in the last 10 minutes, any errors, and any failing network requests.
+
+        The agent reads logs, network requests, storage and the app's commands; \
+        if unsure it calls beaver_guide. Everything it does shows up in this panel.
+        """
+    }
 }

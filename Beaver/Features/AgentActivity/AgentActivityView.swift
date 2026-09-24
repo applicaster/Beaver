@@ -4,55 +4,122 @@
 //
 //  The Agent panel (design §7.2): what an agent did through MCP.
 
+import AppKit
 import SwiftUI
 
 struct AgentActivityView: View {
     @Bindable var model: AgentActivityViewModel
     @Environment(ToastCenter.self) private var toasts
+    @Environment(AppEnvironment.self) private var env
+    @State private var showingSetup = false
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Text("Agent activity").font(.headline)
-                Spacer()
-                Toggle("Hide reads", isOn: $model.hideReads)
-                    .toggleStyle(.checkbox)
-                    .help("Show only calls that changed something, and failed calls")
-                Button("Copy") {
-                    model.copy()
-                    toasts.success("Copied agent activity")
-                }
-                .disabled(model.visible.isEmpty)
-                Button("Clear", role: .destructive) { model.clear() }
-                    .disabled(model.entries.isEmpty)
-            }
-            .padding(10)
-            Divider()
-            if model.visible.isEmpty && !model.entries.isEmpty {
-                // Everything is hidden by the toggle, not missing.
-                ContentUnavailableView {
-                    Label("Only reads so far", systemImage: "eye.slash")
-                } description: {
-                    Text("The agent has only read data — no changes and no failed calls.")
-                } actions: {
-                    Button("Show reads") { model.hideReads = false }
-                }
-                .frame(maxHeight: .infinity)
-            } else if model.visible.isEmpty {
-                ContentUnavailableView("No agent activity",
-                                       systemImage: "sparkles",
-                                       description: Text("Calls from an MCP client appear here. App menu → Copy MCP Setup Command to connect one."))
-                    .frame(maxHeight: .infinity)
+            if showingSetup {
+                setup
             } else {
-                List(model.visible) { entry in
-                    AgentActivityRow(entry: entry)
-                }
-                .listStyle(.plain)
+                activity
             }
         }
         // Fill the popover whatever the content, so the header stays at
         // the top when the list is empty.
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    // MARK: - Activity
+
+    @ViewBuilder
+    private var activity: some View {
+        HStack {
+            Text("Agent activity").font(.headline)
+            Spacer()
+            Button("Connect agent") { showingSetup = true }
+                .help("How to connect Claude Code, Cursor or another MCP client to Beaver")
+            Toggle("Hide reads", isOn: $model.hideReads)
+                .toggleStyle(.checkbox)
+                .help("Show only calls that changed something, and failed calls")
+            Button("Copy") {
+                model.copy()
+                toasts.success("Copied agent activity")
+            }
+            .disabled(model.visible.isEmpty)
+            Button("Clear", role: .destructive) { model.clear() }
+                .disabled(model.entries.isEmpty)
+        }
+        .padding(10)
+        Divider()
+        if model.visible.isEmpty && !model.entries.isEmpty {
+            // Everything is hidden by the toggle, not missing.
+            ContentUnavailableView {
+                Label("Only reads so far", systemImage: "eye.slash")
+            } description: {
+                Text("The agent has only read data — no changes and no failed calls.")
+            } actions: {
+                Button("Show reads") { model.hideReads = false }
+            }
+            .frame(maxHeight: .infinity)
+        } else if model.visible.isEmpty {
+            ContentUnavailableView {
+                Label("No agent activity", systemImage: "sparkles")
+            } description: {
+                Text("Calls from an MCP client appear here.")
+            } actions: {
+                Button("How to connect an agent") { showingSetup = true }
+            }
+            .frame(maxHeight: .infinity)
+        } else {
+            List(model.visible) { entry in
+                AgentActivityRow(entry: entry)
+            }
+            .listStyle(.plain)
+        }
+    }
+
+    // MARK: - Setup
+
+    private var port: UInt16 { env.agentAccessPort ?? AgentAccess.configuredPort() }
+
+    @ViewBuilder
+    private var setup: some View {
+        HStack {
+            Button {
+                showingSetup = false
+            } label: {
+                Label("Back", systemImage: "chevron.left")
+            }
+            Text("Connect an agent").font(.headline)
+            Spacer()
+            Button("Copy command") {
+                copy(AgentAccess.setupCommand(port: port))
+                toasts.success("Copied the Claude Code command")
+            }
+            Button("Copy instructions") {
+                copy(AgentAccess.setupInstructions(port: port))
+                toasts.success("Copied the setup instructions")
+            }
+        }
+        .padding(10)
+        Divider()
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                if env.agentAccessPort == nil {
+                    Label("Agent Access is off. Turn it on in the app menu → Agent Access (MCP).",
+                          systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                }
+                Text(AgentAccess.setupInstructions(port: port))
+                    .font(.system(.callout, design: .monospaced))
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func copy(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
     }
 }
 

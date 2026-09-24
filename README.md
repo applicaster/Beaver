@@ -34,6 +34,7 @@ source tree lives under `Beaver/`.
 | `PROTOCOL.md`       | Wire-protocol contract with the mobile SDK.                   |
 | `SESSION_FILE_FORMAT.md` | Export/import file shared with zapp-support (normative). |
 | `COMMAND_CATALOG.md`| Forward-looking spec for the SDK `cmdspec` command (D17).     |
+| `Beaver/Resources/MCP.md` | Agent Access (MCP): tools, recipes, testing without Xcode. |
 | `SCAFFOLD.md`       | One-time Xcode project setup steps.                           |
 
 ## Export / import files (shared with zapp-support)
@@ -54,6 +55,42 @@ either tool and we open them in either.
 - **Changing the format** takes a pair of PRs, one here and one in
   zapp-support, cross-linked; neither merges alone. See the spec's §1 and
   [`CLAUDE.md`](CLAUDE.md).
+
+## Agent Access (MCP)
+
+Beaver runs an MCP server so an AI agent on the same Mac can read everything
+Beaver collected from the connected app — sessions, logs, network requests,
+storage and the app's commands. It listens on `http://127.0.0.1:9081/mcp`
+(loopback only) while Beaver is open and **Agent Access (MCP)** is on in the
+app menu. Everything the agent does is listed behind the **Agent** toolbar
+button, which also has **Connect agent** with these steps for your port.
+
+1. **Claude Code** — run once in Terminal; it works in every project:
+   ```bash
+   claude mcp add --scope user --transport http beaver http://127.0.0.1:9081/mcp
+   ```
+   Remove later with `claude mcp remove beaver`.
+2. **Cursor** — add to `~/.cursor/mcp.json`:
+   ```json
+   { "mcpServers": { "beaver": { "url": "http://127.0.0.1:9081/mcp" } } }
+   ```
+3. **Any other MCP client** — add a Streamable HTTP server at
+   `http://127.0.0.1:9081/mcp`.
+
+Check it answers:
+
+```bash
+curl -s -X POST http://127.0.0.1:9081/mcp -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+```
+
+First prompt to try: *"Use the beaver MCP server. Call beaver_status, then tell
+me what the app logged in the last 10 minutes, any errors, and any failing
+network requests."*
+
+Port taken? `defaults write ~/Library/Preferences/com.applicaster.LoggerNext mcpPort -int 9082`,
+then toggle Agent Access off and on. Tools, recipes and the tester checklist:
+[`Beaver/Resources/MCP.md`](Beaver/Resources/MCP.md). What it can do, with full
+flows: [`plans/2026-09-23-mcp-capabilities.md`](plans/2026-09-23-mcp-capabilities.md).
 
 ## Quick start
 

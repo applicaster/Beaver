@@ -51,6 +51,17 @@ struct AgentAccessTests {
         #expect(AgentAccess.setupCommand(port: 9081) == "claude mcp add --scope user --transport http beaver http://127.0.0.1:9081/mcp")
     }
 
+    @Test("Setup instructions carry the real port, every client, a smoke test and a first prompt")
+    func setupInstructions() {
+        let text = AgentAccess.setupInstructions(port: 9091)
+        #expect(text.contains(AgentAccess.setupCommand(port: 9091)))
+        #expect(text.contains("http://127.0.0.1:9091/mcp"))
+        #expect(!text.contains("9081"))
+        #expect(text.contains("Cursor"))
+        #expect(text.contains("curl"))
+        #expect(text.contains("beaver_status"))
+    }
+
     @Test("Review focus: overlapping starts, then stop, leave nothing serving")
     func overlappingStartsThenStop() async throws {
         // Mirrors MCPHTTPListenerTests.overlappingStarts, one level up: two
