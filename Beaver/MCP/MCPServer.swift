@@ -91,7 +91,8 @@ public struct MCPServer: Sendable {
         do {
             let result = try await tool.run(arguments, context)
             await journal.record(tool: tool, client: client, result: result, error: nil)
-            return Self.content(result.text, structured: structured ? result.structured : nil, isError: false)
+            let structuredValue: JSON? = if structured { result.structured } else { nil }
+            return Self.content(result.text, structured: structuredValue, isError: false)
         } catch let error as ToolError {
             await journal.record(tool: tool, client: client, result: nil, error: error.message)
             return Self.content(error.message, structured: nil, isError: true)
