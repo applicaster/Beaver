@@ -125,13 +125,16 @@ dedicated message type. The desktop side identifies it by subsystem +
 message prefix:
 
 - **Level:** `info`
-- **Subsystem:** `DebugFeatures/ConsoleCommands/GeneralHandler`
+- **Subsystem:** `DebugFeatures/ConsoleCommands/GeneralHandler`. Some
+  builds log it as subsystem `ApplicasterSDK`, category
+  `ConsoleCommands` instead; Beaver accepts `ConsoleCommands` in
+  either field.
 - **Category:** empty
 - **Message:** `"Registered commands:\n<name1>\n<name2>\n…"` — a header
   line followed by one command name per line, no syntax, no
   descriptions.
 
-Beaver's parser drops the header line, trims each remaining line,
+Beaver's parser (`CommandHints.cmdListNames`) drops the header line, trims each remaining line,
 and feeds the names through `CommandHints.merge` to add Beaver's
 known syntax (`CommandRegistry`) where available. See `DECISIONS.md`
 D17 for the registry-as-scaffold rationale.

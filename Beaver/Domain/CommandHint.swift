@@ -31,6 +31,24 @@ public enum CommandHints {
     /// display rows. Names returned by the SDK that don't appear in
     /// the registry fall through as hints with nil syntax — the UI
     /// shows them at the bottom in a separate section.
+    /// Command names from the SDK's reply to `cmdlist`, or `nil` when
+    /// `event` isn't one. The reply is an ordinary log event,
+    /// `"Registered commands:\n<name>\n…"`. It is logged as subsystem
+    /// `DebugFeatures/ConsoleCommands/GeneralHandler` by current iOS SDKs,
+    /// but some builds log it as category `ConsoleCommands` under subsystem
+    /// `ApplicasterSDK` — the text is the reliable part.
+    public static func cmdListNames(in event: DecodedEvent) -> [String]? {
+        guard event.message.hasPrefix("Registered commands:"),
+              event.subsystem.contains("ConsoleCommands")
+                || event.category.contains("ConsoleCommands")
+        else { return nil }
+        return event.message
+            .split(separator: "\n", omittingEmptySubsequences: true)
+            .dropFirst()  // "Registered commands:"
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+    }
+
     public static func merge(sdkNames: [String]) -> [CommandHint] {
         sdkNames.map { name in
             let spec = CommandRegistry.entries[name]
