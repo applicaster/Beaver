@@ -8,6 +8,6 @@
 
 public enum BeaverTools {
     public static var all: [MCPTool] {
-        StatusTools.all + LogTools.all
+        StatusTools.all + LogTools.all + NetworkTools.all
     }
 }
