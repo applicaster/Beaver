@@ -383,28 +383,12 @@ This gives the SDK headroom to add new message types and fields without
 breaking Beaver, at the cost of Beaver not surfacing them until
 explicitly updated.
 
-### 7.1 Import compatibility (files, not frames)
+### 7.1 Export / import files
 
-Import (`EventJSON.decodeExport`, then `HARExport.decode`) opens, in
-this order:
-
-- **Beaver exports** — a bare array of events, or
-  `{"events": [...], "storage"?: {...}, "network"?: [...]}` with events
-  as objects or JSON strings. Unchanged since first written; what Beaver
-  writes is unchanged too.
-- **zapp-support log exports** — a bare `RawLogEntry[]`. Extra fields
-  (`id`, `emitterId`) are ignored.
-- **zapp-support storage exports** — a top-level object whose only keys
-  are `session` / `local` / `secure` (no `events`): the §4.2 `data`
-  shape, except that keys with no namespace sit under `"root"`. Those
-  are put back as `{key: {"undefined": value}}`, the SDK's own form.
-- **HAR 1.2** — Beaver's, zapp-support's, or a browser's; into Network.
-
-**Levels on import are lenient**, unlike the live decoder in §4.1.1:
-any case; `warn` → warning; `err` / `fatal` → error; `trace` / `""` →
-verbose; `0`–`4` as numbers or numeric strings. Any other value opens
-as `info` with the raw value kept in `context.originalLevel`, and a
-missing level opens as `info` — a line is never dropped over its level.
+Exported files are not frames; their format — what both Beaver and
+zapp-support write and must read — is specified in
+[`SESSION_FILE_FORMAT.md`](SESSION_FILE_FORMAT.md). Import is lenient where
+the live decoder (§4.1.1) is strict: a line is never dropped over its level.
 
 ---
 

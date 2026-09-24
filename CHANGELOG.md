@@ -37,6 +37,9 @@ When releasing:
   as info with the original kept in context as `originalLevel`, instead
   of being silently dropped. zapp-support HAR files already opened in
   Network. Every Beaver file opens exactly as before.
+- **Import never drops a line for a missing field.** A line without a
+  subsystem opens as "Unknown", without a message shows the whole line, and
+  without a timestamp gets the import time — the same as zapp-support.
 - **Storages: edit and copy-key on every key row.** Hover a key for
   **copy key / copy value / edit / delete**; edit reuses the Add-key
   sheet with the key locked. Namespace rows show **＋ / copy** right

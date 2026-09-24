@@ -32,8 +32,28 @@ source tree lives under `Beaver/`.
 | `DECISIONS.md`      | Numbered, dated decision log (D1–D20). Source of truth.       |
 | `ARCHITECTURE.md`   | Layered design synthesizing the decisions.                    |
 | `PROTOCOL.md`       | Wire-protocol contract with the mobile SDK.                   |
+| `SESSION_FILE_FORMAT.md` | Export/import file shared with zapp-support (normative). |
 | `COMMAND_CATALOG.md`| Forward-looking spec for the SDK `cmdspec` command (D17).     |
 | `SCAFFOLD.md`       | One-time Xcode project setup steps.                           |
+
+## Export / import files (shared with zapp-support)
+
+Beaver and [zapp-support](https://github.com/applicaster/zapp-support) (the
+web logger) write and read **the same file**, so a customer can send logs from
+either tool and we open them in either.
+
+- **The format is [`SESSION_FILE_FORMAT.md`](SESSION_FILE_FORMAT.md)** — the
+  only copy; zapp-support links here.
+- **Export** (log feed and Storages screen): *filtered* or *all* — the filter
+  narrows the events; the session's storage and network requests are always
+  included. The Storages screen also has **Export storage only**, with
+  Keychain values redacted by default.
+- **Import** opens Beaver's files, zapp-support's files (current and older),
+  and HAR. Every file that opens today keeps opening; old Beaver versions open
+  new files too.
+- **Changing the format** takes a pair of PRs, one here and one in
+  zapp-support, cross-linked; neither merges alone. See the spec's §1 and
+  [`CLAUDE.md`](CLAUDE.md).
 
 ## Quick start
 
