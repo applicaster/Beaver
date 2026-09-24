@@ -426,7 +426,7 @@ private struct StoragesTopBar: View {
             // device that recorded it is gone, so add / reload /
             // auto-refresh are no-ops. Hide them entirely rather
             // than presenting them as disabled-tease.
-            if isViewingLiveSession {
+            if isViewingLiveSession && env.supportsStorage(.set, in: vm.selectedNamespace) {
                 // Green ➕ tile — adds a top-level key in the current layer.
                 Button(action: onAddKey) {
                     Image(systemName: "plus")
@@ -1033,6 +1033,16 @@ private struct NamespaceRow: View {
         env.currentSessionId == vm.sessionId
     }
 
+    /// Write affordances also hide when the device's `cmdlist` doesn't
+    /// list the command — the SDK would ignore it silently.
+    private var canSet: Bool {
+        isViewingLiveSession && env.supportsStorage(.set, in: namespace)
+    }
+
+    private var canDelete: Bool {
+        isViewingLiveSession && env.supportsStorage(.delete, in: namespace)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
@@ -1047,7 +1057,8 @@ private struct NamespaceRow: View {
                         parent: record,
                         child: child,
                         isClientConnected: isClientConnected,
-                        isLiveSession: isViewingLiveSession,
+                        canSet: canSet,
+                        canDelete: canDelete,
                         rowIndex: idx,
                         onCopy: { copyValue(of: child) },
                         onDelete: {
@@ -1090,7 +1101,7 @@ private struct NamespaceRow: View {
                         target: StorageFieldTarget(namespace: namespace, parentKey: nil,
                                                    key: record.key, storedJSON: record.valueText ?? "",
                                                    field: tree),
-                        live: isViewingLiveSession, connected: isClientConnected, onField: onField
+                        live: canSet, connected: isClientConnected, onField: onField
                     ))
                 } else if let text = decode.text {
                     RawValueBlock(text: text)
@@ -1238,12 +1249,11 @@ private struct NamespaceRow: View {
         // Editing affordances hidden for past sessions — the device
         // that recorded the session is gone, so writes would silently
         // fail. Copy always works, device or not.
-        let canWrite = isViewingLiveSession
         HStack(spacing: 4) {
             if record.isContainer {
                 // Namespace: [+] [copy as JSON]. No delete — the SDK
                 // has no command to remove a whole namespace.
-                if canWrite {
+                if canSet {
                     RowIconButton(
                         systemImage: "plus",
                         help: isClientConnected
@@ -1264,12 +1274,14 @@ private struct NamespaceRow: View {
                 RowIconButton(systemImage: "doc.on.doc",
                               help: "Copy this value",
                               action: copyNamespaceContents)
-                if canWrite {
+                if canSet {
                     RowIconButton(
                         systemImage: "pencil",
                         help: isClientConnected ? "Edit this value" : "Reconnect the device to edit"
                     ) { onEdit(namespace, nil, record.key, record.valueText ?? "") }
                     .disabled(!isClientConnected)
+                }
+                if canDelete {
                     RowIconButton(
                         systemImage: "trash",
                         help: isClientConnected ? "Delete this top-level key" : "Reconnect the device to delete"
@@ -1350,10 +1362,11 @@ private struct InnerKeyRow: View {
     let parent: StorageRecord
     let child: StorageRecord
     let isClientConnected: Bool
-    /// True only when the session being viewed is the live one.
-    /// Hides the delete button for past sessions where writes
-    /// to the device aren't possible.
-    let isLiveSession: Bool
+    /// Live session and the device lists the command. Hides edit /
+    /// delete for past sessions, where writes to the device aren't
+    /// possible, and for SDKs without the command.
+    let canSet: Bool
+    let canDelete: Bool
     /// 0-based index inside the parent's children, used to draw
     /// zebra-stripe backgrounds. Doesn't affect functionality.
     let rowIndex: Int
@@ -1490,9 +1503,9 @@ private struct InnerKeyRow: View {
                         StorageValuePopover(
                             record: child,
                             onCopyKey: copyKeyName,
-                            onEdit: isLiveSession && !child.isContainer
+                            onEdit: canSet && !child.isContainer
                                 ? { showingFullValue = false; onEdit(rawText) } : nil,
-                            onDelete: isLiveSession
+                            onDelete: canDelete
                                 ? { showingFullValue = false; onDelete() } : nil,
                             canWrite: isClientConnected
                         )
@@ -1502,18 +1515,17 @@ private struct InnerKeyRow: View {
                 RowIconButton(systemImage: "key", help: "Copy key name", action: copyKeyName)
                 RowIconButton(systemImage: "doc.on.doc", help: "Copy this value", action: onCopy)
 
-                // Hidden entirely for past sessions — see comments
-                // above on isLiveSession.
-                if isLiveSession {
-                    // Native objects/arrays have no single stored string
-                    // to edit; edit their leaves instead.
-                    if !child.isContainer {
-                        RowIconButton(
-                            systemImage: "pencil",
-                            help: isClientConnected ? "Edit this value" : "Reconnect the device to edit"
-                        ) { onEdit(rawText) }
-                        .disabled(!isClientConnected)
-                    }
+                // Hidden entirely for past sessions — see canSet / canDelete.
+                // Native objects/arrays have no single stored string to
+                // edit; edit their leaves instead.
+                if canSet && !child.isContainer {
+                    RowIconButton(
+                        systemImage: "pencil",
+                        help: isClientConnected ? "Edit this value" : "Reconnect the device to edit"
+                    ) { onEdit(rawText) }
+                    .disabled(!isClientConnected)
+                }
+                if canDelete {
                     RowIconButton(
                         systemImage: "trash",
                         help: isClientConnected
@@ -1603,7 +1615,7 @@ private struct InnerKeyRow: View {
                             target: StorageFieldTarget(namespace: namespace, parentKey: parent.key,
                                                        key: child.key, storedJSON: rawText,
                                                        field: tree),
-                            live: isLiveSession, connected: isClientConnected, onField: onField
+                            live: canSet, connected: isClientConnected, onField: onField
                         ))
                 } else if let text = decode.text {
                     RawValueBlock(text: text)
