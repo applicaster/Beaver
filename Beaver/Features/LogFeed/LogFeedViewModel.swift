@@ -153,13 +153,23 @@ final class LogFeedViewModel {
 
     var matchCount: Int { matchIds.count }
 
-    /// Selected row id (for the detail pane).
-    var selectedEventId: EventRecord.ID? {
+    /// Selected row ids. Several can be selected for copying.
+    var selectedEventIds: Set<EventRecord.ID> = [] {
         didSet {
-            guard oldValue != selectedEventId else { return }
+            guard oldValue != selectedEventIds else { return }
             loadSelectedEvent()
         }
     }
+
+    /// The selected row when exactly one is — what the detail pane and
+    /// `j` / `k` work from.
+    var selectedEventId: EventRecord.ID? {
+        get { selectedEventIds.count == 1 ? selectedEventIds.first : nil }
+        set { selectedEventIds = newValue.map { [$0] } ?? [] }
+    }
+
+    /// Bumped by ⌘F; the Search & highlight field takes focus.
+    private(set) var searchFocusRequest = 0
 
     /// The selected row *with* its JSON payloads. Rows in `page` are
     /// fetched without payloads (see `reload`), so the detail pane reads
@@ -484,6 +494,20 @@ final class LogFeedViewModel {
         // didSet on isPaused handles unseenCount reset + reload.
     }
 
+    // MARK: - Copy, search focus
+
+    /// The rows as clipboard lines, in table order.
+    func logLines(for rowIds: Set<EventRecord.ID>) -> String {
+        rowIds.compactMap { feed.rowIndex(ofRow: $0) }
+            .sorted()
+            .map { feed.rows[$0].event.logLine }
+            .joined(separator: "\n")
+    }
+
+    func focusSearch() {
+        searchFocusRequest += 1
+    }
+
     // MARK: - Clearing the view
 
     /// True while "Clear" is hiding a stretch of the session.
@@ -514,6 +538,10 @@ final class LogFeedViewModel {
     func selectNextRow() { moveSelection(by: 1) }
     func selectPreviousRow() { moveSelection(by: -1) }
 
+    /// `e` / `⇧E`: the next / previous error row. Doesn't wrap.
+    func selectNextError() { stepError(forward: true) }
+    func selectPreviousError() { stepError(forward: false) }
+
     private func moveSelection(by delta: Int) {
         let rows = collapsedRows
         guard !rows.isEmpty else { return }
@@ -521,15 +549,27 @@ final class LogFeedViewModel {
               let index = feed.rowIndex(ofRow: current)
         else {
             // Nothing selected yet: enter from the end you came from.
-            let entry = delta > 0 ? rows.first : rows.last
-            selectedEventId = entry?.id
-            if let entry { scrollTarget = (entry.id, UUID()) }
+            select(rowAt: delta > 0 ? 0 : rows.count - 1)
             return
         }
         let next = index + delta
         guard rows.indices.contains(next) else { return }
-        selectedEventId = rows[next].id
-        scrollTarget = (rows[next].id, UUID())
+        select(rowAt: next)
+    }
+
+    private func stepError(forward: Bool) {
+        let current = selectedEventId.flatMap { feed.rowIndex(ofRow: $0) }
+        guard let index = feed.rowIndex(after: current, forward: forward,
+                                         where: { $0.event.level == .error })
+        else { return }
+        select(rowAt: index)
+    }
+
+    /// Select and reveal a row.
+    private func select(rowAt index: Int) {
+        let id = feed.rows[index].id
+        selectedEventId = id
+        scrollTarget = (id, UUID())
     }
 
     // MARK: - Bookmarks

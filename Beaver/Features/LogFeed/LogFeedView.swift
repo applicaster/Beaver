@@ -40,12 +40,14 @@ private struct LogFeedContent: View {
                     .frame(minWidth: 600, maxWidth: .infinity, maxHeight: .infinity)
                 DetailPaneView(event: selectedEvent,
                                data: vm.selectedData,
-                               context: vm.selectedContext)
+                               context: vm.selectedContext,
+                               selectionCount: vm.selectedEventIds.count)
                     .frame(minWidth: 280, idealWidth: 360, maxHeight: .infinity)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background { LogFeedShortcuts(vm: vm) }
         // Toolbar Bookmarks popover posts to this notification with
         // the chosen event id; we forward it to the active view model.
         .onReceive(
@@ -145,7 +147,8 @@ private struct LogFeedFilterBar: View {
                     set: { vm.highlight = $0.isEmpty ? nil : $0 }
                 ),
                 regex: $vm.highlightIsRegex,
-                isInvalid: vm.highlightIsRegex && !Filter.isValidRegex(vm.highlight ?? "")
+                isInvalid: vm.highlightIsRegex && !Filter.isValidRegex(vm.highlight ?? ""),
+                focusRequest: vm.searchFocusRequest
             )
 
             // Match navigator: N/M plus up/down jump buttons. Appears
@@ -261,6 +264,10 @@ struct FilterPillField: View {
     /// Outlines the pill in red: a regex that doesn't compile, which
     /// the query ignores rather than matching nothing.
     var isInvalid = false
+    /// Bump to put the cursor in the field (⌘F).
+    var focusRequest = 0
+
+    @FocusState private var isFocused: Bool
 
     var body: some View {
         HStack(spacing: 6) {
@@ -269,6 +276,8 @@ struct FilterPillField: View {
             TextField(placeholder, text: $text)
                 .textFieldStyle(.plain)
                 .font(regex ? .system(.body, design: .monospaced) : .body)
+                .focused($isFocused)
+                .onChange(of: focusRequest) { isFocused = true }
 
             // Clear-X button: appears only when the field has text.
             if !text.isEmpty {
@@ -975,7 +984,7 @@ private struct LogFeedTable: View {
         ScrollViewReader { proxy in
             Table(
                 vm.collapsedRows,
-                selection: $vm.selectedEventId,
+                selection: $vm.selectedEventIds,
                 columnCustomization: $columnLayout
             ) {
                 TableColumn("Level") { (row: LogFeedViewModel.CollapsedRow) in
@@ -1050,16 +1059,30 @@ private struct LogFeedTable: View {
             }
             // j / k mirror the arrow keys, and Esc closes the detail
             // pane — the shortcuts the web viewer documents.
+            // e / ⇧E step through error rows.
             .onKeyPress { press in
-                switch press.key {
-                case "j": vm.selectNextRow();     return .handled
-                case "k": vm.selectPreviousRow(); return .handled
+                guard press.modifiers.isDisjoint(with: [.command, .control, .option]) else {
+                    return .ignored
+                }
+                switch press.characters {
+                case "j": vm.selectNextRow();       return .handled
+                case "k": vm.selectPreviousRow();   return .handled
+                case "e": vm.selectNextError();     return .handled
+                case "E": vm.selectPreviousError(); return .handled
                 default:  return .ignored
                 }
             }
+            // ⌘C: the selected rows as log lines.
+            .onCopyCommand {
+                let count = vm.selectedEventIds.count
+                let text = vm.logLines(for: vm.selectedEventIds)
+                guard !text.isEmpty else { return [] }
+                toasts.success(count == 1 ? "Copied line" : "Copied \(count) lines")
+                return [NSItemProvider(object: text as NSString)]
+            }
             .onKeyPress(.escape) {
-                guard vm.selectedEventId != nil else { return .ignored }
-                vm.selectedEventId = nil
+                guard !vm.selectedEventIds.isEmpty else { return .ignored }
+                vm.selectedEventIds = []
                 return .handled
             }
             .onAppear {
@@ -1198,6 +1221,7 @@ private struct LogFeedTable: View {
             }
         }
         Section {
+            Button("Copy Line")      { copyToPasteboard(event.logLine,   label: "Line") }
             Button("Copy Message")   { copyToPasteboard(event.message,   label: "Message") }
             Button("Copy Subsystem") { copyToPasteboard(event.subsystem, label: "Subsystem") }
             if !event.category.isEmpty {
@@ -1251,6 +1275,10 @@ private struct LogFeedTable: View {
 
     @ViewBuilder
     private func multiRowMenu(for events: [EventRecord]) -> some View {
+        Button("Copy \(events.count) Lines") {
+            copyToPasteboard(vm.logLines(for: Set(events.map(\.id))),
+                             label: "\(events.count) lines")
+        }
         Button("Copy \(events.count) Messages") {
             let messages = events.map(\.message).joined(separator: "\n")
             copyToPasteboard(messages, label: "\(events.count) messages")
@@ -1286,6 +1314,28 @@ private struct LogFeedTable: View {
             let full = await vm.fullEvents(ids: ids)
             copyToPasteboard(formatAsJSON(full), label: label)
         }
+    }
+}
+
+// MARK: - Shortcuts
+
+/// Window-level shortcuts while the Log feed is showing. Invisible
+/// buttons, so the shortcuts work wherever focus is in the feed.
+private struct LogFeedShortcuts: View {
+    let vm: LogFeedViewModel
+
+    var body: some View {
+        Group {
+            Button("Find") { vm.focusSearch() }
+                .keyboardShortcut("f", modifiers: .command)
+            Button("Next Match") { vm.nextMatch() }
+                .keyboardShortcut("g", modifiers: .command)
+            Button("Previous Match") { vm.previousMatch() }
+                .keyboardShortcut("g", modifiers: [.command, .shift])
+        }
+        .opacity(0)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }
 
