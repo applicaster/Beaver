@@ -72,7 +72,7 @@ struct NetworkView: View {
                         options: { vm.filter.availableMethods(in: vm.base) }, tint: MethodBadge.tint)
             FacetPicker(title: "Status", selection: $vm.filter.status,
                         options: { vm.filter.availableStatuses(in: vm.base) },
-                        label: NetworkEntry.statusLabel(for:), tint: \.color)
+                        label: NetworkEntry.statusLabel(for:), tint: \.color, summary: .errors)
             FacetPicker(title: "Host", selection: $vm.filter.host,
                         options: { vm.filter.availableHosts(in: vm.base) })
             if !vm.filter.isEmpty || vm.filter.searchIsRegex {
@@ -260,6 +260,9 @@ struct NetworkView: View {
                 let pick = NetworkFilter.StatusPick(e.status)
                 let statusMenuLabel = pick == .noStatus ? "entries without status" : NetworkEntry.statusLabel(for: pick)
                 Button("Only \(statusMenuLabel)") { vm.filter.status = pick }
+                if NetworkFilter.StatusPick.errors.matches(e) {
+                    Button("Only errors") { vm.filter.status = .errors }
+                }
                 let statusClass = e.statusClass
                 Button("Hide \(statusClass.displayName)") { vm.filter.excludedStatusClasses.insert(statusClass) }
                 Divider()
@@ -312,10 +315,13 @@ extension ToastCenter {
 // MARK: - Badges
 
 extension NetworkFilter.StatusPick {
-    /// StatusBadge's colour for this code; "No status" is a failure.
+    /// StatusBadge's colour for this pick; Errors and "No status" are failures.
     var color: Color {
-        guard case .code(let code) = self else { return NetworkEntry.StatusClass.failed.color }
-        return NetworkEntry.StatusClass(status: code).color
+        switch self {
+        case .errors, .noStatus: NetworkEntry.StatusClass.failed.color
+        case .statusClass(let c): c.color
+        case .code(let code): NetworkEntry.StatusClass(status: code).color
+        }
     }
 }
 
@@ -431,6 +437,9 @@ private struct FacetPicker<Value: Hashable & Sendable>: View {
     let options: () -> [FacetOption<Value>]
     var label: (Value) -> String = { "\($0)" }
     var tint: (Value) -> Color = { _ in .accentColor }
+    /// An aggregate row (Status's "Errors") that overlaps the others: a
+    /// divider follows it and "All" doesn't count it.
+    var summary: Value?
     @State private var isShown = false
     @State private var isHovered = false
 
@@ -468,12 +477,13 @@ private struct FacetPicker<Value: Hashable & Sendable>: View {
 
     private func rows(_ options: [FacetOption<Value>]) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            FacetPickerRow(text: "All", count: options.reduce(0) { $0 + $1.count },
-                           isSelected: selection == nil, tint: .primary) { pick(nil) }
+            let total = options.filter { $0.depth == 0 && $0.value != summary }.reduce(0) { $0 + $1.count }
+            FacetPickerRow(text: "All", count: total, isSelected: selection == nil, tint: .primary) { pick(nil) }
             Divider().padding(.vertical, 2)
             ForEach(options, id: \.value) { option in
-                FacetPickerRow(text: label(option.value), count: option.count,
+                FacetPickerRow(text: label(option.value), count: option.count, depth: option.depth,
                                isSelected: option.value == selection, tint: tint(option.value)) { pick(option.value) }
+                if option.value == summary { Divider().padding(.vertical, 2) }
             }
         }
         .padding(.vertical, 4)
@@ -490,6 +500,7 @@ private struct FacetPicker<Value: Hashable & Sendable>: View {
 private struct FacetPickerRow: View {
     let text: String
     let count: Int
+    var depth = 0
     let isSelected: Bool
     let tint: Color
     let onTap: () -> Void
@@ -502,6 +513,7 @@ private struct FacetPickerRow: View {
                     .font(.caption.weight(.semibold))
                     .opacity(isSelected ? 1 : 0)
                     .frame(width: 14)
+                    .padding(.leading, CGFloat(depth) * 16)
                 Text(text)
                     .font(.caption.weight(.semibold))
                     .lineLimit(1)

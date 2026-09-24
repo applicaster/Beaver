@@ -159,9 +159,19 @@ extension NetworkEntry {
 
     /// The Status dropdown's label: "404 Not Found", "-999", "No status".
     public static func statusLabel(for pick: NetworkFilter.StatusPick) -> String {
-        guard case .code(let code) = pick else { return "No status" }
-        return reasonPhrases[code].map { "\(code) \($0)" } ?? "\(code)"
+        switch pick {
+        case .errors: "Errors"
+        case .statusClass(let c): c.displayName
+        case .noStatus: "No status"
+        case .code(let code): (reasonPhrases[code] ?? urlErrorNames[code]).map { "\(code) \($0)" } ?? "\(code)"
+        }
     }
+
+    /// NSURLError codes the iOS SDK sends in place of an HTTP status.
+    private static let urlErrorNames: [Int: String] = [
+        -999: "cancelled", -1001: "timed out", -1003: "host not found", -1004: "cannot connect",
+        -1005: "connection lost", -1009: "offline", -1200: "TLS error", -1202: "bad certificate",
+    ]
 
     // MARK: Helpers
 
