@@ -31,6 +31,10 @@ final class LogFeedViewModel {
             // its rows still match; the match cursor starts over.
             selectionToRestore = selectedEventIds
             currentMatchIndex = nil
+            // New rows, new count: an "N new" from the old filter means
+            // nothing here. Unpaused, the new rows open at the tail (or
+            // at the restored selection, which stops following again).
+            if !isPaused { follow.resume() }
             feed.replace(with: [])
             watermark = nil
             requestReload()
@@ -356,6 +360,10 @@ final class LogFeedViewModel {
                 self.loadedFilter = snapshotFilter
                 self.watermark = snapshot.watermark
                 self.restoreSelection()
+                // The table went through empty, which drops its scroll
+                // offset; the last row may be unchanged, so its onChange
+                // won't re-anchor. Do it explicitly.
+                if self.follow.isFollowing { self.latestScrollToken = UUID() }
                 // Appends announced while no watermark was set were
                 // skipped; fetch whatever landed after the read.
                 self.requestTail()

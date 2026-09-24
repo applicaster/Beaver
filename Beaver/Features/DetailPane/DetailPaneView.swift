@@ -37,6 +37,9 @@ struct DetailPaneView: View {
                 }
                 .padding(16)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                // Fresh per event: "Show more" pages and expansion
+                // state belong to the payload they were opened on.
+                .id(event.id)
             }
         } else if selectionCount > 1 {
             ContentUnavailableView(
