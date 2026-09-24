@@ -15,6 +15,12 @@ When releasing:
 ## [Unreleased]
 
 ### Added
+- **Import opens zapp-support files.** Its log export (any level
+  spelling — `WARN`, `err`, `fatal`, `trace`, `"2"`…) and its storage
+  export now open like Beaver's own. A line with an unknown level opens
+  as info with the original kept in context as `originalLevel`, instead
+  of being silently dropped. zapp-support HAR files already opened in
+  Network. Every Beaver file opens exactly as before.
 - **Storages: edit and copy-key on every key row.** Hover a key for
   **copy key / copy value / edit / delete**; edit reuses the Add-key
   sheet with the key locked. Namespace rows show **＋ / copy** right
