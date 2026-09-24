@@ -274,8 +274,8 @@ Conventions for every tool:
 
 | Tool | Args | Returns | Hints |
 |---|---|---|---|
-| `ui_state` | — | tab, viewed session, active filter, selected event or request, whether the window is key | R |
-| `ui_show` | any of `tab` (`logs`/`network`/`storages`), `sessionId`, `filter`, `selectEventId`, `selectNetworkId`, `reveal` (default false) | the resulting `ui_state` | W. Without `reveal` the window updates in place and nothing takes focus |
+| `ui_state` | — | tab, viewed session, log filter, network filter, storage layer and search, selected event or request, whether the window is key | R |
+| `ui_show` | any of: `tab` (`logs`/`network`/`storages`); `sessionId`; `filter` (logs, §5 conventions); `networkFilter` (`method[]`, `status`, `host[]`, `search` — same as `network_query`); `storage` (`layer`, `search`); `select` (`{eventId}`, `{networkId}`, or `"first"` / `"last"` match of the filter being set); `reveal` (default false) | the resulting `ui_state`, including the id that `"first"` / `"last"` resolved to | W. Without `reveal` the window updates in place and nothing takes focus |
 
 ### 5.9 Journal *(M17)*
 
@@ -319,8 +319,11 @@ Today `MainWindow` owns `selectedTab` and the selection as `@State`, so nothing
 outside the view can change them. The change:
 
 1. `AppEnvironment` gets `selectedTab`, `selection` (`.event(id)` /
-   `.network(id)` / `nil`) and a `revealRequest` counter. `activeFilter` and
-   `viewingSessionId` already live there.
+   `.network(id)` / `nil`), `networkFilter`, `storageLayer`, `storageSearch`
+   and a `revealRequest` counter. `activeFilter` and `viewingSessionId`
+   already live there. `NetworkViewModel.filter` and
+   `StoragesViewModel.selectedNamespace` become reads of the env values
+   instead of owning them.
 2. `MainWindow` binds to those instead of its own `@State`. The view models
    already rebuild on `env.viewingSessionId` changes and read
    `env.activeFilter`, so no view model logic changes. A new selection scrolls
@@ -332,6 +335,16 @@ outside the view can change them. The change:
 No Accessibility API, no synthetic events, no AppleScript: the agent changes
 state and SwiftUI renders it, whether the window is visible, behind other
 windows, or minimized.
+
+**Examples.**
+
+| The person says | The agent calls |
+|---|---|
+| "Show me the auth errors" | `logs_facets` (to learn the exact subsystem names) → `ui_show(tab: logs, filter: {minLevel: error, subsystems: ["com.app.auth"]}, select: "first", reveal: true)` |
+| "Show the failed requests" | `ui_show(tab: network, networkFilter: {status: "errors"}, select: "first", reveal: true)` |
+| "What's in keychain?" | `ui_show(tab: storages, storage: {layer: secure}, reveal: true)` |
+| "Review the errors with me" | `logs_query(filter: {minLevel: error})` → groups them by cause → one `journal_note` with a link per group ("3 causes: token expired ×41, feed 500 ×12, player timeout ×3") → `ui_show(filter…, select: {eventId: first cause}, reveal: true)`. "Next" in chat → `ui_show(select: {eventId: …})` on the next cause; the person can also click the links in the note |
+| (while working, unasked) | `ui_show(...)` without `reveal`: the window is ready on the right view when the person looks, nothing jumps |
 
 ### 7.2 Agent activity journal
 
