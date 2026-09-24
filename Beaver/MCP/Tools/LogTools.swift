@@ -20,7 +20,7 @@ enum LogTools {
                 .merging(ToolSchema.range) { first, _ in first })
     ) { args, ctx in
         let s = try await ctx.resolveSession(args)
-        let f = try await ctx.resolveFilter(args["filter"], sessionId: s.id)
+        let f = try await ctx.resolveFilter(args, sessionId: s.id)
         let r = try await ctx.resolveRange(args, sessionId: s.id)
         let levels = try await ctx.store.levelCounts(sessionId: s.id, filter: f.filter, afterId: r.afterId, beforeId: r.beforeId)
         let subsystems = try await ctx.store.facetCounts(sessionId: s.id, facet: .subsystem, filter: f.filter, afterId: r.afterId, beforeId: r.beforeId)
@@ -71,7 +71,7 @@ enum LogTools {
         ].merging(ToolSchema.range) { first, _ in first })
     ) { args, ctx in
         let s = try await ctx.resolveSession(args)
-        let f = try await ctx.resolveFilter(args["filter"], sessionId: s.id)
+        let f = try await ctx.resolveFilter(args, sessionId: s.id)
         let r = try await ctx.resolveRange(args, sessionId: s.id)
         let limit = try args.limit(default: 100, max: 500)
         let newestFirst = (try args.string("order"))?.lowercased() != "oldest"
@@ -189,7 +189,7 @@ enum LogTools {
         ])
     ) { args, ctx in
         let s = try await ctx.resolveSession(args)
-        let f = try await ctx.resolveFilter(args["filter"], sessionId: s.id)
+        let f = try await ctx.resolveFilter(args, sessionId: s.id)
         let requested = try args.int("timeoutMs") ?? 15_000
         let timeout = min(maxWaitMillis, max(0, requested))
         let limit = try args.limit(default: 50, max: 500)
@@ -201,18 +201,21 @@ enum LogTools {
             start = try await ctx.store.latestEventId(sessionId: s.id) ?? 0
         }
         let deadline = ContinuousClock.now + .milliseconds(timeout)
+        let notes = f.notes
+        let resolved = notes.isEmpty ? "" : " Resolved: " + notes.joined(separator: "; ") + "."
 
         while true {
             let page = try await ctx.store.eventPage(sessionId: s.id, filter: f.filter, afterId: start,
                                                      limit: limit, newestFirst: false)
             if let last = page.events.last {
                 return ToolResult(
-                    summary: "\(page.total) new event(s) matched in session \(s.label) after #\(start) (\(ToolText.describe(f.filter))).",
+                    summary: "\(page.total) new event(s) matched in session \(s.label) after #\(start) (\(ToolText.describe(f.filter))).\(resolved)",
                     body: page.events.map(ToolText.eventLine).joined(separator: "\n"),
                     structured: ["sessionId": JSON(s.id), "timedOut": false, "afterId": JSON(start),
                                  "timeoutMs": JSON(timeout), "lastId": JSON(last.id), "total": JSON(page.total),
                                  "hasMore": .bool(page.total > page.events.count),
-                                 "events": .array(page.events.map { ["id": JSON($0.id), "line": .string(ToolText.eventLine($0))] })],
+                                 "events": .array(page.events.map { ["id": JSON($0.id), "line": .string(ToolText.eventLine($0))] }),
+                                 "resolved": .array(notes.map(JSON.string))],
                     next: ["logs_get(ids: [\(page.events[0].id)])", "logs_wait(afterId: \(last.id), …) for the next one"],
                     sessionId: s.id
                 )
@@ -223,9 +226,10 @@ enum LogTools {
             try? await Task.sleep(for: .milliseconds(250))
         }
         return ToolResult(
-            summary: "Nothing matched in \(timeout / 1000) s (session \(s.label), after #\(start), \(ToolText.describe(f.filter))).",
+            summary: "Nothing matched in \(timeout / 1000) s (session \(s.label), after #\(start), \(ToolText.describe(f.filter))).\(resolved)",
             structured: ["sessionId": JSON(s.id), "timedOut": true, "afterId": JSON(start),
-                         "timeoutMs": JSON(timeout), "total": 0, "hasMore": false, "events": []],
+                         "timeoutMs": JSON(timeout), "total": 0, "hasMore": false, "events": [],
+                         "resolved": .array(notes.map(JSON.string))],
             next: ["logs_wait(afterId: \(start), …) to keep waiting", "logs_query(afterId: \(start)) to see what did arrive"],
             sessionId: s.id
         )

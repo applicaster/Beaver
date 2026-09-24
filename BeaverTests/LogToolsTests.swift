@@ -45,6 +45,24 @@ struct LogToolsTests {
         #expect(r.next.contains { $0.contains("beforeId: \(ids[1])") })
     }
 
+    @Test("Query lifts a top-level minLevel into filter, and says so")
+    func queryLiftsTopLevelFilterKey() async throws {
+        let (ctx, _, _) = try await fixture()
+        let r = try await LogTools.query.run(ToolArguments(["minLevel": "error"]), ctx)
+        #expect(r.structured["total"] == 2)
+        #expect(r.summary.contains("Resolved: minLevel → filter.minLevel"))
+    }
+
+    @Test("Query prefers filter.minLevel when both a top-level and a filter value are given")
+    func queryTopLevelDoesNotOverrideFilter() async throws {
+        let (ctx, _, _) = try await fixture()
+        let r = try await LogTools.query.run(ToolArguments([
+            "minLevel": "error", "filter": ["minLevel": "warning"],
+        ]), ctx)
+        #expect(r.structured["total"] == 3)
+        #expect(!r.summary.contains("minLevel → filter.minLevel"))
+    }
+
     @Test("Query oldest first after a cursor, no more pages")
     func queryAfter() async throws {
         let (ctx, _, ids) = try await fixture()
@@ -178,6 +196,23 @@ struct LogToolsTests {
         #expect(r.structured["timedOut"] == false)
         #expect(r.structured["events"]?.array?.count == 1)
         #expect(ContinuousClock.now - started < .seconds(3))
+    }
+
+    @Test("Wait lifts a top-level search into filter, and echoes the resolution")
+    func waitLiftsTopLevelFilterKey() async throws {
+        let store = try LogStore(source: .inMemory)
+        let s = try await store.createSession(source: .live)
+        try await seed(store, session: s.id, [(.info, "a", "", "before")])
+        let ctx = makeContext(store, ui: HostSnapshot(liveSessionId: s.id))
+        _ = Task {
+            try await Task.sleep(for: .milliseconds(300))
+            try await seed(store, session: s.id, [(.error, "a", "", "App started")])
+        }
+        let r = try await LogTools.wait.run(ToolArguments(["search": "started", "timeoutMs": 5000]), ctx)
+        #expect(r.structured["timedOut"] == false)
+        #expect(r.structured["events"]?.array?.count == 1)
+        #expect(r.summary.contains("Resolved: search → filter.search"))
+        #expect(r.structured["resolved"] == ["search → filter.search"])
     }
 
     @Test("Wait times out with a cursor to resume from")

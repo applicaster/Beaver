@@ -159,6 +159,29 @@ extension ToolContext {
             + " (remote assistance on the device), then call beaver_status().")
     }
 
+    /// Design M30: a weak agent often writes `logs_query(minLevel: "error")`
+    /// instead of `logs_query(filter: {minLevel: "error"})`. Lifts any of
+    /// `Filter`'s keys found at the top level into `filter`, when `filter`
+    /// doesn't already have that key, and notes the resolution — used by
+    /// `logs_facets`, `logs_query` and `logs_wait`, the three tools that take
+    /// both a top-level argument set and a `filter` object.
+    public func resolveFilter(_ args: ToolArguments, sessionId: Int64) async throws -> ResolvedFilter {
+        var object = args["filter"]?.object ?? [:]
+        var lifted: [String] = []
+        for key in Self.filterKeys {
+            guard object[key] == nil, let value = args[key] else { continue }
+            object[key] = value
+            lifted.append("\(key) → filter.\(key)")
+        }
+        let resolved = try await resolveFilter(object.isEmpty ? nil : .object(object), sessionId: sessionId)
+        return ResolvedFilter(filter: resolved.filter, notes: lifted + resolved.notes)
+    }
+
+    static let filterKeys = [
+        "minLevel", "search", "searchIsRegex", "exclude", "excludeIsRegex",
+        "searchPayloads", "subsystems", "excludeSubsystems", "categories", "excludeCategories",
+    ]
+
     public func resolveFilter(_ json: JSON?, sessionId: Int64) async throws -> ResolvedFilter {
         guard let json, json != .null else { return ResolvedFilter(filter: .none, notes: []) }
         guard let object = json.object else {
