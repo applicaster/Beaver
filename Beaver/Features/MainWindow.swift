@@ -52,16 +52,19 @@ struct MainWindow: View {
             NavigationSplitView {
                 sidebar
             } detail: {
+                // The inspector hangs off the detail column, not the
+                // split view: on the split view it swallowed every
+                // toolbar item (Import, Export, Agent, …).
                 detail
+                    .inspector(isPresented: $showingAgentPanel) {
+                        if let agentActivity {
+                            AgentActivityView(model: agentActivity)
+                                .inspectorColumnWidth(min: 280, ideal: 360, max: 520)
+                        }
+                    }
             }
             .navigationTitle(navigationTitle)
             .toolbar { toolbarContent }
-            .inspector(isPresented: $showingAgentPanel) {
-                if let agentActivity {
-                    AgentActivityView(model: agentActivity)
-                        .inspectorColumnWidth(min: 280, ideal: 360, max: 520)
-                }
-            }
             // `.inspector`'s content is mounted regardless of
             // `isPresented` (its `onAppear` fires immediately, even
             // hidden), so the view can't track "is the panel open"
