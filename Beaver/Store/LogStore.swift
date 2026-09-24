@@ -851,23 +851,43 @@ public actor LogStore {
         namespace: StorageSnapshot.Namespace,
         dataJSON: String
     ) async throws {
-        let now = Date()
-        try await dbQueue.write { db in
+        let nowMillis = Int(Date().timeIntervalSince1970 * 1000)
+        // The device re-reports storage every refresh, nearly always
+        // unchanged. Storing each copy grew this table by thousands of
+        // rows an hour, so an unchanged frame only moves the latest
+        // row's `taken_at` — it stays "as of" the last report.
+        let inserted = try await dbQueue.write { db -> Bool in
+            let latest = try Row.fetchOne(
+                db,
+                sql: """
+                    SELECT id, data_json FROM storage_snapshot
+                    WHERE session_id = ? AND namespace = ?
+                    ORDER BY taken_at DESC, id DESC
+                    LIMIT 1
+                """,
+                arguments: [sessionId, namespace.rawValue]
+            )
+            if let latest, latest["data_json"] as String == dataJSON {
+                try db.execute(
+                    sql: "UPDATE storage_snapshot SET taken_at = MAX(taken_at, ?) WHERE id = ?",
+                    arguments: [nowMillis, latest["id"] as Int64]
+                )
+                return false
+            }
             try db.execute(
                 sql: """
                     INSERT INTO storage_snapshot
                       (session_id, taken_at, namespace, data_json)
                     VALUES (?, ?, ?, ?)
                 """,
-                arguments: [
-                    sessionId,
-                    Int(now.timeIntervalSince1970 * 1000),
-                    namespace.rawValue,
-                    dataJSON,
-                ]
+                arguments: [sessionId, nowMillis, namespace.rawValue, dataJSON]
             )
+            return true
         }
+        // Broadcast either way: a screen waiting on a reload (or an
+        // edit check) needs to hear that the device answered.
         broadcast(.storageUpdated(sessionId: sessionId, namespace: namespace))
+        guard inserted else { return }
 
         // Opportunistically harvest device + app metadata out of the
         // session-storage snapshot. The SDK writes a well-known
@@ -920,12 +940,22 @@ public actor LogStore {
                     SELECT id, session_id, taken_at, namespace, data_json
                     FROM storage_snapshot
                     WHERE session_id = ? AND namespace = ?
-                    ORDER BY taken_at DESC
+                    ORDER BY taken_at DESC, id DESC
                     LIMIT 1
                 """,
                 arguments: [sessionId, namespace.rawValue]
             )
             return row.map(Self.makeStorageSnapshot)
+        }
+    }
+
+    func storageSnapshotCount(sessionId: Int64) async throws -> Int {
+        try await dbQueue.read { db in
+            try Int.fetchOne(
+                db,
+                sql: "SELECT COUNT(*) FROM storage_snapshot WHERE session_id = ?",
+                arguments: [sessionId]
+            ) ?? 0
         }
     }
 
