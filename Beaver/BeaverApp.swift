@@ -51,7 +51,10 @@ struct BeaverApp: App {
         let server = WSServer(port: 9080)
         let environment = AppEnvironment(store: store, server: server)
         _env = State(initialValue: environment)
-        agentAccess = AgentAccess(store: store, ui: environment)
+        agentAccess = AgentAccess(store: store, ui: environment, device: server)
+        // design M28: permission read and click delegate ready at launch,
+        // before the first attention note or an old notification's click.
+        _ = AgentNotifier.shared
 
         // Sparkle: `startingUpdater: true` schedules the first
         // appcast check shortly after launch. Subsequent checks run
@@ -106,6 +109,12 @@ struct BeaverApp: App {
                     toasts.success("Copied: \(command)")
                 }
                 .disabled(env.agentAccessPort == nil)
+                // Design M28: always the one action that works — opens the
+                // Agent panel, whose strip asks or points at System Settings.
+                Button(AgentNotifications.menuTitle(for: AgentNotifier.shared.state)) {
+                    NSApp.activate()
+                    AgentNotifier.shared.openPanel()
+                }
             }
         }
     }

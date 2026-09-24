@@ -57,16 +57,99 @@ public struct NewAgentActivity: Sendable {
     }
 }
 
+/// What a journal entry points at (design §5.9). Stored in `links_json`
+/// as `[{"eventId":48211},{"networkId":391},{"sessionId":13},{"savedFilter":"Auth"}]`.
+public enum JournalLink: Sendable, Hashable {
+    case session(Int64)
+    case event(Int64)
+    case network(Int64)
+    case savedFilter(String)
+
+    /// `event #48211`, `request #391`, `session #13`, `filter “Auth”`.
+    public var label: String {
+        switch self {
+        case .session(let id): "session #\(id)"
+        case .event(let id): "event #\(id)"
+        case .network(let id): "request #\(id)"
+        case .savedFilter(let name): "filter “\(name)”"
+        }
+    }
+
+    public var json: JSON {
+        switch self {
+        case .session(let id): ["sessionId": JSON(id)]
+        case .event(let id): ["eventId": JSON(id)]
+        case .network(let id): ["networkId": JSON(id)]
+        case .savedFilter(let name): ["savedFilter": .string(name)]
+        }
+    }
+
+    public init?(json: JSON) {
+        if let id = json["eventId"]?.int64 { self = .event(id) }
+        else if let id = json["networkId"]?.int64 { self = .network(id) }
+        else if let id = json["sessionId"]?.int64 { self = .session(id) }
+        else if let name = json["savedFilter"]?.string { self = .savedFilter(name) }
+        else { return nil }
+    }
+
+    public static func encode(_ links: [JournalLink]) -> String? {
+        links.isEmpty ? nil : JSON.array(links.map(\.json)).text
+    }
+
+    public static func decode(_ text: String?) -> [JournalLink] {
+        guard let text, let items = (try? JSON.parse(Data(text.utf8)))?.array else { return [] }
+        return items.compactMap(JournalLink.init(json:))
+    }
+}
+
+/// A toast in Beaver's window for a journal entry (design §7.2): only
+/// destructive calls and attention notes interrupt.
+public struct AgentToast: Sendable, Equatable {
+    public enum Button: Sendable, Equatable {
+        /// Opens the Agent panel.
+        case journal
+        /// Brings Beaver forward on what the note points at.
+        case show(JournalLink)
+    }
+    public let message: String
+    public let button: Button
+}
+
+extension AgentActivity {
+    public static let attention = "attention"
+
+    public var links: [JournalLink] { JournalLink.decode(linksJSON) }
+
+    /// A `journal_note(level: attention)`, or a watch that fired.
+    public var isAttention: Bool { kind == .note && level == Self.attention }
+
+    public var toast: AgentToast? {
+        guard !isError else { return nil }
+        if kind == .destructive { return AgentToast(message: "Agent: \(summary)", button: .journal) }
+        if isAttention { return AgentToast(message: summary, button: links.first.map { .show($0) } ?? .journal) }
+        return nil
+    }
+}
+
 public enum AgentActivityText {
     public static func visible(_ entries: [AgentActivity], hideReads: Bool) -> [AgentActivity] {
         hideReads ? entries.filter { $0.kind != .read || $0.isError } : entries
     }
 
-    /// `14:03:12 claude-code logs_query — 41 events`, `✗` on failures.
+    /// `14:03:12 claude-code logs_query — 41 events`, links after `→`,
+    /// `✗` on failures, a notice (why a note wasn't notified) in brackets.
     public static func line(_ a: AgentActivity) -> String {
         let who = a.client ?? "agent"
         let what = a.tool ?? a.kind.rawValue
-        return "\(timeFormatter.string(from: a.at)) \(who) \(what) — \(a.summary)" + (a.isError ? " ✗" : "")
+        var text = "\(timeFormatter.string(from: a.at)) \(who) \(what) — \(a.summary)"
+        let links = a.links
+        if !links.isEmpty { text += " → " + links.map(\.label).joined(separator: ", ") }
+        if a.isError {
+            text += " ✗"
+        } else if let notice = a.error {
+            text += " (\(notice))"
+        }
+        return text
     }
 
     public static func copyText(_ entries: [AgentActivity]) -> String {

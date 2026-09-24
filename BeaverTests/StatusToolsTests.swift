@@ -104,4 +104,22 @@ struct StatusToolsTests {
             #expect(error.message.contains("source must be live, imported or any"))
         }
     }
+
+    @Test("beaver_status reports the notification state, and how to turn it on")
+    func notifications() async throws {
+        let store = try LogStore(source: .inMemory)
+        let denied = try await StatusTools.status.run(ToolArguments(),
+                                                       makeContext(store, ui: HostSnapshot(notifications: .denied)))
+        #expect(denied.structured["notifications"] == "denied")
+        #expect(denied.body.contains(AgentNotifications.howToEnable))
+
+        // Beaver isn't listed in System Settings until it has asked once,
+        // so notDetermined points at what triggers the ask instead of the
+        // Settings path.
+        let notDetermined = try await StatusTools.status.run(ToolArguments(),
+                                                              makeContext(store, ui: HostSnapshot(notifications: .notDetermined)))
+        #expect(notDetermined.structured["notifications"] == "notDetermined")
+        #expect(notDetermined.body.contains("attention note"))
+        #expect(!notDetermined.body.contains(AgentNotifications.howToEnable))
+    }
 }

@@ -6,7 +6,7 @@
 import Foundation
 
 enum LogTools {
-    static var all: [MCPTool] { [facets, query, get, wait] }
+    static var all: [MCPTool] { [facets, query, get, wait, clear] }
 
     static let maxWaitMillis = 60_000
 
@@ -178,10 +178,10 @@ enum LogTools {
     static let wait = MCPTool(
         name: "logs_wait",
         title: "Wait for logs",
-        description: "Use after you or the user do something on the device, to wait until a matching event is logged. Returns as soon as one arrives, or when timeoutMs passes (default 15000, max 60000). Pass afterId from an earlier result; without it, only events from now on count. For minutes or longer, ask the user to tell you when to look again.",
+        description: "Use after you or the user do something on the device, to wait until a matching event is logged. Returns as soon as one arrives, or when timeoutMs passes (default 15000, max 60000). Pass afterId from an earlier result; without it, only events from now on count. Without sessionId it follows the device: if the app restarts it carries on in the new session and says so (sessionChanged). For minutes or longer, use watch_start.",
         kind: .read,
         inputSchema: ToolSchema.object([
-            "sessionId": ToolSchema.sessionId,
+            "sessionId": ToolSchema.integer("Stay on this session; if it ends the call returns sessionEnded. Omit it to follow the device."),
             "filter": ToolSchema.filter,
             "afterId": ToolSchema.integer("Only events after this id. Default: the latest event now."),
             "timeoutMs": ToolSchema.integer("How long to wait. Default 15000, max 60000."),
@@ -193,45 +193,70 @@ enum LogTools {
         let requested = try args.int("timeoutMs") ?? 15_000
         let timeout = min(maxWaitMillis, max(0, requested))
         let limit = try args.limit(default: 50, max: 500)
-        let afterIdArg = try args.int64("afterId")
         let start: Int64
-        if let afterIdArg {
+        if let afterIdArg = try args.int64("afterId") {
             start = afterIdArg
         } else {
             start = try await ctx.store.latestEventId(sessionId: s.id) ?? 0
         }
-        let deadline = ContinuousClock.now + .milliseconds(timeout)
+        let w = try await ctx.waitForEvents(from: s, afterId: start, filter: f.filter, limit: limit,
+                                            timeout: .milliseconds(timeout), untilFirst: true)
         let notes = f.notes
         let resolved = notes.isEmpty ? "" : " Resolved: " + notes.joined(separator: "; ") + "."
-
-        while true {
-            let page = try await ctx.store.eventPage(sessionId: s.id, filter: f.filter, afterId: start,
-                                                     limit: limit, newestFirst: false)
-            if let last = page.events.last {
-                return ToolResult(
-                    summary: "\(page.total) new event(s) matched in session \(s.label) after #\(start) (\(ToolText.describe(f.filter))).\(resolved)",
-                    body: page.events.map(ToolText.eventLine).joined(separator: "\n"),
-                    structured: ["sessionId": JSON(s.id), "timedOut": false, "afterId": JSON(start),
-                                 "timeoutMs": JSON(timeout), "lastId": JSON(last.id), "total": JSON(page.total),
-                                 "hasMore": .bool(page.total > page.events.count),
-                                 "events": .array(page.events.map { ["id": JSON($0.id), "line": .string(ToolText.eventLine($0))] }),
-                                 "resolved": .array(notes.map(JSON.string))],
-                    next: ["logs_get(ids: [\(page.events[0].id)])", "logs_wait(afterId: \(last.id), …) for the next one"],
-                    sessionId: s.id
-                )
-            }
-            if ContinuousClock.now >= deadline || Task.isCancelled { break }
-            // ponytail: polls the store (appends land in 50 ms batches anyway);
-            // switch to LogStore.changes() if 250 ms latency ever matters.
-            try? await Task.sleep(for: .milliseconds(250))
+        let follow = w.followText.isEmpty ? "" : " " + w.followText
+        var structured: [String: JSON] = [
+            "sessionId": JSON(w.sessionId), "timedOut": .bool(w.timedOut), "afterId": JSON(start),
+            "timeoutMs": JSON(timeout), "total": JSON(w.total), "hasMore": .bool(w.total > w.events.count),
+            "events": .array(w.events.map { ["id": JSON($0.id), "line": .string(ToolText.eventLine($0))] }),
+            "resolved": .array(notes.map(JSON.string)),
+        ]
+        structured.merge(w.followFields) { current, _ in current }
+        if let last = w.events.last {
+            structured["lastId"] = JSON(last.id)
+            return ToolResult(
+                summary: "\(w.total) new event(s) matched in session \(s.label) after #\(start) (\(ToolText.describe(f.filter))).\(resolved)\(follow)",
+                body: w.events.map(ToolText.eventLine).joined(separator: "\n"),
+                structured: .object(structured),
+                next: ["logs_get(ids: [\(w.events[0].id)])", "logs_wait(afterId: \(last.id), …) for the next one"],
+                sessionId: w.sessionId
+            )
         }
+        let why = w.sessionEnded ? "The session ended before anything matched" : "Nothing matched in \(timeout / 1000) s"
         return ToolResult(
-            summary: "Nothing matched in \(timeout / 1000) s (session \(s.label), after #\(start), \(ToolText.describe(f.filter))).\(resolved)",
-            structured: ["sessionId": JSON(s.id), "timedOut": true, "afterId": JSON(start),
-                         "timeoutMs": JSON(timeout), "total": 0, "hasMore": false, "events": [],
-                         "resolved": .array(notes.map(JSON.string))],
-            next: ["logs_wait(afterId: \(start), …) to keep waiting", "logs_query(afterId: \(start)) to see what did arrive"],
-            sessionId: s.id
+            summary: "\(why) (session \(s.label), after #\(start), \(ToolText.describe(f.filter))).\(resolved)\(follow)",
+            structured: .object(structured),
+            next: w.sessionEnded
+                ? ["beaver_status() to see the device's new session", "logs_wait(…) without sessionId to follow the device"]
+                : ["logs_wait(afterId: \(start), …) to keep waiting", "logs_query(afterId: \(start)) to see what did arrive"],
+            sessionId: w.sessionId
+        )
+    }
+
+    static let clear = MCPTool(
+        name: "logs_clear",
+        title: "Clear the log view",
+        description: "Use when the user wants a clean screen before reproducing something: hides the events up to now in Beaver's Log feed, like its Clear button (⌘K). Deletes nothing — logs_query still sees every event. Acts on the session the user is viewing.",
+        kind: .change,
+        inputSchema: ToolSchema.object([
+            "sessionId": ToolSchema.integer("The session the user is viewing (the default). Clear only acts on that one."),
+        ])
+    ) { args, ctx in
+        let host = await ctx.ui.snapshot()
+        guard let viewing = host.viewingSessionId else {
+            throw ToolError("The user isn't viewing a session, so there's nothing on screen to clear. beaver_status() shows what is connected.")
+        }
+        if let wanted = try args.int64("sessionId"), wanted != viewing {
+            throw ToolError("Clear only acts on the session the user is viewing (#\(viewing)); you passed #\(wanted). Omit sessionId, or ask the user to open session #\(wanted) first.")
+        }
+        guard let watermark = try await ctx.store.latestEventId(sessionId: viewing) else {
+            throw ToolError("Session #\(viewing) has no events; nothing to clear. Example: logs_wait(timeoutMs: 15000) to wait for the first one.")
+        }
+        await ctx.ui.clearLogView(sessionId: viewing, through: watermark)
+        return ToolResult(
+            summary: "Cleared the Log feed of session #\(viewing): events up to #\(watermark) are hidden on screen. Nothing was deleted.",
+            structured: ["sessionId": JSON(viewing), "watermark": JSON(watermark)],
+            next: ["logs_wait(afterId: \(watermark), …) for what comes next", "logs_query(afterId: \(watermark))"],
+            sessionId: viewing
         )
     }
 }

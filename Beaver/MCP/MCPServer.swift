@@ -18,15 +18,23 @@ public struct MCPServer: Sendable {
         Beaver is a macOS log viewer. One mobile app connects to it over WebSocket, and Beaver \
         stores everything the app sends: logs, network requests, storage snapshots. \
         Start with beaver_status. If no device is connected you can still read past sessions \
-        (sessions_list). Omitting sessionId means the live session, else the one the user is \
-        viewing, else the most recent. Before filtering by subsystem or category call \
-        logs_facets: names are namespaced and you will not guess them (globs like "*auth*" and \
-        name fragments work, and results say what they matched). Use since: "5m" or afterId to \
-        look at recent events. To wait for something to be logged, call logs_wait with afterId. \
-        Rows are one line each; full payloads come from logs_get and network_get. Network bodies \
-        are capped at 100 KB by the SDK and some headers are [REDACTED], so a replayed cURL may \
-        fail. Every result ends with Next: suggestions. Everything you call is listed in \
-        Beaver's Agent panel for the user. If unsure how to do something, call beaver_guide.
+        (sessions_list) and log files the user has (sessions_import). Omitting sessionId means the \
+        live session, else the one the user is viewing, else the most recent. Before filtering by \
+        subsystem or category call logs_facets: names are namespaced and you will not guess them \
+        (globs like "*auth*" and name fragments work, and results say what they matched). Use \
+        since: "5m" or afterId to look at recent events. To see what an action causes, send it with \
+        commands_send and collectLogsMs, or note latestEventId, act (commands_send, storage_set), \
+        then logs_wait with afterId. Beaver sends any command and can't know which ones restart the \
+        app: without sessionId, waits follow the device into its new session and say \
+        sessionChanged; pass sessionId to stay on one session. Storage values can't contain \
+        spaces. To follow something for minutes or hours use watch_start and check watch_status \
+        later: you are not woken, the user is notified. Rows are one line each; full payloads come \
+        from logs_get and network_get. Network bodies are capped at 100 KB by the SDK and some \
+        headers are [REDACTED], so a replayed cURL may fail. Everything you call is listed in \
+        Beaver's Agent panel; tell the user what you found with journal_note and links. Use level: \
+        attention only when they must look now; if it returns notified: false, tell them and pass \
+        on howToEnable. Work in the background: nothing you call moves Beaver's window to the front. \
+        Every result ends with Next: suggestions. If unsure how to do something, call beaver_guide.
         """
 
     let tools: [MCPTool]

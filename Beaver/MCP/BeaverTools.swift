@@ -8,6 +8,10 @@
 
 public enum BeaverTools {
     public static var all: [MCPTool] {
-        StatusTools.all + LogTools.all + NetworkTools.all + StateTools.all + [GuideTool.tool]
+        let groups: [[MCPTool]] = [
+            StatusTools.all, SessionTools.all, LogTools.all, NetworkTools.all, StorageTools.all,
+            StateTools.all, CommandTools.all, WatchTools.all, JournalTools.all,
+        ]
+        return groups.flatMap { $0 } + [GuideTool.tool]
     }
 }

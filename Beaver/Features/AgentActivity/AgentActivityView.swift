@@ -48,6 +48,7 @@ struct AgentActivityView: View {
         }
         .padding(10)
         Divider()
+        NotificationStrip()
         if model.visible.isEmpty && !model.entries.isEmpty {
             // Everything is hidden by the toggle, not missing.
             ContentUnavailableView {
@@ -165,7 +166,7 @@ private struct AgentActivityRow: View {
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
                 Text(entry.client ?? "agent").foregroundStyle(.secondary)
-                Text(entry.tool ?? entry.kind.rawValue).fontWeight(.medium)
+                Text(title).fontWeight(.medium)
                 Spacer()
                 if entry.isError {
                     Image(systemName: "xmark.circle.fill").foregroundStyle(.red)
@@ -173,17 +174,92 @@ private struct AgentActivityRow: View {
                 } else if entry.kind == .destructive {
                     Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
                         .accessibilityLabel("Destructive")
+                } else if entry.kind == .system {
+                    Image(systemName: "info.circle").foregroundStyle(.secondary)
+                        .accessibilityLabel("System")
                 }
             }
             .font(.caption)
             Text(entry.summary)
-                .font(.callout)
-                .lineLimit(6)
+                .font(entry.kind == .note ? .callout.weight(.medium) : .callout)
+                .lineLimit(entry.kind == .note ? nil : 6)
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
+            let links = entry.links
+            if !links.isEmpty {
+                HStack(spacing: 10) {
+                    ForEach(links, id: \.self) { link in
+                        Button("→ \(link.label)") { AgentNotifier.shared.show([link]) }
+                            .buttonStyle(.link)
+                            .font(.caption)
+                    }
+                }
+            }
+            if !entry.isError, let notice = entry.error {
+                HStack(spacing: 6) {
+                    Label(notice, systemImage: "bell.slash").font(.caption).foregroundStyle(.orange)
+                    if let strip = AgentNotifier.shared.strip {
+                        Button(strip.button) { AgentNotifier.shared.perform(strip.action) }
+                            .controlSize(.small)
+                    }
+                }
+            }
         }
         .opacity(entry.kind == .read && !entry.isError ? 0.75 : 1)
         .padding(.vertical, 4)
+        .padding(.horizontal, entry.kind == .note ? 6 : 0)
+        .background {
+            if entry.kind == .note {
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(entry.isAttention ? Color.orange.opacity(0.12) : Color.accentColor.opacity(0.08))
+            }
+        }
+    }
+
+    private var title: String {
+        entry.kind == .note ? "★ note" : (entry.tool ?? entry.kind.rawValue)
+    }
+}
+
+/// Design M28: while notifications can't reach the person, say so and
+/// offer the one action that works; when they can, a switch to mute them.
+private struct NotificationStrip: View {
+    var body: some View {
+        let notifier = AgentNotifier.shared
+        if let strip = notifier.strip {
+            VStack(alignment: .leading, spacing: 6) {
+                Label(strip.title, systemImage: "bell.slash")
+                    .font(.callout.weight(.medium))
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(strip.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                if let error = notifier.lastRequestError {
+                    Text("macOS refused: \(error). Turn it on in System Settings.")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .textSelection(.enabled)
+                }
+                HStack {
+                    Spacer()
+                    Button(strip.button) { notifier.perform(strip.action) }
+                }
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.orange.opacity(0.12))
+            Divider()
+        } else {
+            Toggle("Notifications from the agent",
+                   isOn: Binding(get: { !notifier.muted }, set: { notifier.muted = !$0 }))
+                .toggleStyle(.switch)
+                .controlSize(.small)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .help("macOS notifications for the agent's attention notes while Beaver is in the background")
+            Divider()
+        }
     }
 }
 

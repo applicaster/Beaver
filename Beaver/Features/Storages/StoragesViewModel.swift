@@ -465,12 +465,8 @@ final class StoragesViewModel {
         case noAnswer
     }
 
-    /// Send an edit and read it back. The SDK reports set / delete only
-    /// as a log line, so the proof is the next `storage.list` reply.
-    ///
-    /// A reply to a `storage.list` sent just before the edit can still
-    /// arrive after it and show the old value, so a mismatch only counts
-    /// once no matching snapshot has shown up within ~3 s.
+    /// Send an edit and read it back through `StorageCommand.sendAndVerify`,
+    /// the same path `storage_set` / `storage_delete` take (D58).
     func apply(_ edit: Edit, via server: WSServer) async -> EditResult {
         let previous = StorageCommand.storedValue(
             in: records(in: edit.namespace), parent: edit.parent, key: edit.key
@@ -484,25 +480,15 @@ final class StoragesViewModel {
             return Edit(namespace: edit.namespace, parent: edit.parent, key: edit.key, value: wire)
         }()
 
-        // Snapshot times are stored in whole milliseconds.
-        let sentAt = Date(timeIntervalSince1970: (Date().timeIntervalSince1970 * 1000).rounded(.down) / 1000)
-        await server.send(command: edit.command)
-        await server.send(command: "storage.list")
-
-        var heardBack = false
-        for _ in 0..<12 {
-            try? await Task.sleep(for: .milliseconds(250))
-            await reloadFromStore()
-            guard let taken = takenAt[edit.namespace], taken >= sentAt else { continue }
-            heardBack = true
-            let now = StorageCommand.storedValue(
-                in: records(in: edit.namespace), parent: edit.parent, key: edit.key
-            )
-            if StorageCommand.matches(stored: now, sent: edit.value) {
-                return .applied(undo: undo)
-            }
+        let outcome = await StorageCommand.sendAndVerify(
+            edit.command, layer: edit.namespace, parent: edit.parent, key: edit.key,
+            expected: edit.value, sessionId: sessionId, store: store, device: server)
+        await reloadFromStore()
+        switch outcome {
+        case .applied: return .applied(undo: undo)
+        case .notApplied: return .notApplied
+        case .noAnswer: return .noAnswer
         }
-        return heardBack ? .notApplied : .noAnswer
     }
 
     /// Send `storage.list` to the device. The response comes back as a
