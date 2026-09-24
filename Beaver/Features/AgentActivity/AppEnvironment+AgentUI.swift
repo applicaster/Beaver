@@ -80,10 +80,11 @@ extension AppEnvironment: AgentUI {
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    /// The main window while it is open, on screen or in the Dock.
-    /// Popovers and panels can't become main, so they don't match.
+    /// The main window while it is open, on screen or in the Dock. Panels
+    /// (popovers, About, Sparkle) don't count. Not `canBecomeMain` alone:
+    /// it is false while the window is minimised.
     private var mainWindow: NSWindow? {
-        NSApp.windows.first { $0.canBecomeMain && ($0.isVisible || $0.isMiniaturized) }
+        NSApp.windows.first { !($0 is NSPanel) && ($0.isMiniaturized || ($0.isVisible && $0.canBecomeMain)) }
     }
 
     /// Shows what a journal link points at, through `ui_show`'s path
