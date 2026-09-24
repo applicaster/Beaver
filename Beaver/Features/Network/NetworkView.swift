@@ -234,7 +234,7 @@ struct NetworkView: View {
     private func table(_ rows: [NetworkEntry]) -> some View {
         ScrollViewReader { proxy in
             tableContent(rows)
-                .background { NetworkScrollWatcher { vm.userScrolled(atBottom: $0) } }
+                .background { ScrollWatcher(bottomSlack: 8) { vm.userScrolled(atBottom: $0) } }
                 // Same as the Log feed's auto-scroll: instant, and deferred
                 // one runloop so the Table commits its rows before scrolling.
                 .onChange(of: rows.last?.id) { _, id in
@@ -713,85 +713,5 @@ private struct FacetPickerRow: View {
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
-    }
-}
-
-// MARK: - Scroll watcher
-
-/// Reports each user scroll of the table (trackpad, wheel, scroller
-/// drag) with whether it ended at the bottom. Programmatic `scrollTo`
-/// doesn't post `didLiveScrollNotification`, so following never turns
-/// itself off.
-// ponytail: a copy of LogFeedView's private ScrollWatcher plus the
-// bottom check; share one once the Log feed work has landed.
-private struct NetworkScrollWatcher: NSViewRepresentable {
-    let onUserScroll: (_ atBottom: Bool) -> Void
-
-    func makeNSView(context: Context) -> NSView {
-        let view = NetworkScrollWatcherView()
-        view.onUserScroll = onUserScroll
-        return view
-    }
-
-    func updateNSView(_ nsView: NSView, context: Context) {
-        (nsView as? NetworkScrollWatcherView)?.onUserScroll = onUserScroll
-    }
-}
-
-private final class NetworkScrollWatcherView: NSView {
-    var onUserScroll: ((Bool) -> Void)?
-    private weak var observed: NSScrollView?
-
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        guard window != nil else { unsubscribe(); return }
-        // The Table installs its NSScrollView a runloop later.
-        DispatchQueue.main.async { [weak self] in self?.subscribe() }
-    }
-
-    deinit { unsubscribe() }
-
-    private func subscribe() {
-        guard let scrollView = findScrollView(), observed !== scrollView else { return }
-        unsubscribe()
-        observed = scrollView
-        NotificationCenter.default.addObserver(self, selector: #selector(handleScroll),
-                                               name: NSScrollView.didLiveScrollNotification, object: scrollView)
-    }
-
-    private func unsubscribe() {
-        if let observed {
-            NotificationCenter.default.removeObserver(self, name: NSScrollView.didLiveScrollNotification,
-                                                      object: observed)
-        }
-        observed = nil
-    }
-
-    @objc private func handleScroll() {
-        guard let scrollView = observed, let document = scrollView.documentView else { return }
-        // Within a few points of the end counts as the bottom.
-        onUserScroll?(scrollView.contentView.bounds.maxY >= document.frame.height - 8)
-    }
-
-    /// The Table's scroll view: an ancestor, or a sibling's descendant.
-    private func findScrollView() -> NSScrollView? {
-        var current: NSView? = superview
-        while let view = current {
-            if let scroll = view as? NSScrollView { return scroll }
-            for sibling in view.superview?.subviews ?? [] where sibling !== view {
-                if let scroll = sibling as? NSScrollView ?? sibling.firstDescendantScrollView() { return scroll }
-            }
-            current = view.superview
-        }
-        return nil
-    }
-}
-
-private extension NSView {
-    func firstDescendantScrollView() -> NSScrollView? {
-        for child in subviews {
-            if let scroll = child as? NSScrollView ?? child.firstDescendantScrollView() { return scroll }
-        }
-        return nil
     }
 }
