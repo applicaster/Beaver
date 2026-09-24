@@ -84,6 +84,11 @@ struct MainWindow: View {
                    sid == env.viewingSessionId {
                     await refreshBookmarks()
                 }
+                // Live events that couldn't be stored are gone; say so
+                // rather than leave a silent gap in the feed.
+                if case .writeFailed(let message) = change {
+                    toasts.error(message)
+                }
             }
         }
         // Initial fetch when the viewing session changes — covers

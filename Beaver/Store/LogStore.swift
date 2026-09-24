@@ -31,6 +31,8 @@ public actor LogStore {
         case savedFiltersChanged
         case networkAppended(sessionId: Int64)
         case networkBookmarksChanged(sessionId: Int64)
+        /// A batch of live events could not be written and is lost.
+        case writeFailed(message: String)
     }
 
     public enum Source {
@@ -397,10 +399,10 @@ public actor LogStore {
                 broadcast(.appended(sessionId: sessionId, count: items.count))
             }
         } catch {
-            // Surface via a dedicated error stream in a future iteration.
-            // TODO: append a synthetic error event tagged
-            // 'loggernext.store' so the user sees write failures in-feed.
             print("LogStore flush failed: \(error)")
+            broadcast(.writeFailed(
+                message: "Couldn't save \(batch.count) event\(batch.count == 1 ? "" : "s"): \(error.localizedDescription)"
+            ))
         }
     }
 

@@ -93,4 +93,29 @@ struct LogStoreFeedTests {
             #expect(plan.contains("INTEGER PRIMARY KEY (rowid>?"), "plan: \(plan)")
         }
     }
+
+    @Test("A batch that fails to save is announced, not just printed")
+    func flushFailureIsBroadcast() async throws {
+        let store = try LogStore(source: .inMemory)
+        let stream = await store.changes()
+        // No such session: the foreign key rejects the insert.
+        await store.append(DecodedEvent(timestampMillis: 1, level: .info, subsystem: "s", category: "",
+                                        message: "lost", dataJSON: nil, contextJSON: nil), to: 999)
+        let message = try await withThrowingTaskGroup(of: String?.self) { group in
+            group.addTask {
+                for await change in stream {
+                    if case .writeFailed(let message) = change { return message }
+                }
+                return nil
+            }
+            group.addTask {
+                try await Task.sleep(for: .seconds(5))
+                return nil
+            }
+            let first = try await group.next() ?? nil
+            group.cancelAll()
+            return first
+        }
+        #expect(message?.hasPrefix("Couldn't save 1 event:") == true)
+    }
 }
