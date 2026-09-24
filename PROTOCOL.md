@@ -19,6 +19,7 @@ this doc gets corrected.
 | Address family  | IPv4 and IPv6 (Beaver will accept both)     |
 | TLS             | Not used                                        |
 | Auto-ping       | Server replies to client pings automatically    |
+| Control frames  | Ping, pong and close are never read as frames   |
 | Subprotocols    | None negotiated                                 |
 | Origin          | Not checked                                     |
 
@@ -32,7 +33,9 @@ forbids it.
 ## 2. Frame format
 
 All frames are **text** WebSocket frames whose body is a JSON object. Every
-object has a `type` discriminator field.
+object has a `type` discriminator field. Control frames (ping, pong, close)
+carry no frame: the SDK pings every 20 s to detect a dead socket, and Beaver
+answers without passing the ping payload to the decoder.
 
 ```jsonc
 // Generic envelope:
