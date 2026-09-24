@@ -6,7 +6,7 @@
 import Foundation
 
 enum LogTools {
-    static var all: [MCPTool] { [facets, query] }
+    static var all: [MCPTool] { [facets, query, get] }
 
     static let facets = MCPTool(
         name: "logs_facets",
@@ -120,6 +120,56 @@ enum LogTools {
                          "nextCursor": cursor, "resolved": .array(notes.map(JSON.string))],
             next: next,
             sessionId: s.id
+        )
+    }
+
+    static let get = MCPTool(
+        name: "logs_get",
+        title: "Get events",
+        description: "Use when a log line needs its full message, data and context payloads. Up to 50 ids from logs_query or logs_wait. Payloads over 256 KB are cut, with truncated: true.",
+        kind: .read,
+        inputSchema: ToolSchema.object(["ids": ToolSchema.integers("Event ids, at most 50.")], required: ["ids"])
+    ) { args, ctx in
+        let ids = try args.int64s("ids") ?? []
+        guard !ids.isEmpty else {
+            throw ToolError("ids is required. Example: logs_get(ids: [48211]) — ids are the #numbers in logs_query rows.")
+        }
+        guard ids.count <= 50 else {
+            throw ToolError("At most 50 ids per call; you sent \(ids.count). Split them.")
+        }
+        let events = try await ctx.store.events(ids: Set(ids)).sorted { $0.id < $1.id }
+        let missing = ids.filter { id in !events.contains { $0.id == id } }
+        var blocks: [String] = []
+        var rows: [JSON] = []
+        for e in events {
+            let data = e.dataJSON.map { ToolText.capped($0, maxBytes: ToolText.payloadCap) }
+            let context = e.contextJSON.map { ToolText.capped($0, maxBytes: ToolText.payloadCap) }
+            var block = "#\(e.id) \(e.fullTimestamp) \(e.level.rawValue.uppercased()) "
+                + (e.category.isEmpty ? e.subsystem : "\(e.subsystem)/\(e.category)") + "\n" + e.message
+            if let data { block += "\ndata: " + data.text + (data.truncated ? " … [truncated]" : "") }
+            if let context { block += "\ncontext: " + context.text + (context.truncated ? " … [truncated]" : "") }
+            blocks.append(block)
+            // Parsed when whole and valid, so the agent gets structure; the raw text otherwise.
+            func payload(_ p: (text: String, truncated: Bool)?) -> JSON {
+                guard let p else { return .null }
+                if !p.truncated, let parsed = try? JSON.parse(Data(p.text.utf8)) { return parsed }
+                return .string(p.text)
+            }
+            rows.append([
+                "id": JSON(e.id), "sessionId": JSON(e.sessionId), "time": .string(e.fullTimestamp),
+                "level": .string(e.level.rawValue), "subsystem": .string(e.subsystem),
+                "category": .string(e.category), "message": .string(e.message),
+                "data": payload(data), "dataTruncated": .bool(data?.truncated ?? false),
+                "context": payload(context), "contextTruncated": .bool(context?.truncated ?? false),
+            ])
+        }
+        return ToolResult(
+            summary: "\(events.count) event(s)" + (missing.isEmpty ? "." : "; not found: \(missing.map(String.init).joined(separator: ", ")).")
+                + (rows.contains { $0["dataTruncated"] == true || $0["contextTruncated"] == true } ? " Some payloads were cut at 256 KB." : ""),
+            body: blocks.joined(separator: "\n\n"),
+            structured: ["events": .array(rows), "missing": .array(missing.map { JSON($0) })],
+            next: events.last.map { ["logs_query(afterId: \($0.id), order: \"oldest\") for what came after"] } ?? ["logs_query()"],
+            sessionId: events.first?.sessionId
         )
     }
 }
