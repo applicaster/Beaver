@@ -176,10 +176,17 @@ Options on the table:
 - `GET /mcp` → `405` (no server-initiated stream). `DELETE` → `405`.
 - No `Mcp-Session-Id`: the server is stateless. Nothing a tool does depends on
   earlier calls in the same MCP session.
-- **Origin.** If an `Origin` header is present and is not `http://localhost…`,
-  `http://127.0.0.1…` or `null`, the request is rejected with `403`. This is
-  the DNS-rebinding defense the MCP spec asks for. There are no
+- **Origin.** If an `Origin` header is present and is not `http://localhost…`
+  or `http://127.0.0.1…`, the request is rejected with `403`. This is the
+  DNS-rebinding defense the MCP spec asks for, and it also covers
+  `Origin: null` (a sandboxed iframe, a `data:`/`file:` page): absent is the
+  only origin that passes without a loopback host. There are no
   `Access-Control-*` headers.
+- **Content-Type.** A `POST` with a non-empty body must send
+  `Content-Type: application/json` (parameters like `; charset=utf-8` are
+  ignored, matching is case-insensitive); anything else is rejected with
+  `415`. Otherwise a page could post a same-origin, no-preflight
+  `text/plain` body and still reach a tool.
 - The `User-Agent` header (e.g. `claude-code/2.1`) is recorded as the client
   name in the journal. Nothing else identifies a caller.
 - Body limit 4 MB in; responses are capped by the tools themselves (§6).

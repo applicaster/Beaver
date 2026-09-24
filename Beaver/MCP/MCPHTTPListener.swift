@@ -92,7 +92,7 @@ public struct HTTPResponse: Sendable, Equatable {
     static let reasons = [
         200: "OK", 202: "Accepted", 400: "Bad Request", 403: "Forbidden", 404: "Not Found",
         405: "Method Not Allowed", 411: "Length Required", 413: "Content Too Large",
-        431: "Request Header Fields Too Large",
+        415: "Unsupported Media Type", 431: "Request Header Fields Too Large",
     ]
 }
 
@@ -113,6 +113,9 @@ public enum MCPHTTP {
             r.headers["Allow"] = "POST"
             return r
         }
+        if !request.body.isEmpty, !contentTypeIsJSON(request.headers["content-type"]) {
+            return .text(415, "Content-Type must be application/json.")
+        }
         guard let reply = await handler(request.body, request.headers) else {
             return HTTPResponse(status: 202, headers: [:], body: Data())
         }
@@ -120,9 +123,22 @@ public enum MCPHTTP {
     }
 
     public static func originAllowed(_ origin: String?) -> Bool {
-        guard let origin, origin != "null" else { return true }
+        // No Origin header at all (Claude Code, Cursor, curl) stays allowed.
+        // `Origin: null` — a sandboxed iframe, a `data:`/`file:` page — is
+        // rejected: it's exactly the kind of origin the DNS-rebinding check
+        // exists to keep out, not a signal of a trusted non-browser client.
+        guard let origin else { return true }
         guard let host = URL(string: origin)?.host() else { return false }
         return ["localhost", "127.0.0.1", "::1", "[::1]"].contains(host)
+    }
+
+    /// The media type only: `application/json; charset=utf-8` matches,
+    /// parameters and case are ignored.
+    static func contentTypeIsJSON(_ contentType: String?) -> Bool {
+        guard let contentType else { return false }
+        let media = contentType.split(separator: ";", maxSplits: 1).first?
+            .trimmingCharacters(in: .whitespaces) ?? ""
+        return media.caseInsensitiveCompare("application/json") == .orderedSame
     }
 }
 

@@ -1999,7 +1999,15 @@ won't decode, and the feed starts unfiltered once.
   immediate rebind on the same port could otherwise see
   `EADDRINUSE`. `start()` and `stop()` are safe against overlapping
   calls: a `start()` racing a `stop()`, or two `start()`s, resolve to
-  exactly one live listener.
+  exactly one live listener. `Origin: null` is rejected, not
+  allowed — a sandboxed iframe, `data:` or `file:` page sends exactly
+  that origin, so treating it as trusted would defeat the check;
+  only an absent `Origin` (every non-browser MCP client) passes
+  without a loopback host. A `POST` with a non-empty body also needs
+  `Content-Type: application/json` (parameters ignored, case
+  folded), rejected otherwise with `415` — without it, a page could
+  send a same-origin `text/plain` body with no preflight and still
+  reach a tool.
 
 ---
 

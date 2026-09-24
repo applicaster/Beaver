@@ -42,7 +42,7 @@ struct MCPHTTPTests {
     }
 
     @Test("Origins", arguments: [
-        (nil as String?, true), ("null", true), ("http://localhost:3000", true),
+        (nil as String?, true), ("null", false), ("http://localhost:3000", true),
         ("http://127.0.0.1", true), ("http://[::1]:8080", true),
         ("https://evil.example", false), ("http://localhost.evil.example", false),
     ])
@@ -58,13 +58,24 @@ struct MCPHTTPTests {
 
     @Test("Routes")
     func routes() async {
-        #expect(await MCPHTTP.route(request("POST", body: "{}"), handler: echo).status == 200)
-        #expect(await MCPHTTP.route(request("POST", body: "{}"), handler: echo).headers["Content-Type"] == "application/json")
+        #expect(await MCPHTTP.route(request("POST", body: "{}", headers: ["content-type": "application/json"]), handler: echo).status == 200)
+        #expect(await MCPHTTP.route(request("POST", body: "{}", headers: ["content-type": "application/json"]), handler: echo).headers["Content-Type"] == "application/json")
         #expect(await MCPHTTP.route(request("POST"), handler: echo).status == 202)
         #expect(await MCPHTTP.route(request("GET"), handler: echo).status == 405)
-        #expect(await MCPHTTP.route(request("POST", "/other", body: "{}"), handler: echo).status == 404)
-        #expect(await MCPHTTP.route(request("POST", body: "{}", headers: ["origin": "https://evil.example"]), handler: echo).status == 403)
-        #expect(await MCPHTTP.route(request("POST", "/mcp?x=1", body: "{}"), handler: echo).status == 200)
+        #expect(await MCPHTTP.route(request("POST", "/other", body: "{}", headers: ["content-type": "application/json"]), handler: echo).status == 404)
+        #expect(await MCPHTTP.route(request("POST", body: "{}", headers: ["origin": "https://evil.example", "content-type": "application/json"]), handler: echo).status == 403)
+        #expect(await MCPHTTP.route(request("POST", body: "{}", headers: ["origin": "null", "content-type": "application/json"]), handler: echo).status == 403)
+        #expect(await MCPHTTP.route(request("POST", "/mcp?x=1", body: "{}", headers: ["content-type": "application/json"]), handler: echo).status == 200)
+    }
+
+    @Test("A POST body must be application/json (media type only, params ignored, case-insensitive)")
+    func contentType() async {
+        #expect(await MCPHTTP.route(request("POST", body: "hi", headers: ["content-type": "text/plain"]), handler: echo).status == 415)
+        #expect(await MCPHTTP.route(request("POST", body: "{}"), handler: echo).status == 415)
+        #expect(await MCPHTTP.route(request("POST", body: "{}", headers: ["content-type": "application/json; charset=utf-8"]), handler: echo).status == 200)
+        #expect(await MCPHTTP.route(request("POST", body: "{}", headers: ["content-type": "APPLICATION/JSON"]), handler: echo).status == 200)
+        // A notification/response body (nil reply) is empty, so no Content-Type is required to send it.
+        #expect(await MCPHTTP.route(request("POST"), handler: echo).status == 202)
     }
 
     @Test("Serialized response")
