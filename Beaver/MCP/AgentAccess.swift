@@ -32,11 +32,11 @@ public actor AgentAccess {
     /// and race another call against it deterministically.
     private let duringDrain: (@Sendable () async -> Void)?
 
-    public init(store: LogStore, ui: any AgentUI,
+    public init(store: LogStore, ui: any AgentUI, device: any DeviceLink,
                 beforeBind: (@Sendable () async -> Void)? = nil,
                 duringDrain: (@Sendable () async -> Void)? = nil) {
         server = MCPServer(tools: BeaverTools.all,
-                           context: ToolContext(store: store, ui: ui),
+                           context: ToolContext(store: store, ui: ui, device: device),
                            journal: AgentJournal(store: store))
         self.beforeBind = beforeBind
         self.duringDrain = duringDrain

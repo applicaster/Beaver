@@ -19,7 +19,7 @@ struct AgentAccessTests {
     @Test("Start serves every tool; stop closes the port")
     func startStop() async throws {
         let store = try LogStore(source: .inMemory)
-        let access = AgentAccess(store: store, ui: FakeUI(value: HostSnapshot()))
+        let access = AgentAccess(store: store, ui: FakeUI(), device: FakeDevice())
         let port = try await access.start(port: 0)
         let list = try await post(port, #"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#)
         #expect(list["result"]?["tools"]?.array?.count == BeaverTools.all.count)
@@ -82,7 +82,7 @@ struct AgentAccessTests {
         // guard, so at most one survives to be `self.listener` — the loser
         // must cancel its own orphaned listener rather than leak it.
         let store = try LogStore(source: .inMemory)
-        let access = AgentAccess(store: store, ui: FakeUI(value: HostSnapshot()))
+        let access = AgentAccess(store: store, ui: FakeUI(), device: FakeDevice())
         async let first: UInt16? = try? await access.start(port: 0)
         async let second: UInt16? = try? await access.start(port: 0)
         let ports = [await first, await second].compactMap { $0 }
@@ -111,7 +111,7 @@ struct AgentAccessTests {
         let store = try LogStore(source: .inMemory)
         let (reached, reachedContinuation) = AsyncStream<Void>.makeStream()
         let (gate, gateContinuation) = AsyncStream<Void>.makeStream()
-        let access = AgentAccess(store: store, ui: FakeUI(value: HostSnapshot())) {
+        let access = AgentAccess(store: store, ui: FakeUI(), device: FakeDevice()) {
             reachedContinuation.yield(())
             var iterator = gate.makeAsyncIterator()
             _ = await iterator.next()
@@ -146,7 +146,7 @@ struct AgentAccessTests {
         let (reached, reachedContinuation) = AsyncStream<Void>.makeStream()
         let (gate, gateContinuation) = AsyncStream<Void>.makeStream()
         let calls = Counter()
-        let access = AgentAccess(store: store, ui: FakeUI(value: HostSnapshot())) {
+        let access = AgentAccess(store: store, ui: FakeUI(), device: FakeDevice()) {
             guard await calls.increment() == 2 else { return }
             reachedContinuation.yield(())
             var iterator = gate.makeAsyncIterator()
@@ -187,7 +187,7 @@ struct AgentAccessTests {
         let (reached, reachedContinuation) = AsyncStream<Void>.makeStream()
         let (gate, gateContinuation) = AsyncStream<Void>.makeStream()
         let calls = Counter()
-        let access = AgentAccess(store: store, ui: FakeUI(value: HostSnapshot()), duringDrain: {
+        let access = AgentAccess(store: store, ui: FakeUI(), device: FakeDevice(), duringDrain: {
             guard await calls.increment() == 1 else { return }
             reachedContinuation.yield(())
             var iterator = gate.makeAsyncIterator()
@@ -229,7 +229,7 @@ struct AgentAccessTests {
         let (reached, reachedContinuation) = AsyncStream<Void>.makeStream()
         let (gate, gateContinuation) = AsyncStream<Void>.makeStream()
         let calls = Counter()
-        let access = AgentAccess(store: store, ui: FakeUI(value: HostSnapshot()), duringDrain: {
+        let access = AgentAccess(store: store, ui: FakeUI(), device: FakeDevice(), duringDrain: {
             guard await calls.increment() == 1 else { return }
             reachedContinuation.yield(())
             var iterator = gate.makeAsyncIterator()

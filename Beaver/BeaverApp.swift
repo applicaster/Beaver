@@ -51,7 +51,7 @@ struct BeaverApp: App {
         let server = WSServer(port: 9080)
         let environment = AppEnvironment(store: store, server: server)
         _env = State(initialValue: environment)
-        agentAccess = AgentAccess(store: store, ui: environment)
+        agentAccess = AgentAccess(store: store, ui: environment, device: server)
 
         // Sparkle: `startingUpdater: true` schedules the first
         // appcast check shortly after launch. Subsequent checks run

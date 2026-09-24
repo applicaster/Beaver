@@ -32,15 +32,26 @@ public struct HostSnapshot: Sendable, Equatable {
     }
 }
 
+/// How tools reach the connected app (design M15, D57). `WSServer` is the
+/// live one; tests use a fake.
+public protocol DeviceLink: Sendable {
+    func send(command: String) async
+}
+
+extension WSServer: DeviceLink {}
+
 /// Everything a tool handler gets.
 public struct ToolContext: Sendable {
     public let store: LogStore
     public let ui: any AgentUI
+    public let device: any DeviceLink
     public let now: @Sendable () -> Date
 
-    public init(store: LogStore, ui: any AgentUI, now: @escaping @Sendable () -> Date = { Date() }) {
+    public init(store: LogStore, ui: any AgentUI, device: any DeviceLink,
+                now: @escaping @Sendable () -> Date = { Date() }) {
         self.store = store
         self.ui = ui
+        self.device = device
         self.now = now
     }
 }
