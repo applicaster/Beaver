@@ -139,7 +139,7 @@ struct NetworkView: View {
     /// `Results (754/754)  Success 96% (720/749)  Avg 413 ms` and the
     /// Bookmarks / Clear / Pause / Export HAR buttons, as in zapp-support.
     private func resultsBar(_ rows: [NetworkEntry]) -> some View {
-        let s = NetworkStats(rows)
+        let s = vm.stats
         return HStack(spacing: 12) {
             Text("Results (\(s.count)/\(vm.entries.count))").font(.headline)
             let stats = [
@@ -185,7 +185,7 @@ struct NetworkView: View {
     /// nothing to narrow to, unless it is on (so it can be turned off).
     @ViewBuilder
     private var bookmarksButton: some View {
-        let count = vm.entries.lazy.filter { vm.isBookmarked($0.id) }.count
+        let count = vm.bookmarkCount
         let button = Button { vm.showOnlyBookmarked.toggle() } label: {
             Label("Bookmarks (\(count))", systemImage: vm.showOnlyBookmarked ? "bookmark.fill" : "bookmark")
         }

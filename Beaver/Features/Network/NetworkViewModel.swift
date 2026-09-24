@@ -12,8 +12,18 @@ final class NetworkViewModel {
     let sessionId: Int64
     private let store: LogStore
 
-    private(set) var entries: [NetworkEntry] = []
-    var filter = NetworkFilter()
+    private(set) var entries: [NetworkEntry] = [] {
+        didSet { bookmarkCount = entries.count { bookmarkedIds.contains($0.id) } }
+    }
+    /// A search edit waits `searchDebounce` before re-filtering, so typing
+    /// doesn't scan every body on each keystroke; other changes apply at once.
+    var filter = NetworkFilter() {
+        didSet {
+            guard filter != oldValue else { return }
+            var unsearched = filter; unsearched.search = oldValue.search
+            if unsearched == oldValue { scheduleSearch() } else { recompute() }
+        }
+    }
     var selection: NetworkEntry.ID?
 
     /// While paused new requests are stored but not loaded; `pendingCount`
@@ -21,15 +31,23 @@ final class NetworkViewModel {
     private(set) var isPaused = false
     private(set) var pendingCount = 0
 
-    private(set) var bookmarkedIds: Set<Int64> = []
-    var showOnlyBookmarked = false
+    private(set) var bookmarkedIds: Set<Int64> = [] {
+        didSet {
+            bookmarkCount = entries.count { bookmarkedIds.contains($0.id) }
+            if showOnlyBookmarked { recompute() }
+        }
+    }
+    private(set) var bookmarkCount = 0
+    var showOnlyBookmarked = false { didSet { if showOnlyBookmarked != oldValue { recompute() } } }
 
-    // ponytail: filters the whole array on every change. Fine for a few
-    // thousand requests per session; move to SQL / incremental if a
-    // session ever gets much bigger.
-    var filtered: [NetworkEntry] { filter.isEmpty ? base : base.filter(filter.matches) }
+    /// What the table shows, and its results bar. Stored, not computed:
+    /// rebuilt only when the filter, bookmarks or entries change, and on
+    /// append only the new rows are filtered — never on a render.
+    private(set) var filtered: [NetworkEntry] = []
+    private(set) var stats = NetworkStats([])
+
     /// After Clear and bookmarks-only, before the filter: what the
-    /// Method / Status / Host dropdowns count.
+    /// Method / Status / Host dropdowns count (only while one is open).
     var base: [NetworkEntry] {
         showOnlyBookmarked ? entries.filter { bookmarkedIds.contains($0.id) } : entries
     }
@@ -37,10 +55,12 @@ final class NetworkViewModel {
     /// or bookmarks-only that hides it also empties the detail pane, instead
     /// of showing a request the table no longer lists.
     var selected: NetworkEntry? {
-        guard let id = selection, let e = entries.first(where: { $0.id == id }) else { return nil }
-        let visible = (!showOnlyBookmarked || bookmarkedIds.contains(id)) && filter.matches(e)
-        return visible ? e : nil
+        guard let id = selection else { return nil }
+        return filtered.first { $0.id == id }
     }
+
+    private static let searchDebounce = Duration.milliseconds(150)
+    @ObservationIgnored private var searchTask: Task<Void, Never>?
 
     /// See StoragesViewModel.subscription for why this is nonisolated(unsafe).
     private nonisolated(unsafe) var subscription: Task<Void, Never>?
@@ -74,6 +94,7 @@ final class NetworkViewModel {
                     await self.loadBookmarks()
                 case .cleared(let sid) where sid == self.sessionId:
                     self.entries = []
+                    self.recompute()
                     self.selection = nil
                     self.maxLoadedId = 0
                     self.pendingCount = 0
@@ -93,6 +114,7 @@ final class NetworkViewModel {
     /// session (a new VM) shows everything again.
     func clear() {
         entries = []
+        recompute()
         selection = nil
     }
 
@@ -123,5 +145,28 @@ final class NetworkViewModel {
         guard !newOnes.isEmpty else { return }
         entries.append(contentsOf: newOnes)
         maxLoadedId = max(maxLoadedId, newOnes.map(\.id).max() ?? 0)
+        let shown = newOnes.filter(isShown)
+        guard !shown.isEmpty else { return }
+        filtered.append(contentsOf: shown)
+        stats = NetworkStats(filtered)
+    }
+
+    private func isShown(_ e: NetworkEntry) -> Bool {
+        (!showOnlyBookmarked || bookmarkedIds.contains(e.id)) && filter.matches(e)
+    }
+
+    private func recompute() {
+        searchTask?.cancel()
+        filtered = filter.isEmpty && !showOnlyBookmarked ? entries : entries.filter(isShown)
+        stats = NetworkStats(filtered)
+    }
+
+    private func scheduleSearch() {
+        searchTask?.cancel()
+        searchTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.searchDebounce)
+            guard !Task.isCancelled else { return }
+            self?.recompute()
+        }
     }
 }

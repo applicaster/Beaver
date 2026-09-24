@@ -335,4 +335,35 @@ struct NetworkFilterTests {
         #expect(NetworkEntry.statusLabel(for: .code(299)) == "299")
         #expect(NetworkEntry.statusLabel(for: .noStatus) == "No status")
     }
+    /// Benchmark-style: 5 000 entries with 2 KB bodies and a few headers,
+    /// searched the way the Network tab does on every (debounced) keystroke.
+    @Test
+    func searchOverFiveThousandEntries() throws {
+        let filler = String(repeating: "lorem ipsum dolor sit amet ", count: 80)
+        let entries = (0..<5_000).map { i in
+            let body = i % 100 == 0 ? filler + "needle-\(i)" : filler
+            let o: [String: Any] = [
+                "url": "https://api\(i % 7).example.com/v1/items/\(i)?page=\(i % 10)",
+                "method": i % 3 == 0 ? "POST" : "GET",
+                "status": 200,
+                "requestHeaders": ["Accept": "application/json", "User-Agent": "Beaver/1.0"],
+                "responseHeaders": ["Content-Type": "application/json", "X-Trace": "trace-\(i)"],
+                "requestBody": i % 3 == 0 ? filler : "",
+                "responseBody": body,
+            ]
+            let json = String(decoding: try! JSONSerialization.data(withJSONObject: o), as: UTF8.self)
+            return NetworkEntry.parse(json, id: Int64(i + 1), fallbackMillis: UInt64(i))!
+        }
+        var f = NetworkFilter(); f.search = "NEEDLE"
+        let clock = ContinuousClock()
+        var matched: [NetworkEntry] = []
+        let elapsed = clock.measure { matched = entries.filter(f.matches) }
+        #expect(matched.count == 50)
+        #expect(matched.first?.id == 1)
+        print("NetworkFilter search over 5 000 entries: \(elapsed)")
+        var byHost = NetworkFilter(); byHost.host = "api3.example.com"
+        let hostElapsed = clock.measure { matched = entries.filter(byHost.matches) }
+        #expect(matched.count == 714)
+        print("NetworkFilter host facet over 5 000 entries: \(hostElapsed)")
+    }
 }

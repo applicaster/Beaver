@@ -45,6 +45,12 @@ public struct NetworkEntry: Identifiable, Hashable, Sendable {
     public let id: Int64
     public let requestId: String
     public let url: String
+    /// Parsed once in `parse`: the table, the filter and the Host facet
+    /// read it for every row on every pass.
+    public let host: String
+    /// Path plus query, the "Path" column. Falls back to the whole URL
+    /// when it doesn't parse, so the row is never blank.
+    public let path: String
     public let method: String
     public let status: Int?
     public let statusText: String?
@@ -61,16 +67,6 @@ public struct NetworkEntry: Identifiable, Hashable, Sendable {
     public let durationMillis: Int?
     public let error: String?
     public let payloadJSON: String
-
-    public var host: String { URLComponents(string: url)?.host ?? "" }
-
-    /// Path plus query, the "Path" column. Falls back to the whole URL
-    /// when it doesn't parse, so the row is never blank.
-    public var path: String {
-        guard let c = URLComponents(string: url), c.host != nil else { return url }
-        let p = c.percentEncodedPath.isEmpty ? "/" : c.percentEncodedPath
-        return c.percentEncodedQuery.map { "\(p)?\($0)" } ?? p
-    }
 
     public var statusClass: StatusClass { StatusClass(status: status) }
 
@@ -92,10 +88,19 @@ public struct NetworkEntry: Identifiable, Hashable, Sendable {
             return end - s
         }()
 
+        let c = URLComponents(string: url)
+        let path: String = {
+            guard let c, c.host != nil else { return url }
+            let p = c.percentEncodedPath.isEmpty ? "/" : c.percentEncodedPath
+            return c.percentEncodedQuery.map { "\(p)?\($0)" } ?? p
+        }()
+
         return NetworkEntry(
             id: id,
             requestId: o["requestId"] as? String ?? "",
             url: url,
+            host: c?.host ?? "",
+            path: path,
             method: (o["method"] as? String ?? "GET").uppercased(),
             status: int(o["status"]),
             statusText: o["statusText"] as? String,
