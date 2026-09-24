@@ -46,13 +46,57 @@ struct StoragesView: View {
     }
 }
 
+// MARK: - Editing
+
+/// `@AppStorage` key for the storage-only export's redaction toggle.
+private let storageExportRedactKey = "storageExportRedactKeychain"
+
+extension AppEnvironment {
+    /// Whether the connected device lists `storage.<layer>.<action>` in
+    /// its `cmdlist` reply (anything goes before a reply arrives).
+    func supportsStorage(_ action: StorageCommand.Action,
+                         in layer: StorageSnapshot.Namespace) -> Bool {
+        StorageCommand.isSupported(action, in: layer, by: availableCommands.map(\.name))
+    }
+}
+
+/// Send an edit, then say whether the device really applied it — the
+/// SDK only logs the result. A successful edit offers Undo.
+@MainActor
+private func sendStorageEdit(_ edit: StoragesViewModel.Edit,
+                             vm: StoragesViewModel,
+                             server: WSServer,
+                             toasts: ToastCenter,
+                             isUndo: Bool = false) {
+    Task {
+        switch await vm.apply(edit, via: server) {
+        case .applied(let undo):
+            if isUndo {
+                toasts.success("Undone")
+            } else if let undo {
+                toasts.show("Applied", duration: 6, action: ToastAction(title: "Undo") {
+                    sendStorageEdit(undo, vm: vm, server: server, toasts: toasts, isUndo: true)
+                })
+            } else {
+                toasts.success("Applied — no Undo: the old value has spaces")
+            }
+        case .notApplied:
+            toasts.error("Device didn't apply this — see the log")
+        case .noAnswer:
+            toasts.error("No reply from the device — see the log")
+        }
+    }
+}
+
 // MARK: - Content
 
 private struct StoragesContent: View {
     @Bindable var vm: StoragesViewModel
     @Environment(AppEnvironment.self) private var env
+    @Environment(ToastCenter.self) private var toasts
     @State private var showingExporter = false
     @State private var exportDocument: JSONExportDocument?
+    @AppStorage(storageExportRedactKey) private var redactKeychain = true
 
     // Add / delete sheet state. Each row in the outline owns its
     // namespace, so we carry that along — the action sheet picks the
@@ -98,6 +142,12 @@ private struct StoragesContent: View {
     @State private var pendingInnerDelete: InnerDeleteTarget?
     @State private var pendingAdd: AddKeyContext?
     @State private var pendingFieldDelete: StorageFieldTarget?
+    /// A Keychain write waiting for the user to confirm it.
+    @State private var pendingKeychainSave: StoragesViewModel.Edit?
+
+    private func send(_ edit: StoragesViewModel.Edit) {
+        sendStorageEdit(edit, vm: vm, server: env.server, toasts: toasts)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -184,14 +234,13 @@ private struct StoragesContent: View {
             presenting: pendingDelete
         ) { target in
             Button("Delete", role: .destructive) {
-                let key = target.record.key
-                let ns  = target.namespace
                 pendingDelete = nil
-                vm.deleteValue(in: ns, key: key, via: env.server)
+                send(.init(namespace: target.namespace, parent: nil,
+                           key: target.record.key, value: nil))
             }
             Button("Cancel", role: .cancel) { pendingDelete = nil }
         } message: { _ in
-            Text("The value is removed on the device immediately. Other devices won't see the change until they reconnect.")
+            Text("Removes the key from the device's storage right away. Undo is offered once the device confirms.")
         }
         // Inner-row delete confirmation. SDK contract:
         //   storage.<wireKey>.delete <childKey> <parentKey>
@@ -206,20 +255,13 @@ private struct StoragesContent: View {
             presenting: pendingInnerDelete
         ) { target in
             Button("Delete", role: .destructive) {
-                let ns      = target.namespace
-                let parent  = target.parentKey
-                let child   = target.childKey
                 pendingInnerDelete = nil
-                vm.deleteValue(
-                    in: ns,
-                    parent: parent,
-                    key: child,
-                    via: env.server
-                )
+                send(.init(namespace: target.namespace, parent: target.parentKey,
+                           key: target.childKey, value: nil))
             }
             Button("Cancel", role: .cancel) { pendingInnerDelete = nil }
         } message: { _ in
-            Text("Removes one key inside the namespace on the device. The namespace itself stays.")
+            Text("Removes one key inside the namespace on the device. The namespace itself stays. Undo is offered once the device confirms.")
         }
         // Field delete: the SDK can't remove part of a value, so this
         // rewrites the whole stored JSON without the field.
@@ -231,18 +273,43 @@ private struct StoragesContent: View {
             ),
             presenting: pendingFieldDelete
         ) { target in
-            Button("Delete", role: .destructive) {
-                pendingFieldDelete = nil
-                guard let json = JSONFieldPatch.removing(target.field.id, in: target.storedJSON) else { return }
-                vm.setValue(in: target.namespace, parent: target.parentKey,
-                            key: target.key, value: json, via: env.server)
+            // Sending a value with spaces would write the wrong key, so
+            // then the dialog only explains.
+            if let json = fieldDeleteValue(target),
+               StorageCommand.valueProblem(json, parent: target.parentKey) == nil {
+                Button("Delete", role: .destructive) {
+                    pendingFieldDelete = nil
+                    send(.init(namespace: target.namespace, parent: target.parentKey,
+                               key: target.key, value: json))
+                }
+                Button("Cancel", role: .cancel) { pendingFieldDelete = nil }
+            } else {
+                Button("OK", role: .cancel) { pendingFieldDelete = nil }
             }
-            Button("Cancel", role: .cancel) { pendingFieldDelete = nil }
         } message: { target in
-            let json = JSONFieldPatch.removing(target.field.id, in: target.storedJSON) ?? ""
-            Text(json.contains(where: \.isWhitespace)
-                 ? "Rewrites \(target.key) on the device without this field. The new value contains spaces, which the device splits on — it may store only part of it."
-                 : "Rewrites \(target.key) on the device without this field.")
+            let problem = fieldDeleteValue(target).flatMap {
+                StorageCommand.valueProblem($0, parent: target.parentKey)
+            }
+            Text(problem.map { "Can't delete this field: \($0)" }
+                 ?? "Rewrites \(target.key) on the device without this field.")
+        }
+        // The Keychain holds sign-in tokens; a slip there can log the
+        // app out, so writes to it are confirmed.
+        .confirmationDialog(
+            "Write \"\(pendingKeychainSave?.key ?? "")\" to the Keychain?",
+            isPresented: Binding(
+                get: { pendingKeychainSave != nil },
+                set: { if !$0 { pendingKeychainSave = nil } }
+            ),
+            presenting: pendingKeychainSave
+        ) { edit in
+            Button("Write to Keychain", role: .destructive) {
+                pendingKeychainSave = nil
+                send(edit)
+            }
+            Button("Cancel", role: .cancel) { pendingKeychainSave = nil }
+        } message: { _ in
+            Text("The Keychain holds sign-in tokens and credentials. A wrong value can sign the app out. Undo is offered once the device confirms.")
         }
         // Add-key sheet. Identifiable trigger so the same view powers
         // both top-bar "+ Add key" (parentKey = nil → top-level) and
@@ -254,18 +321,24 @@ private struct StoragesContent: View {
                 editKey: ctx.editKey,
                 initialValue: ctx.editValue,
                 fieldLabel: ctx.field?.fieldLabel,
+                // A string field takes any text; other fields and whole
+                // values must parse when they look like JSON.
+                validatesJSON: ctx.field.map { f in
+                    if case .string = f.field.kind { return false }
+                    return true
+                } ?? true,
                 transform: ctx.field.map { f in
                     { JSONFieldPatch.setting(f.field.id, to: $0, in: f.storedJSON) }
                 },
                 onSave: { namespace, parent, key, value in
-                    vm.setValue(
-                        in: namespace,
-                        parent: parent,
-                        key: key,
-                        value: value,
-                        via: env.server
-                    )
                     pendingAdd = nil
+                    let edit = StoragesViewModel.Edit(namespace: namespace, parent: parent,
+                                                      key: key, value: value)
+                    if namespace == .keychain {
+                        pendingKeychainSave = edit
+                    } else {
+                        send(edit)
+                    }
                 },
                 onCancel: { pendingAdd = nil }
             )
@@ -293,6 +366,21 @@ private struct StoragesContent: View {
         formatter.dateFormat = "yyyy-MM-dd_HHmmss"
         formatter.locale = .init(identifier: "en_US_POSIX")
         return "loggernext_storages_\(formatter.string(from: Date()))"
+    }
+
+    private func fieldDeleteValue(_ target: StorageFieldTarget) -> String? {
+        JSONFieldPatch.removing(target.field.id, in: target.storedJSON)
+    }
+
+    /// Just the storage, in zapp-support's shape. Keychain values are
+    /// redacted unless the user turned that off in the Export menu.
+    private func prepareStorageExport() {
+        let storage = vm.snapshots.mapValues(\.dataJSON)
+        guard !storage.isEmpty,
+              let data = try? EventJSON.encodeStorage(storage, redactKeychain: redactKeychain)
+        else { return }
+        exportDocument = JSONExportDocument(data: data)
+        showingExporter = true
     }
 
     private func prepareExport(scope: SessionExport.Scope) async {
@@ -1888,12 +1976,17 @@ private struct AddStorageKeySheet: View {
     /// Field mode: the value typed is one field's; `transform` turns it
     /// into the whole stored value (nil = can't).
     let fieldLabel: String?
+    /// Text that opens with `{` or `[` must parse. Off for a string
+    /// field, which stores any text as-is.
+    let validatesJSON: Bool
     let transform: ((String) -> String?)?
 
-    /// What actually gets sent as the key's value.
+    /// What actually gets sent as the key's value: the patched document
+    /// in field mode, and JSON compacted either way (the editor shows it
+    /// pretty-printed).
     private var outgoingValue: String? {
-        guard let transform else { return value }
-        return transform(value)
+        guard let transform else { return StorageCommand.wireValue(value) }
+        return transform(value).map(StorageCommand.wireValue)
     }
     let onSave: (StorageSnapshot.Namespace, String?, String, String) -> Void
     let onCancel: () -> Void
@@ -1906,6 +1999,7 @@ private struct AddStorageKeySheet: View {
          editKey: String? = nil,
          initialValue: String = "",
          fieldLabel: String? = nil,
+         validatesJSON: Bool = true,
          transform: ((String) -> String?)? = nil,
          onSave: @escaping (StorageSnapshot.Namespace, String?, String, String) -> Void,
          onCancel: @escaping () -> Void) {
@@ -1913,30 +2007,50 @@ private struct AddStorageKeySheet: View {
         self.initialParent = initialParent
         self.editKey = editKey
         self.fieldLabel = fieldLabel
+        self.validatesJSON = validatesJSON
         self.transform = transform
         self.onSave = onSave
         self.onCancel = onCancel
         _key = State(initialValue: editKey ?? "")
-        _value = State(initialValue: initialValue)
+        // Stored JSON is usually one long line; show it indented. A
+        // string field keeps its text exactly — reformatting it would
+        // change what gets stored.
+        let pretty = validatesJSON ? JSONText.pretty(initialValue) : nil
+        _value = State(initialValue: pretty ?? initialValue)
+        isTallEditor = pretty != nil || initialValue.count > 80
     }
+
+    /// Room for a pretty-printed document or a long token; one line's
+    /// worth otherwise.
+    private let isTallEditor: Bool
     /// User-typed subscope for top-level mode. Trimmed and folded
     /// to `nil` on save when empty.
     @State private var manualParent: String = ""
 
-    // The SDK splits commands on spaces with no quoting. A space in the
-    // key or namespace shifts every argument and writes the wrong key,
-    // so it blocks Save; a space in the value only truncates it, so
-    // that one just warns.
+    // The SDK splits commands on spaces with no quoting, so a space in
+    // the key, namespace or value shifts every later argument and
+    // writes the wrong place. Each blocks Save.
     private static func hasInnerSpace(_ s: String) -> Bool {
         s.trimmingCharacters(in: .whitespaces).contains(where: \.isWhitespace)
     }
     private var keyHasSpaces: Bool { Self.hasInnerSpace(key) }
     private var parentHasSpaces: Bool { Self.hasInnerSpace(manualParent) }
-    private var valueHasSpaces: Bool { (outgoingValue ?? value).contains(where: \.isWhitespace) }
+
+    private var isInvalidJSON: Bool {
+        validatesJSON && JSONText.looksLikeJSON(value) && !JSONText.isValid(value)
+    }
+
+    /// Why the value can't be sent, in terms of what the device would do.
+    private var valueWarning: String? {
+        if isInvalidJSON { return "Not valid JSON. Fix it, or remove the opening { or [ to store plain text." }
+        guard let outgoingValue else { return nil }
+        return StorageCommand.valueProblem(outgoingValue, parent: resolvedParent)
+    }
 
     private var canSave: Bool {
         !key.trimmingCharacters(in: .whitespaces).isEmpty
             && !keyHasSpaces && !parentHasSpaces && outgoingValue != nil
+            && valueWarning == nil
     }
 
     private var isInside: Bool { initialParent != nil }
@@ -1951,11 +2065,8 @@ private struct AddStorageKeySheet: View {
     }
 
     private var commandPreview: String {
-        var cmd = "storage.\(initialNamespace.wireKey).set \(key) \(outgoingValue ?? "…")"
-        if let parent = resolvedParent {
-            cmd += " \(parent)"
-        }
-        return cmd
+        StorageCommand.set(initialNamespace, key: key,
+                           value: outgoingValue ?? "…", parent: resolvedParent)
     }
 
     /// Colour cue per storage layer — matches the NamespaceTab
@@ -2019,10 +2130,9 @@ private struct AddStorageKeySheet: View {
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("Value").font(.caption).foregroundStyle(.secondary)
-                TextField("e.g. true", text: $value)
-                    .textFieldStyle(.roundedBorder)
-                    .spaceWarning(valueHasSpaces,
-                                  "The device splits on spaces — only the first word may be stored.")
+                PlainTextEditor(text: $value)
+                    .frame(height: isTallEditor ? 240 : 56)
+                    .spaceWarning(valueWarning != nil, valueWarning ?? "")
             }
 
             // Optional subscope — only shown in top-level mode.
@@ -2058,11 +2168,12 @@ private struct AddStorageKeySheet: View {
                 Button("Cancel", role: .cancel, action: onCancel)
                     .keyboardShortcut(.cancelAction)
                 Button("Save") {
+                    guard let outgoingValue else { return }
                     onSave(
                         initialNamespace,
                         resolvedParent,
                         key.trimmingCharacters(in: .whitespaces),
-                        outgoingValue ?? value
+                        outgoingValue
                     )
                 }
                 .keyboardShortcut(.defaultAction)
@@ -2070,6 +2181,6 @@ private struct AddStorageKeySheet: View {
             }
         }
         .padding(20)
-        .frame(width: 460)
+        .frame(width: 560)
     }
 }
