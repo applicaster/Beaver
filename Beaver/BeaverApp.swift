@@ -175,11 +175,9 @@ struct BeaverApp: App {
         case .success(.event(let event)):
             await env.store.append(event, to: sessionId)
             // Side-channel: detect cmdlist responses and populate the
-            // command-help popover. Identified by the GeneralHandler
-            // subsystem + "Registered commands:" prefix. Event still
-            // appears in the log feed normally.
-            if isCmdListResponse(event) {
-                let names = parseCmdListMessage(event.message)
+            // command-help popover (see CommandHints.cmdListNames). Event
+            // still appears in the log feed normally.
+            if let names = CommandHints.cmdListNames(in: event) {
                 await MainActor.run {
                     env.availableCommands = CommandHints.merge(sdkNames: names)
                 }
@@ -249,28 +247,6 @@ private final class BeaverUpdaterDelegate: NSObject, SPUUpdaterDelegate {
     func feedURLString(for updater: SPUUpdater) -> String? {
         "https://applicaster.github.io/Beaver/appcast.xml"
     }
-}
-
-// MARK: - cmdlist response detection
-
-/// True iff the event looks like the SDK's reply to `cmdlist`.
-/// Documented format (empirically captured 2026-05-16):
-/// - level: info
-/// - subsystem: `DebugFeatures/ConsoleCommands/GeneralHandler`
-/// - message: `"Registered commands:\n<name>\n<name>\n…"`
-private func isCmdListResponse(_ event: DecodedEvent) -> Bool {
-    event.subsystem == "DebugFeatures/ConsoleCommands/GeneralHandler"
-        && event.message.hasPrefix("Registered commands:")
-}
-
-/// Pull the command names out of a cmdlist response message. Drops the
-/// header line and any blank lines; trims whitespace from each entry.
-private func parseCmdListMessage(_ message: String) -> [String] {
-    message
-        .split(separator: "\n", omittingEmptySubsequences: true)
-        .dropFirst()  // "Registered commands:"
-        .map { $0.trimmingCharacters(in: .whitespaces) }
-        .filter { !$0.isEmpty }
 }
 
 // MARK: - Synthetic-event helpers

@@ -180,13 +180,20 @@ struct ZappSupportImportTests {
     @Test("An object that is not storage is not mistaken for it", arguments: [
         #"{}"#,
         #"{"local":"not an object"}"#,
-        #"{"local":{},"somethingElse":{}}"#,
+        #"{"somethingElse":{}}"#,
         #"{"log":{"entries":[]}}"#,
     ])
     func notStorage(json: String) throws {
         let back = try EventJSON.decodeExport(Data(json.utf8))
         #expect(back.storage.isEmpty)
         #expect(back.events.isEmpty)
+    }
+
+    @Test("A storage-only file ignores unknown keys")
+    func storageOnlyIgnoresUnknownKeys() throws {
+        let back = try EventJSON.decodeExport(Data(#"{"local":{"k":"v"},"somethingElse":{}}"#.utf8))
+        #expect(try layer(back.storage[.local])["k"] as? String == "v")
+        #expect(back.storage.count == 1)
     }
 
     // MARK: HAR

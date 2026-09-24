@@ -15,6 +15,10 @@ struct NetworkView: View {
     @State private var harDocument: JSONExportDocument?
     @State private var harDefaultFilename = ""
     @State private var showingHARExporter = false
+    /// Column widths / order / visibility, remembered between launches —
+    /// the Log feed's pattern (`TableColumnCustomization` is Codable).
+    @AppStorage("network.columnLayout") private var storedColumnLayout = ""
+    @State private var columnLayout = TableColumnCustomization<NetworkEntry>()
 
     var body: some View {
         let rows = vm.filtered
@@ -77,10 +81,13 @@ struct NetworkView: View {
                         options: { vm.filter.availableHosts(in: vm.base) })
             if !vm.filter.isEmpty || vm.filter.searchIsRegex {
                 Button("Clear filters") { vm.filter = NetworkFilter() }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
             }
             Spacer()
         }
-        .padding(8)
+        .padding(.horizontal, 12)
+        .frame(height: 44)
     }
 
     // MARK: Chips
@@ -115,7 +122,7 @@ struct NetworkView: View {
                 .help("Clear every chip")
             }
             .padding(.horizontal, 12)
-            .padding(.bottom, 6)
+            .padding(.bottom, 4)
         }
     }
 
@@ -135,13 +142,16 @@ struct NetworkView: View {
         let s = NetworkStats(rows)
         return HStack(spacing: 12) {
             Text("Results (\(s.count)/\(vm.entries.count))").font(.headline)
-            Group {
-                if let rate = s.successRate {
-                    Text("Success \(Int((rate * 100).rounded()))% (\(s.successCount)/\(s.httpCount))")
-                }
-                if let avg = s.averageDurationMillis { Text("Avg \(avg) ms") }
+            let stats = [
+                s.successRate.map { "Success \(Int(($0 * 100).rounded()))% (\(s.successCount)/\(s.httpCount))" },
+                s.averageDurationMillis.map { "Avg \($0) ms" },
+            ].compactMap { $0 }
+            if !stats.isEmpty {
+                Text(stats.joined(separator: " · "))
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
-            .foregroundStyle(.secondary)
             Spacer(minLength: 8)
             bookmarksButton
             Button { vm.clear() } label: { Label("Clear", systemImage: "xmark.circle") }
@@ -160,8 +170,9 @@ struct NetworkView: View {
         }
         .monospacedDigit()
         .buttonStyle(.bordered)
-        .controlSize(.regular)
-        .padding(.horizontal, 8)
+        .controlSize(.small)
+        .padding(.horizontal, 12)
+        .padding(.top, 2)
         .padding(.bottom, 8)
     }
 
@@ -207,8 +218,11 @@ struct NetworkView: View {
 
     // MARK: Table
 
+    /// One type style per row: 12 pt monospaced, numbers right-aligned,
+    /// colour only where it means something (method, non-2xx status, slow,
+    /// large or cut).
     private func table(_ rows: [NetworkEntry]) -> some View {
-        Table(rows, selection: $vm.selection) {
+        Table(rows, selection: $vm.selection, columnCustomization: $columnLayout) {
             TableColumn("Method") { e in
                 HStack(spacing: 4) {
                     if vm.isBookmarked(e.id) {
@@ -216,38 +230,51 @@ struct NetworkView: View {
                             .font(.caption2)
                             .foregroundStyle(.yellow)
                     }
-                    MethodBadge(method: e.method)
+                    Pill(text: e.method, tint: MethodBadge.tint(e.method), minWidth: 44, strong: true)
                 }
             }
             .width(min: 64, ideal: 76, max: 96)
+            .customizationID("method")
+            // The status is the one pill column; the method beside it is plain text.
             TableColumn("Status") { StatusBadge(entry: $0) }
-                .width(min: 48, ideal: 56, max: 64)
-            TableColumn("Host") { Text($0.host).lineLimit(1) }
-                .width(min: 80, ideal: 140)
-            TableColumn("Path") { Text($0.path).lineLimit(1).truncationMode(.middle) }
-            TableColumn("Duration") { e in
-                Text(e.durationMillis.map { "\($0) ms" } ?? "—")
-                    .foregroundStyle(Self.durationColor(e.durationMillis)).monospacedDigit()
+            .width(min: 48, ideal: 56, max: 64)
+            .customizationID("status")
+            TableColumn("Host") { Text($0.host).font(Self.rowFont).lineLimit(1) }
+                .width(min: 100, ideal: 170, max: 260)
+                .customizationID("host")
+            TableColumn("Path") { e in
+                Text(e.path).font(Self.rowFont).lineLimit(1).truncationMode(.middle).help(e.path)
             }
-            .width(min: 60, ideal: 70, max: 90)
-            TableColumn("Size") { e in
-                // The reported size when the SDK sent one (exact, no "+");
-                // Content-Length is never used here — compressed, it would
-                // read as a wrong body size.
-                if let bytes = e.responseBodySize ?? e.responseBytes {
-                    let pill = Pill(text: Self.size(e), tint: bytes < 50_000 ? .green : .orange)
-                    if e.isResponseBodyTruncated && e.responseBodySize == nil {
-                        pill.help(Self.sizeHelp(e))
-                    } else {
-                        pill
-                    }
-                } else {
-                    Text("—").foregroundStyle(.secondary)
-                }
+            .customizationID("path")
+            TableColumn("Duration") { DurationCell(millis: $0.durationMillis) }
+                .width(min: 60, ideal: 72, max: 90)
+                .customizationID("duration")
+                .alignment(.trailing)
+            TableColumn("Size") { SizeCell(entry: $0) }
+                .width(min: 56, ideal: 70, max: 90)
+                .customizationID("size")
+                .alignment(.trailing)
+            TableColumn("Time") { e in
+                Text(Self.time(e.startMillis))
+                    .font(Self.rowFont)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
             }
-            .width(min: 56, ideal: 70, max: 90)
-            TableColumn("Time") { Text(Self.time($0.startMillis)).monospacedDigit() }
-                .width(min: 90, ideal: 100, max: 110)
+            .width(min: 96, ideal: 104, max: 120)
+            .customizationID("time")
+            .alignment(.trailing)
+        }
+        .onAppear {
+            guard let data = storedColumnLayout.data(using: .utf8),
+                  let saved = try? JSONDecoder().decode(TableColumnCustomization<NetworkEntry>.self, from: data)
+            else { return }
+            columnLayout = saved
+        }
+        .onChange(of: columnLayout) { _, layout in
+            guard let data = try? JSONEncoder().encode(layout),
+                  let text = String(data: data, encoding: .utf8)
+            else { return }
+            storedColumnLayout = text
         }
         .contextMenu(forSelectionType: NetworkEntry.ID.self) { ids in
             if let id = ids.first, let e = vm.entries.first(where: { $0.id == id }) {
@@ -280,9 +307,16 @@ struct NetworkView: View {
         }
     }
 
-    static func durationColor(_ ms: Int?) -> Color {
-        guard let ms else { return .secondary }
-        return ms < 100 ? .green : ms < 500 ? .orange : .red
+    /// The table's single row font.
+    static let rowFont = Font.system(size: 12, design: .monospaced)
+
+    /// Same grey / yellow / red scale as Size: under 1 s, 1–3 s, 3 s and up.
+    static func durationColor(_ ms: Int?, _ scheme: ColorScheme) -> Color {
+        switch NetworkEntry.DurationTier(millis: ms) {
+        case .normal: Color.tier(.normal, scheme)
+        case .slow: Color.tier(.attention, scheme)
+        case .verySlow: Color.tier(.critical, scheme)
+        }
     }
 
     /// The reported (real) size when the SDK sent one; otherwise the
@@ -300,6 +334,74 @@ struct NetworkView: View {
     static func time(_ ms: UInt64) -> String {
         Date(timeIntervalSince1970: Double(ms) / 1000)
             .formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute().second().secondFraction(.fractional(3)))
+    }
+}
+
+/// `512 ms`, right-aligned; orange from 1 s, red from 3 s, white on a
+/// selected row.
+private struct DurationCell: View {
+    let millis: Int?
+    @Environment(\.backgroundProminence) private var prominence
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        Text(millis.map(NetworkEntry.compactDuration) ?? "—")
+            .font(NetworkView.rowFont)
+            .foregroundStyle(prominence == .increased ? .white : NetworkView.durationColor(millis, scheme))
+            .frame(maxWidth: .infinity, alignment: .trailing)
+    }
+}
+
+/// The reported size when the SDK sent one (exact, no "+"), else the
+/// captured bytes. Content-Length is never used here — compressed, it would
+/// read as a wrong body size. Grey / yellow / red by `tableSizeTier`.
+private struct SizeCell: View {
+    let entry: NetworkEntry
+    @Environment(\.backgroundProminence) private var prominence
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        let text = Text(NetworkView.size(entry))
+            .font(NetworkView.rowFont)
+            .foregroundStyle(prominence == .increased ? .white
+                             : Color.tier(entry.tableSizeTier, scheme))
+            .frame(maxWidth: .infinity, alignment: .trailing)
+        if entry.isResponseBodyTruncated && entry.responseBodySize == nil {
+            text.help(NetworkView.sizeHelp(entry))
+        } else {
+            text
+        }
+    }
+}
+
+/// The table's method: bold coloured text, no fill. A pale fill at 11 pt on
+/// every row smeared; text alone stays crisp and leaves the status as the
+/// only pill column.
+private struct MethodText: View {
+    let method: String
+    @Environment(\.backgroundProminence) private var prominence
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        let tint = MethodBadge.tint(method)
+        Text(method)
+            .font(.system(size: 11, weight: .bold, design: .monospaced))
+            .foregroundStyle(prominence == .increased ? .white
+                             : scheme == .dark ? tint.mix(with: .white, by: 0.25) : tint.mix(with: .black, by: 0.35))
+            .lineLimit(1)
+            .frame(minWidth: 44, alignment: .leading)
+    }
+}
+
+extension Color {
+    /// Grey / yellow / red for the Size and Duration columns. System yellow
+    /// is unreadable as text on white, so it is darkened in light mode.
+    static func tier(_ tier: NetworkEntry.Tier, _ scheme: ColorScheme) -> Color {
+        switch tier {
+        case .normal: .secondary
+        case .attention: scheme == .dark ? .yellow : Color.yellow.mix(with: .black, by: 0.4)
+        case .critical: .red
+        }
     }
 }
 
@@ -330,8 +432,7 @@ extension NetworkEntry.StatusClass {
         switch self {
         case .success: .green
         case .redirect: .blue
-        case .clientError: .orange
-        case .serverError, .failed: .red
+        case .clientError, .serverError, .failed: .red
         case .other: .gray
         }
     }
@@ -341,6 +442,11 @@ extension NetworkEntry.StatusClass {
 struct Pill: View {
     let text: String
     let tint: Color
+    /// Keeps a column of pills one width (GET/POST/PUT), text centred.
+    var minWidth: CGFloat?
+    /// A denser fill and darker text, for the method column, so a full
+    /// column of pills reads solid instead of washed out.
+    var strong = false
     @Environment(\.colorScheme) private var scheme
     /// `.increased` inside a selected table row (blue background).
     @Environment(\.backgroundProminence) private var prominence
@@ -352,6 +458,7 @@ struct Pill: View {
             .lineLimit(1)
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
+            .frame(minWidth: minWidth)
             .background(fill, in: RoundedRectangle(cornerRadius: 4))
     }
 
@@ -360,12 +467,22 @@ struct Pill: View {
     // lighten (dark mode) the text, and go white on a selected row.
     private var textColor: Color {
         if prominence == .increased { return .white }
-        return scheme == .dark ? tint.mix(with: .white, by: 0.25) : tint.mix(with: .black, by: 0.4)
+        if strong { return scheme == .dark ? tint.mix(with: .white, by: 0.35) : tint.mix(with: .black, by: 0.55) }
+        return tint.readableText(in: scheme)
     }
 
     private var fill: Color {
         if prominence == .increased { return .white.opacity(0.22) }
+        if strong { return tint.opacity(scheme == .dark ? 0.38 : 0.30) }
         return tint.opacity(scheme == .dark ? 0.25 : 0.18)
+    }
+}
+
+extension Color {
+    /// This tint darkened (light mode) or lightened (dark mode) enough to
+    /// read as text on its own pale fill.
+    func readableText(in scheme: ColorScheme) -> Color {
+        scheme == .dark ? mix(with: .white, by: 0.25) : mix(with: .black, by: 0.4)
     }
 }
 
@@ -375,6 +492,7 @@ private struct NetworkChip: View {
     let title: String
     let excluded: Bool
     let onRemove: () -> Void
+    @Environment(\.colorScheme) private var scheme
 
     private var tint: Color { excluded ? .red : .green }
 
@@ -393,9 +511,9 @@ private struct NetworkChip: View {
         }
         .font(.caption)
         .padding(.horizontal, 8)
-        .padding(.vertical, 3)
-        .background(Capsule().fill(tint.opacity(0.18)))
-        .foregroundStyle(tint)
+        .padding(.vertical, 2)
+        .background(Capsule().fill(tint.opacity(scheme == .dark ? 0.25 : 0.15)))
+        .foregroundStyle(tint.readableText(in: scheme))
     }
 }
 
@@ -403,12 +521,14 @@ private struct NetworkChip: View {
 struct MethodBadge: View {
     let method: String
 
-    var body: some View { Pill(text: method, tint: Self.tint(method)) }
+    var body: some View { Pill(text: method, tint: Self.tint(method), minWidth: 44) }
 
+    /// A muted colour per verb so GET and POST read apart at a glance;
+    /// Pill darkens the text and keeps the fill light.
     static func tint(_ method: String) -> Color {
         switch method {
         case "GET": .blue
-        case "POST": .green
+        case "POST": .teal
         case "PUT": .orange
         case "PATCH": .purple
         case "DELETE": .red
@@ -419,14 +539,15 @@ struct MethodBadge: View {
 
 struct StatusBadge: View {
     let entry: NetworkEntry
+    static let minWidth: CGFloat = 34
 
     var body: some View {
-        Pill(text: entry.status.map(String.init) ?? "—", tint: entry.statusClass.color)
+        Pill(text: entry.status.map(String.init) ?? "—", tint: entry.statusClass.color, minWidth: Self.minWidth)
     }
 }
 
-/// Single-choice facet dropdown, styled like the Log feed's level pill:
-/// neutral on All, tinted once a value is picked. Options come from
+/// Single-choice facet dropdown: a native bordered button as tall as the
+/// search field, neutral on All, tinted once a value is picked. Options come from
 /// `NetworkFilter.available…`, so they only list values that can match.
 private struct FacetPicker<Value: Hashable & Sendable>: View {
     let title: String
@@ -441,28 +562,25 @@ private struct FacetPicker<Value: Hashable & Sendable>: View {
     /// divider follows it and "All" doesn't count it.
     var summary: Value?
     @State private var isShown = false
-    @State private var isHovered = false
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        let color = selection.map(tint) ?? .secondary
+        let color = selection.map(tint)
         Button { isShown.toggle() } label: {
             HStack(spacing: 6) {
                 Text(selection.map(label) ?? title)
-                    .font(.caption.weight(.bold))
+                    .font(.system(size: 13))
                     .lineLimit(1)
                 Image(systemName: "chevron.down")
-                    .font(.caption2.weight(.semibold))
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(color == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tint))
             }
-            .foregroundStyle(selection == nil ? Color.primary : color)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(Capsule().fill(isHovered ? color.opacity(0.12) : Color(.controlBackgroundColor)))
-            .overlay(Capsule().strokeBorder(color.opacity(selection == nil ? 0.3 : 0.5), lineWidth: 1))
-            .animation(.easeInOut(duration: 0.12), value: isHovered)
+            .foregroundStyle(color.map { AnyShapeStyle($0.readableText(in: scheme)) } ?? AnyShapeStyle(.primary))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.bordered)
+        .controlSize(.large)
+        .tint(color)
         .fixedSize()
-        .onHover { isHovered = $0 }
         .help("Show one \(title.lowercased()) only")
         .popover(isPresented: $isShown, arrowEdge: .bottom) {
             let opts = options()

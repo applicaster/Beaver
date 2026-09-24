@@ -48,7 +48,9 @@ enum EventJSON {
     ///    shape and what the old Logger app wrote
     ///  - a wrapped object `{"events": [...]}` (objects OR JSON strings)
     ///  - the same object with `"storage": {"session": …, "local": …,
-    ///    "secure": …}` alongside
+    ///    "secure": …}` and / or `"network": [...]` alongside
+    ///  - a storage-only object `{"session": …, "local": …, "secure": …}`
+    /// The contract is SESSION_FILE_FORMAT.md.
     static func decodeExport(_ data: Data) throws -> Export {
         let json = try JSONSerialization.jsonObject(with: data)
 
@@ -57,10 +59,10 @@ enum EventJSON {
         }
 
         guard let object = json as? [String: Any] else { return Export() }
-        // Beaver's object export always has `events`; without it, maybe
-        // zapp-support's storage export.
-        if object["events"] == nil, let storage = decodeZappStorage(object) {
-            return Export(storage: storage)
+        // No `events` / `storage` / `network`: a storage-only file — Beaver's
+        // "Export storage only", or zapp-support's older storage export.
+        if object["events"] == nil && object["storage"] == nil && object["network"] == nil {
+            return Export(storage: decodeStorageOnly(object))
         }
         return Export(
             events: decodeEvents(object["events"]),
@@ -104,22 +106,18 @@ enum EventJSON {
     /// same parser the store uses, so an imported entry goes through
     /// the one code path a live one does. Tolerates each element
     /// arriving as a JSON string, mirroring `decodeEvents`.
-    /// zapp-support's storage export (`storageStore.toExportObject`):
-    /// `{session|local|secure: {namespace: {key: value}}}` — the storage
-    /// frame's own shape (PROTOCOL.md §4.2), except that keys with no
-    /// namespace are grouped under `"root"`. Those go back to the SDK's
-    /// wire form, `{key: {"undefined": value}}`, which the Storages screen
-    /// already shows as a plain key.
-    private static func decodeZappStorage(_ object: [String: Any]) -> [StorageSnapshot.Namespace: String]? {
-        let wireKeys = Set(StorageSnapshot.Namespace.allCases.map(\.wireKey))
-        guard !object.isEmpty, Set(object.keys).isSubset(of: wireKeys) else { return nil }
-        var layers: [String: Any] = [:]
+    /// A storage-only file: `{session|local|secure: {namespace: {key: value}}}`
+    /// (SESSION_FILE_FORMAT.md shape C). zapp-support's older storage export
+    /// grouped keys with no namespace under `"root"`; those go back to the
+    /// SDK's wire form, `{key: {"undefined": value}}`, which the Storages
+    /// screen already shows as a plain key.
+    private static func decodeStorageOnly(_ object: [String: Any]) -> [StorageSnapshot.Namespace: String] {
+        var layers = object
         for (wireKey, value) in object {
-            guard var layer = value as? [String: Any] else { return nil }
-            if let root = layer["root"] as? [String: Any] {
-                layer["root"] = nil
-                for (key, v) in root where layer[key] == nil { layer[key] = ["undefined": v] }
-            }
+            guard var layer = value as? [String: Any],
+                  let root = layer["root"] as? [String: Any] else { continue }
+            layer["root"] = nil
+            for (key, v) in root where layer[key] == nil { layer[key] = ["undefined": v] }
             layers[wireKey] = layer
         }
         return decodeStorage(layers)
@@ -252,14 +250,7 @@ enum EventJSON {
         }
         var root: [String: Any] = ["events": eventObjects(events)]
         if !storage.isEmpty {
-            var storageObject: [String: Any] = [:]
-            for (namespace, json) in storage {
-                guard let parsed = try? JSONSerialization.jsonObject(
-                    with: Data(json.utf8)
-                ) else { continue }
-                storageObject[namespace.wireKey] = parsed
-            }
-            root["storage"] = storageObject
+            root["storage"] = storageObject(storage)
         }
         if !network.isEmpty {
             root["network"] = network.compactMap { entry in
@@ -268,6 +259,38 @@ enum EventJSON {
         }
         let options: JSONSerialization.WritingOptions = pretty ? [.prettyPrinted] : []
         return try JSONSerialization.data(withJSONObject: root, options: options)
+    }
+
+    /// Storage alone, as `{storageType: {namespace: {key: value}}}` —
+    /// zapp-support's storage export shape, and what `decodeExport`
+    /// reads back. Keychain values become `"[REDACTED]"` (keys kept) so
+    /// the file can go on a ticket without the user's tokens.
+    static func encodeStorage(
+        _ storage: [StorageSnapshot.Namespace: String],
+        redactKeychain: Bool
+    ) throws -> Data {
+        var object = storageObject(storage)
+        if redactKeychain, let secure = object[StorageSnapshot.Namespace.keychain.wireKey] {
+            object[StorageSnapshot.Namespace.keychain.wireKey] = redacted(secure)
+        }
+        return try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
+    }
+
+    private static func storageObject(_ storage: [StorageSnapshot.Namespace: String]) -> [String: Any] {
+        var object: [String: Any] = [:]
+        for (namespace, json) in storage {
+            guard let parsed = try? JSONSerialization.jsonObject(with: Data(json.utf8)) else { continue }
+            object[namespace.wireKey] = parsed
+        }
+        return object
+    }
+
+    private static func redacted(_ value: Any) -> Any {
+        switch value {
+        case let dict as [String: Any]: dict.mapValues(redacted)
+        case let array as [Any]:        array.map(redacted)
+        default:                        "[REDACTED]"
+        }
     }
 
     // MARK: - Helpers

@@ -84,6 +84,11 @@ struct MainWindow: View {
                    sid == env.viewingSessionId {
                     await refreshBookmarks()
                 }
+                // Live events that couldn't be stored are gone; say so
+                // rather than leave a silent gap in the feed.
+                if case .writeFailed(let message) = change {
+                    toasts.error(message)
+                }
             }
         }
         // Initial fetch when the viewing session changes — covers
@@ -105,7 +110,11 @@ struct MainWindow: View {
                 return
             }
             if logFeedVM?.sessionId != sid {
-                logFeedVM = LogFeedViewModel(store: env.store, sessionId: sid)
+                // A reconnect or relaunch is a new session; the filter
+                // the user set up shouldn't go with the old one. Clear's
+                // watermark does — it's an id from that session.
+                let filter = logFeedVM?.filter.carriedOver ?? LogFeedViewModel.rememberedFilter()
+                logFeedVM = LogFeedViewModel(store: env.store, sessionId: sid, filter: filter)
             }
             if storagesVM?.sessionId != sid {
                 let fresh = StoragesViewModel(store: env.store, sessionId: sid)

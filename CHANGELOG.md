@@ -15,6 +15,22 @@ When releasing:
 ## [Unreleased]
 
 ### Added
+- **Log feed: the filter survives reconnects and relaunches**, and
+  changing it keeps the selected row when it still matches.
+  Right-click → **Show in Context** clears the filter and lands on the
+  row.
+- **Log feed: multi-select and ⌘C.** Selected rows copy as
+  `HH:mm:ss.SSS [LEVEL] subsystem/category: message` lines. The detail
+  pane has **Copy data** / **Copy context**.
+- **Log feed keyboard:** ⌘F focuses Search & highlight, ⌘G / ⇧⌘G step
+  through matches, `e` / `⇧E` jump to the next / previous error.
+- **Log feed: Time column shows its time zone**, plus an optional
+  **Δ** column (right-click the header): the time since the previous
+  row, or since the selected row when one is selected.
+- **Log feed: "⏎ N lines" badge** on rows whose message is cut off.
+- **Log feed: search event data.** The `{}` chip on Filter / Exclude
+  also matches each event's JSON payload. It's off by default, since
+  it's slower on big sessions, and saved filters keep it.
 - **Import opens zapp-support files.** Its log export (any level
   spelling — `WARN`, `err`, `fatal`, `trace`, `"2"`…) and its storage
   export now open like Beaver's own. A line with an unknown level opens
@@ -33,8 +49,26 @@ When releasing:
   keys that appeared or changed get a brief yellow highlight (a
   collapsed namespace flashes on their behalf).
 - **Storages: spaces are caught before sending.** The device splits
-  commands on spaces, so a space in the key or namespace now blocks
-  Save and a space in the value shows a warning.
+  commands on spaces, so a space in the key, namespace or value blocks
+  Save, and the warning says what the device would do instead ("it
+  would store `a` in a namespace named `b`"). JSON values are sent
+  compact; a JSON string containing a space still blocks, explained.
+- **Storages: edits are checked.** After a save or delete Beaver reads
+  the key back from the next snapshot and says **Applied** (with
+  **Undo**) or **Device didn't apply this — see the log**. Keychain
+  writes ask first. Edit / delete hide for a layer whose command the
+  device doesn't list in `cmdlist`.
+- **Storages: multi-line value editor.** Stored JSON opens
+  pretty-printed and must parse before Save; smart quotes stay off.
+- **Storages: search shows matches per layer.** Each tab shows its
+  match count; clicking it jumps to that layer's first match.
+- **Storages: ⌘F** focuses search, **⌘R** reloads, and a row's
+  right-click menu has **Edit… / Delete…**.
+- **Storages: "as of" time and a Disconnected — cached strip** show
+  how old the storage on screen is.
+- **Storages: Export storage only**, with **Redact Keychain values**
+  on by default. The file uses zapp-support's
+  `{storageType: {namespace: {key: value}}}` shape and opens in Beaver.
 - **Storages: the full-value popover has the row's buttons** — copy key,
   copy value, edit, delete — plus **copy decoded value** (pretty-printed
   JSON / decoded text) for JSON-string, Base64 and JWT values.
@@ -51,6 +85,22 @@ When releasing:
   layers are dimmed.
 
 ### Fixed
+- **Log feed: live streaming no longer refetches the session.** Each
+  append fetches only the new rows and merges them in place, including
+  events that arrive late with an earlier timestamp. On a 100k-event
+  session an append drops from ~150 ms to under a millisecond. Past
+  the 1M-row cap the feed now keeps the newest rows, not the oldest.
+- **Log feed: `%` and `_` in Filter / Exclude are literal**, regex
+  terms ignore case like plain ones, and an invalid regex outlines its
+  pill in red instead of silently showing no rows.
+- **A failed write shows an error toast** instead of dropping events
+  silently.
+- **Storages: unchanged snapshots no longer pile up.** Auto-refresh
+  stored a full copy of every layer every 2 s; an unchanged report now
+  only updates its time.
+- **Storages: overlapping reloads could show stale values** and flash
+  rows that hadn't changed. A reload that has been overtaken is dropped.
+- **Storages: the delete dialog** no longer mentions other devices.
 - **Storages: the list could stop updating.** After a new snapshot
   arrived the key list could keep showing old values until the tab was
   reopened. It now refreshes as soon as the device reports new storage.
@@ -61,6 +111,12 @@ When releasing:
   and edit / delete target the key itself instead of `undefined`.
 
 ### Changed
+- **Log feed follows the tail by being at the bottom (D3).** Scroll up
+  and it stops; a floating **N new ↓** pill counts what arrived and
+  takes you back. The Auto-scroll toggle is gone.
+- **Log detail pane:** the message is a monospaced, scrollable block,
+  and very large payloads show 200 entries per level with
+  **Show more**.
 - **Storages tab restructured (D30 + D31).** Session / Local /
   Keychain are back as **tabs at the top** (one layer visible at a
   time). Inside each tab, every **namespace** (`applicaster.v2`,
@@ -94,6 +150,8 @@ When releasing:
   write at the layer's root.
 
 ### Removed
+- The unused full-text index (`event_fts`) and its triggers — inserts
+  and session deletes no longer pay for them (D40).
 - **Inline edit on storage values.** Changing a value now means
   delete + add. The common case (flip a feature flag) is binary
   anyway; keeping edit would re-introduce a sheet for a flow that

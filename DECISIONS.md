@@ -107,6 +107,22 @@ it resumes follow-tail.
 - Floating button overlay over the table.
 - Counter increments while paused, resets to zero when follow-tail resumes.
 
+**Implemented (2026-09-23).** Until then, following was split across an
+"Auto-scroll" toggle (off by default) and a Pause button, and the
+"N new" pill only showed while paused. Now:
+- `TailFollow` holds the state. `ScrollWatcher` reports whether a user
+  scroll ended within three rows of the bottom, and that decides
+  following. Programmatic scrolls don't report.
+- Off the tail, a floating pill over the table reads "N new ↓", or
+  "Latest ↓" when nothing has arrived. Clicking it unpauses, follows
+  and scrolls to the newest row.
+- Jumps (match, bookmark, time, `j`/`k`/`e` off the last row, a
+  restored selection) stop following instead of pausing.
+- The Auto-scroll toggle is gone; being at the bottom now does that
+  job. Pause stays as the explicit "stop new rows arriving" switch.
+  Scrolling to the bottom doesn't unpause.
+- A fresh feed follows from the start, so it opens on the newest rows.
+
 ---
 
 ## D4. Search and filtering: substring + level + regex toggle + saved filters
@@ -478,7 +494,8 @@ controls whether its term is treated as regex or substring (D4).
 ## D15. Filter substring uses `LIKE`, not FTS5
 
 **Status:** Accepted (2026-05-16). **Reverses the original intent of
-D1 and ARCHITECTURE.md §4.**
+D1 and ARCHITECTURE.md §4.** The kept-for-later `event_fts` table and
+triggers were dropped by migration v7 — see D40.
 
 **Decision.** Substring filter / exclude / highlight queries use plain
 `LIKE '%term%'` across message, subsystem, and category. The FTS5
@@ -1803,3 +1820,127 @@ in header joining and `startTime` derivation).
 - `LogStore.Change.networkAppended(sessionId:)` is a new broadcast
   case; `NetworkViewModel` subscribes to it the same way
   `StoragesViewModel` subscribes to `.storageUpdated`.
+
+---
+
+## D40. Payload search is `LIKE` behind a toggle; the FTS table goes
+
+**Status:** Accepted (2026-09-23). Amends D15.
+
+**Decision.** Search and Exclude can also match an event's `data`
+payload, opt-in via a `{}` chip in either pill (`Filter.searchPayloads`,
+saved with presets from migration v8). It's `LIKE` / `REGEXP` over
+`COALESCE(data_json, '')`. Migration v7 drops `event_fts` and its two
+triggers, which D15 had kept unused.
+
+**Why not a trigram FTS5 index.** Measured on a copy of a real 2.8 GB
+store (261k events, 1.79 GB of `data_json` when capped at 64 KB per
+row):
+
+| | trigram FTS5 (largest session, 67k events, 610 MB of payload) |
+|---|---|
+| build | 82 s |
+| disk | +1.55 GB (≈2.5× the indexed text) |
+| query `"player"` | 36 ms, vs ~600 ms for `LIKE` over `data_json` |
+
+Queries were fast, but extrapolated to the whole store the migration
+would take ~4 minutes and add ~4.5 GB. Every live insert would
+tokenize up to 64 KB of payload, and deleting a session would
+re-tokenize every row it held. That's too much to pay just so a toggle
+can be quick. `LIKE` costs nothing until the toggle is on, and then
+only for the query that asked.
+
+**Dropping `event_fts`.** The drop took 11 ms on the same store copy (the
+old index covered only short text columns, 24 MB). Inserts and
+session deletes no longer pay the trigger.
+
+**Launch cost.** v7 + v8 on a copy of the real store brought to v6,
+opened through `LogStore` in release: **0.16 s**
+(`BEAVER_MIGRATION_DB=… swift test -c release -Xswiftc -enable-testing
+--filter MigrationBenchmark`). The first run took 7.65 s. The time
+wasn't the SQL: GRDB's default `foreignKeyChecks: .deferred` re-checks
+every foreign key in the database after each migration, a full scan of
+about 3.8 s here. Both migrations are registered `.immediate`, since
+neither touches a keyed row. Future migrations on big tables should
+consider doing the same.
+
+**Also in this change (D14 follow-ups).**
+- `LIKE` escapes `%`, `_` and `\` (`ESCAPE '\'`): typing `100%`
+  finds `100%`.
+- `REGEXP` terms run with `(?i)`, like `LIKE` and the highlighter.
+- A regex that doesn't compile adds no constraint and outlines its
+  pill in red, instead of silently showing zero rows (D14's "produces
+  zero rows" no longer holds).
+
+**Alternatives considered.**
+- *Trigram FTS5 for terms ≥ 3 chars, `LIKE` below.* Measured above.
+- *Payloads always searched.* ~600 ms per keystroke on a big session.
+
+---
+
+## D41. The Log feed appends instead of refetching
+
+**Status:** Accepted (2026-09-23). Amends D16.
+
+**Decision.** A live append no longer runs `reload()`. The feed keeps
+a watermark: the highest event id at the time of its last read.
+`.appended` then fetches only `id > watermark`, with the loaded
+filter (`LogStore.feedTail`). Rows are read by rowid range under
+`NOT INDEXED`, so the session indexes never walk the whole session.
+Counts are incremented. `FeedRows` merges the new rows into the
+loaded ones and regroups only from the insertion point. A full
+`feedSnapshot` still runs on filter change, Clear, and when the feed
+grows a tenth past its cap.
+
+The snapshot now reads the *newest* rows (`ORDER BY … DESC LIMIT`),
+so a session past the 1M cap drops its oldest rows, not the arriving
+ones. It counts only when the cap was hit.
+
+**Why merge rather than append.** Arrival order isn't timestamp order:
+on the reference store 20,808 of 67,035 events in one session arrived
+after an event with a later timestamp, up to 21 s late. Appending
+would misorder them, and a reload per late event would undo the win.
+
+**Measured** (`BEAVER_BENCH=1 swift test -c release -Xswiftc
+-enable-testing --filter FeedBenchmark`, 100k synthetic events,
+20 per append, median of 10):
+
+| | before (2×COUNT + SELECT all + regroup) | after (tail + merge) |
+|---|---|---|
+| unfiltered | 149 ms | 0.30 ms |
+| search "player" | 44 ms | 0.21 ms |
+
+"Before" counts the regroup once. It used to run on every `body`
+pass as a computed property.
+
+---
+
+## D42. The Log-feed filter outlives its session; selection outlives a filter change
+
+**Status:** Accepted (2026-09-23). Extends D32.
+
+**Decision.**
+- When the viewed session changes (reconnect, or picking another one),
+  the new `LogFeedViewModel` starts with the previous one's filter,
+  minus Clear's `hiddenThroughEventId`, which is an event id from the
+  old session. The filter is also remembered in `UserDefaults`
+  (`logFeed.lastFilter`, JSON of `Filter`), so the first session after
+  a relaunch starts with it too.
+- A filter change keeps the selection. Once the new snapshot lands,
+  selected events that still match are re-selected, on whichever rows
+  now show them, and the first is scrolled into view. The table still
+  passes through the empty state D32's crash workaround needs.
+- "Show in Context" on a row clears the filter, keeping Clear unless it
+  hides that row, and lands on the row among its neighbours.
+
+**Alternatives considered.**
+- *A saved filter marked Default.* Deferred. Remembering the last
+  filter covers relaunch without a new setting, and presets still work
+  as before.
+- *Store the last filter in the database.* It's a per-user view
+  preference, not session data. `UserDefaults` already holds the
+  column layout.
+
+**Trade-off.** A stored filter from before a `Filter` field was added
+won't decode, and the feed starts unfiltered once.
+

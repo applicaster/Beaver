@@ -290,3 +290,42 @@ struct SessionExportTests {
         #expect(data != nil)
     }
 }
+
+// MARK: - Storage-only export
+
+extension EventJSONExportTests {
+
+    /// Same `{storageType: {namespace: {key: value}}}` shape zapp-support
+    /// writes, so either tool reads the other's file.
+    @Test("Storage-only export uses the zapp-support shape and re-imports")
+    func storageOnlyRoundTrip() throws {
+        let data = try EventJSON.encodeStorage(storage, redactKeychain: false)
+        let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(Set(object.keys) == ["session", "local", "secure"])
+        let session = object["session"] as? [String: Any]
+        #expect((session?["applicaster.v2"] as? [String: Any])?["app_name"] as? String == "Demo")
+
+        let back = try EventJSON.decodeExport(data)
+        #expect(back.events.isEmpty)
+        #expect(back.storage.count == 3)
+        #expect(back.storage[.keychain]?.contains("abc") == true)
+    }
+
+    @Test("Keychain values are redacted, keys kept, other layers untouched")
+    func storageOnlyRedactsKeychain() throws {
+        let nested: [StorageSnapshot.Namespace: String] = [
+            .local:    #"{"flag":"true"}"#,
+            .keychain: #"{"auth":{"token":"abc","expires":5,"list":["x"]}}"#,
+        ]
+        let data = try EventJSON.encodeStorage(nested, redactKeychain: true)
+        let text = String(decoding: data, as: UTF8.self)
+        #expect(!text.contains("abc"))
+        #expect(!text.contains("\"x\""))
+        let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let auth = (object["secure"] as? [String: Any])?["auth"] as? [String: Any]
+        #expect(auth?["token"] as? String == "[REDACTED]")
+        #expect(auth?["expires"] as? String == "[REDACTED]")
+        #expect(auth?["list"] as? [String] == ["[REDACTED]"])
+        #expect((object["local"] as? [String: Any])?["flag"] as? String == "true")
+    }
+}
