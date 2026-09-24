@@ -33,6 +33,7 @@ public actor LogStore {
         case networkBookmarksChanged(sessionId: Int64)
         /// A batch of live events could not be written and is lost.
         case writeFailed(message: String)
+        case agentActivityChanged
     }
 
     public enum Source {
@@ -1452,5 +1453,77 @@ public actor LogStore {
             clauses.append("\(column) NOT IN (\(placeholders))")
             args.append(contentsOf: values)
         }
+    }
+
+    // MARK: - Agent activity journal
+
+    public static let agentActivityCap = 2_000
+
+    @discardableResult
+    public func recordAgentActivity(_ new: NewAgentActivity, at: Date = Date()) async throws -> Int64 {
+        let id = try await dbQueue.write { db in
+            // A session deleted between the call and this write becomes no link.
+            try db.execute(
+                sql: """
+                    INSERT INTO agent_activity
+                        (at, client, tool, kind, summary, level, is_error, error, links_json, session_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, (SELECT id FROM session WHERE id = ?))
+                """,
+                arguments: [Int64(at.timeIntervalSince1970 * 1000), new.client, new.tool,
+                            new.kind.rawValue, new.summary, new.level, new.isError, new.error,
+                            new.linksJSON, new.sessionId]
+            )
+            let id = db.lastInsertedRowID
+            try db.execute(sql: "DELETE FROM agent_activity WHERE id <= ?",
+                           arguments: [id - Int64(Self.agentActivityCap)])
+            return id
+        }
+        broadcast(.agentActivityChanged)
+        return id
+    }
+
+    public func agentActivity(limit: Int = LogStore.agentActivityCap) async throws -> [AgentActivity] {
+        try await dbQueue.read { db in
+            try Row.fetchAll(
+                db,
+                sql: """
+                    SELECT id, at, client, tool, kind, summary, level, is_error, error,
+                           links_json, session_id, seen
+                    FROM agent_activity ORDER BY id DESC LIMIT ?
+                """,
+                arguments: [limit]
+            ).map { row in
+                AgentActivity(
+                    id: row["id"],
+                    at: Date(timeIntervalSince1970: TimeInterval(row["at"] as Int64) / 1000),
+                    client: row["client"], tool: row["tool"],
+                    kind: AgentActivity.Kind(rawValue: row["kind"]) ?? .system,
+                    summary: row["summary"], level: row["level"],
+                    isError: row["is_error"], error: row["error"],
+                    linksJSON: row["links_json"], sessionId: row["session_id"],
+                    seen: row["seen"]
+                )
+            }
+        }
+    }
+
+    public func unseenAgentActivityCount() async throws -> Int {
+        try await dbQueue.read { db in
+            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM agent_activity WHERE seen = 0") ?? 0
+        }
+    }
+
+    public func markAgentActivitySeen() async throws {
+        try await dbQueue.write { db in
+            try db.execute(sql: "UPDATE agent_activity SET seen = 1 WHERE seen = 0")
+        }
+        broadcast(.agentActivityChanged)
+    }
+
+    public func clearAgentActivity() async throws {
+        try await dbQueue.write { db in
+            try db.execute(sql: "DELETE FROM agent_activity")
+        }
+        broadcast(.agentActivityChanged)
     }
 }
