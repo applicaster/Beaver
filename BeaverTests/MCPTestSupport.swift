@@ -1,14 +1,31 @@
 import Foundation
 @testable import BeaverCore
 
-struct FakeUI: AgentUI {
+/// The app's `AgentUI` stand-in: applies changes the way `AppEnvironment`
+/// does, and keeps them for the test to read.
+actor FakeUI: AgentUI {
     var value: HostSnapshot
-    func snapshot() async -> HostSnapshot { value }
+    private(set) var changes: [UIChange] = []
+
+    init(value: HostSnapshot) { self.value = value }
+
+    func snapshot() -> HostSnapshot { value }
+
+    func show(_ change: UIChange) {
+        changes.append(change)
+        value.ui = value.ui.applying(change)
+    }
 }
 
 func makeContext(_ store: LogStore, ui: HostSnapshot = HostSnapshot(),
                  now: Date = Date(timeIntervalSince1970: 1_000_000)) -> ToolContext {
     ToolContext(store: store, ui: FakeUI(value: ui), now: { now })
+}
+
+/// A context whose fake UI the test can read back.
+func makeUIContext(_ store: LogStore, ui: HostSnapshot = HostSnapshot()) -> (ToolContext, FakeUI) {
+    let fake = FakeUI(value: ui)
+    return (ToolContext(store: store, ui: fake, now: { Date(timeIntervalSince1970: 1_000_000) }), fake)
 }
 
 /// Appends `rows` (level, subsystem, category, message) 1 ms apart and
