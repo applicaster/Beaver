@@ -383,6 +383,13 @@ This gives the SDK headroom to add new message types and fields without
 breaking Beaver, at the cost of Beaver not surfacing them until
 explicitly updated.
 
+### 7.1 Export / import files
+
+Exported files are not frames; their format — what both Beaver and
+zapp-support write and must read — is specified in
+[`SESSION_FILE_FORMAT.md`](SESSION_FILE_FORMAT.md). Import is lenient where
+the live decoder (§4.1.1) is strict: a line is never dropped over its level.
+
 ---
 
 ## 8. What Beaver does *not* do

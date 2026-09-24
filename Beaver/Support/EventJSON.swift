@@ -48,7 +48,9 @@ enum EventJSON {
     ///    shape and what the old Logger app wrote
     ///  - a wrapped object `{"events": [...]}` (objects OR JSON strings)
     ///  - the same object with `"storage": {"session": …, "local": …,
-    ///    "secure": …}` alongside
+    ///    "secure": …}` and / or `"network": [...]` alongside
+    ///  - a storage-only object `{"session": …, "local": …, "secure": …}`
+    /// The contract is SESSION_FILE_FORMAT.md.
     static func decodeExport(_ data: Data) throws -> Export {
         let json = try JSONSerialization.jsonObject(with: data)
 
@@ -57,9 +59,10 @@ enum EventJSON {
         }
 
         guard let object = json as? [String: Any] else { return Export() }
-        // A storage-only export is the storage object itself.
+        // No `events` / `storage` / `network`: a storage-only file — Beaver's
+        // "Export storage only", or zapp-support's older storage export.
         if object["events"] == nil && object["storage"] == nil && object["network"] == nil {
-            return Export(storage: decodeStorage(object))
+            return Export(storage: decodeStorageOnly(object))
         }
         return Export(
             events: decodeEvents(object["events"]),
@@ -103,6 +106,23 @@ enum EventJSON {
     /// same parser the store uses, so an imported entry goes through
     /// the one code path a live one does. Tolerates each element
     /// arriving as a JSON string, mirroring `decodeEvents`.
+    /// A storage-only file: `{session|local|secure: {namespace: {key: value}}}`
+    /// (SESSION_FILE_FORMAT.md shape C). zapp-support's older storage export
+    /// grouped keys with no namespace under `"root"`; those go back to the
+    /// SDK's wire form, `{key: {"undefined": value}}`, which the Storages
+    /// screen already shows as a plain key.
+    private static func decodeStorageOnly(_ object: [String: Any]) -> [StorageSnapshot.Namespace: String] {
+        var layers = object
+        for (wireKey, value) in object {
+            guard var layer = value as? [String: Any],
+                  let root = layer["root"] as? [String: Any] else { continue }
+            layer["root"] = nil
+            for (key, v) in root where layer[key] == nil { layer[key] = ["undefined": v] }
+            layers[wireKey] = layer
+        }
+        return decodeStorage(layers)
+    }
+
     private static func decodeNetwork(_ value: Any?) -> [NetworkCapture] {
         if let array = value as? [[String: Any]] {
             return array.compactMap { dict in
@@ -117,27 +137,40 @@ enum EventJSON {
     }
 
     private static func makeEvent(_ dict: [String: Any]) -> DecodedEvent? {
-        guard let subsystem = dict["subsystem"] as? String else { return nil }
-        guard let message   = dict["message"]   as? String else { return nil }
+        // A missing field doesn't drop the line either (SESSION_FILE_FORMAT.md
+        // §4), with the same placeholders zapp-support uses.
+        let subsystem = dict["subsystem"] as? String ?? "Unknown"
+        let message = dict["message"] as? String ?? jsonString(dict) ?? ""
 
-        guard let timestamp = ProtocolDecoder.timestampMillis(dict["timestamp"]) else { return nil }
-
-        let level: LogLevel
-        if let s = dict["level"] as? String, let parsed = LogLevel(rawValue: s) {
-            level = parsed
-        } else if let n = dict["level"] as? Int, let parsed = LogLevel(numericLevel: n) {
-            level = parsed
+        // A timestamp that is present but can't be stored is still rejected
+        // (ProtocolDecoderTests): only an absent one falls back to import time.
+        let rawTimestamp = dict["timestamp"].flatMap { $0 is NSNull ? nil : $0 }
+        let timestamp: UInt64
+        if let rawTimestamp {
+            guard let parsed = ProtocolDecoder.timestampMillis(rawTimestamp) else { return nil }
+            timestamp = parsed
         } else {
-            return nil
+            timestamp = UInt64(Date().timeIntervalSince1970 * 1000)
+        }
+
+        // A line is never dropped over its level: an unknown one opens as
+        // info, with the raw value kept in context as `originalLevel`.
+        let rawLevel = dict["level"].flatMap { $0 is NSNull ? nil : $0 }
+        let parsedLevel = rawLevel.flatMap(importedLevel)
+        var context = dict["context"]
+        if let rawLevel, parsedLevel == nil, context == nil || context is [String: Any] {
+            var object = context as? [String: Any] ?? [:]
+            object["originalLevel"] = rawLevel
+            context = object
         }
 
         let category = (dict["category"] as? String) ?? ""
         let dataJSON = (dict["data"]    as Any?).flatMap(jsonString)
-        let contextJSON = (dict["context"] as Any?).flatMap(jsonString)
+        let contextJSON = context.flatMap(jsonString)
 
         return DecodedEvent(
             timestampMillis: timestamp,
-            level: level,
+            level: parsedLevel ?? .info,
             subsystem: subsystem,
             category: category,
             message: message,
@@ -150,6 +183,24 @@ enum EventJSON {
 
     /// Renders an event list as a bare JSON array — matches the format
     /// the old Logger app exports.
+    /// Beaver's own spellings plus what other loggers write — zapp-support
+    /// passes through whatever its emitter sent: any case, `warn`, `err`,
+    /// `fatal`, `trace`, `""` (its "verbose"), and `0`–`4` as numbers or
+    /// strings.
+    private static func importedLevel(_ raw: Any) -> LogLevel? {
+        // A JSON bool bridges to NSNumber, and `true as? Int` is 1.
+        if let n = raw as? NSNumber, CFGetTypeID(n) == CFBooleanGetTypeID() { return nil }
+        if let n = raw as? Int { return LogLevel(numericLevel: n) }
+        switch (raw as? String)?.lowercased() {
+        case "verbose", "trace", "", "0":   return .verbose
+        case "debug", "1":                  return .debug
+        case "info", "2":                   return .info
+        case "warning", "warn", "3":        return .warning
+        case "error", "err", "fatal", "4":  return .error
+        default:                            return nil
+        }
+    }
+
     static func encode(_ events: [EventRecord], pretty: Bool = true) throws -> Data {
         let array = eventObjects(events)
         let options: JSONSerialization.WritingOptions = pretty ? [.prettyPrinted] : []
