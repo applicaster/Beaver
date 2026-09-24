@@ -1744,9 +1744,11 @@ Network tab, with these choices:
    `event` and `event_bookmark` only. Network rows (and their
    bookmarks) go only when the session is deleted, through the
    `ON DELETE CASCADE`. *Revised 2026-09-23:* it first deleted
-   `network_entry` too, treating requests as a stream like `event`, but
-   that silently destroyed request history whenever the user cleared
-   log noise. The Network tab has its own Clear, which only hides rows.
+   `network_entry` too, treating requests as a stream like `event`. No
+   UI calls `clearEvents` today (the Log feed's Clear only hides rows),
+   so this is a store-API rule: clearing log events must never take the
+   request history with it. The Network tab has its own Clear, which
+   only hides rows.
 4. **Rows are kept in arrival order, not start time.**
    `LogStore.networkEntries` reads back `ORDER BY id`, matching the
    order `NetworkViewModel` builds live by appending each new row as

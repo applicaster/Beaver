@@ -134,6 +134,9 @@ final class NetworkViewModel {
         recompute()
         selection = nil
         unseenCount = 0
+        // An empty table can't be scrolled, so no scroll event would ever
+        // turn following back on: resume it here unless a sort is active.
+        isFollowing = sortOrder.isEmpty
     }
 
     func togglePause() {

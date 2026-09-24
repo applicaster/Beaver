@@ -209,7 +209,8 @@ struct NetworkView: View {
 
     private func exportHAR(_ rows: [NetworkEntry]) {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
-        guard let data = try? HARExport.encode(rows, creatorVersion: version) else {
+        // HAR is a timeline: arrival order even when the table is sorted.
+        guard let data = try? HARExport.encode(rows.sorted { $0.id < $1.id }, creatorVersion: version) else {
             toasts.error("Couldn't build the HAR file")
             return
         }

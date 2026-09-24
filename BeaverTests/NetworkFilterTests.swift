@@ -355,15 +355,12 @@ struct NetworkFilterTests {
             return NetworkEntry.parse(json, id: Int64(i + 1), fallbackMillis: UInt64(i))!
         }
         var f = NetworkFilter(); f.search = "NEEDLE"
-        let clock = ContinuousClock()
         var matched: [NetworkEntry] = []
-        let elapsed = clock.measure { matched = entries.filter(f.matches) }
+        matched = entries.filter(f.matches)
         #expect(matched.count == 50)
         #expect(matched.first?.id == 1)
-        print("NetworkFilter search over 5 000 entries: \(elapsed)")
         var byHost = NetworkFilter(); byHost.host = "api3.example.com"
-        let hostElapsed = clock.measure { matched = entries.filter(byHost.matches) }
+        matched = entries.filter(byHost.matches)
         #expect(matched.count == 714)
-        print("NetworkFilter host facet over 5 000 entries: \(hostElapsed)")
     }
 }
