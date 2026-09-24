@@ -119,7 +119,9 @@ private struct LogFeedFilterBar: View {
                 regex: Binding(
                     get: { vm.filter.searchIsRegex },
                     set: { vm.filter.searchIsRegex = $0 }
-                )
+                ),
+                payloads: $vm.filter.searchPayloads,
+                isInvalid: vm.filter.searchIsRegex && !Filter.isValidRegex(vm.filter.search ?? "")
             )
             FilterPillField(
                 systemImage: "minus.circle",
@@ -131,7 +133,9 @@ private struct LogFeedFilterBar: View {
                 regex: Binding(
                     get: { vm.filter.excludeIsRegex },
                     set: { vm.filter.excludeIsRegex = $0 }
-                )
+                ),
+                payloads: $vm.filter.searchPayloads,
+                isInvalid: vm.filter.excludeIsRegex && !Filter.isValidRegex(vm.filter.exclude ?? "")
             )
             FilterPillField(
                 systemImage: "magnifyingglass",
@@ -140,7 +144,8 @@ private struct LogFeedFilterBar: View {
                     get: { vm.highlight ?? "" },
                     set: { vm.highlight = $0.isEmpty ? nil : $0 }
                 ),
-                regex: $vm.highlightIsRegex
+                regex: $vm.highlightIsRegex,
+                isInvalid: vm.highlightIsRegex && !Filter.isValidRegex(vm.highlight ?? "")
             )
 
             // Match navigator: N/M plus up/down jump buttons. Appears
@@ -251,6 +256,11 @@ struct FilterPillField: View {
     let placeholder: String
     @Binding var text: String
     @Binding var regex: Bool
+    /// Adds a `{}` toggle for "also search event data". Log feed only.
+    var payloads: Binding<Bool>? = nil
+    /// Outlines the pill in red: a regex that doesn't compile, which
+    /// the query ignores rather than matching nothing.
+    var isInvalid = false
 
     var body: some View {
         HStack(spacing: 6) {
@@ -275,23 +285,22 @@ struct FilterPillField: View {
             Button {
                 regex.toggle()
             } label: {
-                Text(".*")
-                    .font(.caption.weight(.semibold).monospaced())
-                    .foregroundStyle(regex ? Color.white : Color.secondary)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(
-                        RoundedRectangle(cornerRadius: 4)
-                            .fill(regex ? Color.accentColor : Color.clear)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 4)
-                            .strokeBorder(regex ? Color.clear : Color.secondary.opacity(0.4),
-                                          lineWidth: 1)
-                    )
+                PillToggleLabel(text: ".*", isOn: regex)
             }
             .buttonStyle(.plain)
             .help(regex ? "Regex: ON" : "Toggle regex mode")
+
+            if let payloads {
+                Button {
+                    payloads.wrappedValue.toggle()
+                } label: {
+                    PillToggleLabel(text: "{}", isOn: payloads.wrappedValue)
+                }
+                .buttonStyle(.plain)
+                .help(payloads.wrappedValue
+                      ? "Also searching event data (slower on big sessions). Applies to Filter and Exclude."
+                      : "Also search event data — the JSON payload, not just message, subsystem and category")
+            }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
@@ -301,8 +310,33 @@ struct FilterPillField: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .strokeBorder(Color(.separatorColor), lineWidth: 1)
+                .strokeBorder(isInvalid ? Color.red : Color(.separatorColor),
+                              lineWidth: isInvalid ? 1.5 : 1)
         )
+        .help(isInvalid ? "Not a valid regular expression — ignored until it is" : "")
+    }
+}
+
+/// The small monospaced on/off chip inside a filter pill.
+private struct PillToggleLabel: View {
+    let text: String
+    let isOn: Bool
+
+    var body: some View {
+        Text(text)
+            .font(.caption.weight(.semibold).monospaced())
+            .foregroundStyle(isOn ? Color.white : Color.secondary)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(isOn ? Color.accentColor : Color.clear)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 4)
+                    .strokeBorder(isOn ? Color.clear : Color.secondary.opacity(0.4),
+                                  lineWidth: 1)
+            )
     }
 }
 

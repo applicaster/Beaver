@@ -33,6 +33,11 @@ public struct Filter: Equatable, Hashable, Sendable {
 
     public var excludeIsRegex: Bool
 
+    /// Also match search / exclude terms against the event's `data`
+    /// payload. Opt-in: payloads are ~97% of a session's bytes, so this
+    /// turns a millisecond scan into a noticeable one (D40).
+    public var searchPayloads: Bool
+
     /// Show only these subsystems. Empty means "no restriction", not
     /// "show nothing".
     public var subsystems: Set<String>
@@ -57,6 +62,7 @@ public struct Filter: Equatable, Hashable, Sendable {
         searchIsRegex: Bool = false,
         exclude: String? = nil,
         excludeIsRegex: Bool = false,
+        searchPayloads: Bool = false,
         subsystems: Set<String> = [],
         excludedSubsystems: Set<String> = [],
         categories: Set<String> = [],
@@ -68,6 +74,7 @@ public struct Filter: Equatable, Hashable, Sendable {
         self.searchIsRegex = searchIsRegex
         self.exclude = exclude?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
         self.excludeIsRegex = excludeIsRegex
+        self.searchPayloads = searchPayloads
         self.subsystems = subsystems
         self.excludedSubsystems = excludedSubsystems
         self.categories = categories
@@ -86,6 +93,19 @@ public struct Filter: Equatable, Hashable, Sendable {
             && categories.isEmpty
             && excludedCategories.isEmpty
             && hiddenThroughEventId == nil
+    }
+
+    /// Whether `pattern` compiles the way the store will run it. The
+    /// store ignores a pattern that doesn't, so a half-typed regex
+    /// doesn't blank the feed; the UI marks the field instead.
+    public static func isValidRegex(_ pattern: String) -> Bool {
+        LogStore.compiledRegex(caseInsensitive(pattern)) != nil
+    }
+
+    /// Regex terms ignore case, matching `LIKE` and the highlighter.
+    /// An inline `(?-i)` in the pattern still turns it back on.
+    static func caseInsensitive(_ pattern: String) -> String {
+        "(?i)" + pattern
     }
 
     /// Number of active chips, for the facet menu's badge.

@@ -765,19 +765,16 @@ public actor LogStore {
         isRegex: Bool
     ) async throws -> [Int64] {
         try await dbQueue.read { db in
-            let (whereClause, args) = Self.where(filter: filter, sessionId: sessionId)
-            var sql = "SELECT id FROM event \(whereClause)"
-            var fullArgs = args
-            if isRegex {
-                sql += " AND (message REGEXP ? OR subsystem REGEXP ? OR category REGEXP ?)"
-                fullArgs.append(contentsOf: [highlight, highlight, highlight])
-            } else {
-                let likeTerm = "%\(highlight)%"
-                sql += " AND (message LIKE ? OR subsystem LIKE ? OR category LIKE ?)"
-                fullArgs.append(contentsOf: [likeTerm, likeTerm, likeTerm])
+            // What the row shows is what gets highlighted, so no payloads.
+            guard let (match, matchArgs) = Self.textMatch(highlight, isRegex: isRegex, payloads: false) else {
+                return []
             }
-            sql += " ORDER BY timestamp_ms ASC, id ASC"
-            return try Int64.fetchAll(db, sql: sql, arguments: StatementArguments(fullArgs))
+            let (whereClause, args) = Self.where(filter: filter, sessionId: sessionId)
+            return try Int64.fetchAll(
+                db,
+                sql: "SELECT id FROM event \(whereClause) AND \(match) ORDER BY timestamp_ms ASC, id ASC",
+                arguments: StatementArguments(args + matchArgs)
+            )
         }
     }
 
@@ -829,7 +826,7 @@ public actor LogStore {
                 db,
                 sql: """
                     SELECT id, name, min_level, search, search_rx, exclude, exclude_rx,
-                           subsystems, excluded_subsystems, categories, excluded_categories
+                           search_payloads, subsystems, excluded_subsystems, categories, excluded_categories
                     FROM saved_filter
                     ORDER BY name COLLATE NOCASE
                 """
@@ -863,14 +860,16 @@ public actor LogStore {
                 sql: """
                     INSERT INTO saved_filter
                       (name, min_level, search, search_rx, exclude, exclude_rx,
+                       search_payloads,
                        subsystems, excluded_subsystems, categories, excluded_categories)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(name) DO UPDATE SET
                       min_level           = excluded.min_level,
                       search              = excluded.search,
                       search_rx           = excluded.search_rx,
                       exclude             = excluded.exclude,
                       exclude_rx          = excluded.exclude_rx,
+                      search_payloads     = excluded.search_payloads,
                       subsystems          = excluded.subsystems,
                       excluded_subsystems = excluded.excluded_subsystems,
                       categories          = excluded.categories,
@@ -883,6 +882,7 @@ public actor LogStore {
                     filter.searchIsRegex ? 1 : 0,
                     filter.exclude,
                     filter.excludeIsRegex ? 1 : 0,
+                    filter.searchPayloads ? 1 : 0,
                     Self.encodeChips(filter.subsystems),
                     Self.encodeChips(filter.excludedSubsystems),
                     Self.encodeChips(filter.categories),
@@ -918,6 +918,7 @@ public actor LogStore {
             searchIsRegex: ((row["search_rx"] as Int?) ?? 0) != 0,
             exclude: row["exclude"] as String?,
             excludeIsRegex: ((row["exclude_rx"] as Int?) ?? 0) != 0,
+            searchPayloads: ((row["search_payloads"] as Int?) ?? 0) != 0,
             subsystems: decodeChips(row["subsystems"]),
             excludedSubsystems: decodeChips(row["excluded_subsystems"]),
             categories: decodeChips(row["categories"]),
@@ -1185,7 +1186,7 @@ public actor LogStore {
     /// Translate a `Filter` into a SQL WHERE clause + bound arguments.
     ///
     /// Substring search uses `LIKE '%x%'` across message/subsystem/
-    /// category. Regex uses the custom `REGEXP` function registered in
+    /// category, plus `data_json` when `searchPayloads` is on. Regex uses the custom `REGEXP` function registered in
     /// `init`. FTS5 was tried first but its prefix-match semantics
     /// (`'l*'` returns every word starting with `l`) produced huge
     /// candidate sets for short terms, making `NOT IN` exclude queries
@@ -1208,36 +1209,19 @@ public actor LogStore {
             args.append(contentsOf: allowed)
         }
 
-        // Search
-        if let search = filter.search {
-            if filter.searchIsRegex {
-                clauses.append(
-                    "(message REGEXP ? OR subsystem REGEXP ? OR category REGEXP ?)"
-                )
-                args.append(contentsOf: [search, search, search])
-            } else {
-                let likeTerm = "%\(search)%"
-                clauses.append(
-                    "(message LIKE ? OR subsystem LIKE ? OR category LIKE ?)"
-                )
-                args.append(contentsOf: [likeTerm, likeTerm, likeTerm])
-            }
+        // Search / exclude. A regex that doesn't compile constrains
+        // nothing; the UI flags the field.
+        if let search = filter.search,
+           let (match, matchArgs) = textMatch(search, isRegex: filter.searchIsRegex,
+                                              payloads: filter.searchPayloads) {
+            clauses.append(match)
+            args.append(contentsOf: matchArgs)
         }
-
-        // Exclude
-        if let exclude = filter.exclude {
-            if filter.excludeIsRegex {
-                clauses.append(
-                    "NOT (message REGEXP ? OR subsystem REGEXP ? OR category REGEXP ?)"
-                )
-                args.append(contentsOf: [exclude, exclude, exclude])
-            } else {
-                let likeTerm = "%\(exclude)%"
-                clauses.append(
-                    "NOT (message LIKE ? OR subsystem LIKE ? OR category LIKE ?)"
-                )
-                args.append(contentsOf: [likeTerm, likeTerm, likeTerm])
-            }
+        if let exclude = filter.exclude,
+           let (match, matchArgs) = textMatch(exclude, isRegex: filter.excludeIsRegex,
+                                              payloads: filter.searchPayloads) {
+            clauses.append("NOT " + match)
+            args.append(contentsOf: matchArgs)
         }
 
         // "Clear" hides what's on screen without deleting it.
@@ -1264,6 +1248,41 @@ public actor LogStore {
         )
 
         return ("WHERE " + clauses.joined(separator: " AND "), args)
+    }
+
+    /// `(message … OR subsystem … OR category … [OR data …])` for one
+    /// term, or `nil` for a regex that doesn't compile.
+    ///
+    /// `data_json` is coalesced: a NULL would make the whole OR NULL
+    /// when nothing else matched, and `NOT NULL` drops the row from an
+    /// exclude it has nothing to do with.
+    static func textMatch(_ term: String, isRegex: Bool, payloads: Bool)
+        -> (String, [any DatabaseValueConvertible])? {
+        var columns = ["message", "subsystem", "category"]
+        if payloads { columns.append("COALESCE(data_json, '')") }
+        let test: String
+        let argument: String
+        if isRegex {
+            guard Filter.isValidRegex(term) else { return nil }
+            test = "REGEXP ?"
+            argument = Filter.caseInsensitive(term)
+        } else {
+            test = #"LIKE ? ESCAPE '\'"#
+            argument = "%" + likeEscaped(term) + "%"
+        }
+        let sql = "(" + columns.map { "\($0) \(test)" }.joined(separator: " OR ") + ")"
+        return (sql, Array(repeating: argument, count: columns.count))
+    }
+
+    /// `%` and `_` are wildcards to LIKE; a user typing `100%` means the
+    /// characters.
+    static func likeEscaped(_ term: String) -> String {
+        var escaped = ""
+        for character in term {
+            if character == #"\"# || character == "%" || character == "_" { escaped.append(#"\"#) }
+            escaped.append(character)
+        }
+        return escaped
     }
 
     private static func appendChip(

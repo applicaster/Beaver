@@ -226,6 +226,26 @@ enum Schema {
             """)
         }
 
+        migrator.registerMigration("v7_drop_event_fts") { db in
+            // Nothing has read event_fts since D15; the triggers still
+            // tokenised every insert and every delete. A trigram rebuild
+            // over payloads was measured and rejected (D40), so it goes.
+            // On the 2.8 GB reference store this takes ~11 ms: the index
+            // only covered short text columns.
+            try db.execute(sql: """
+                DROP TRIGGER IF EXISTS event_ai;
+                DROP TRIGGER IF EXISTS event_ad;
+                DROP TABLE IF EXISTS event_fts;
+            """)
+        }
+
+        migrator.registerMigration("v8_saved_filter_payloads") { db in
+            try db.execute(sql: """
+                ALTER TABLE saved_filter
+                    ADD COLUMN search_payloads INTEGER NOT NULL DEFAULT 0;
+            """)
+        }
+
         return migrator
     }
 }
