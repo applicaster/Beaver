@@ -34,4 +34,71 @@ struct AgentSignalTests {
         #expect(tool.listing["annotations"]?["readOnlyHint"] == false)
         #expect(tool.listing["annotations"]?["destructiveHint"] == false)
     }
+
+    @Test("Each permission state has the strip, the path and the button that works (M28)")
+    func strips() throws {
+        #expect(AgentNotifications.strip(for: .allowed) == nil)
+        #expect(AgentNotifications.strip(for: .muted) == nil)
+        let ask = try #require(AgentNotifications.strip(for: .notDetermined))
+        #expect(ask.action == .askPermission)
+        #expect(ask.button == "Allow Notifications")
+        #expect(ask.title.contains("hasn't asked yet"))
+        let denied = try #require(AgentNotifications.strip(for: .denied))
+        #expect(denied.action == .openSettings)
+        #expect(denied.button == "Open System Settings")
+        for strip in [ask, denied] {
+            #expect(strip.detail == "Turn on: System Settings → Notifications → Beaver → Allow Notifications (style: Banners)")
+        }
+        #expect(AgentNotifications.settingsURL.absoluteString
+            == "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=com.applicaster.LoggerNext")
+        #expect(AgentNotifications.menuTitle(for: .denied) == "Agent Notifications: Off — Turn On…")
+        #expect(AgentNotifications.menuTitle(for: .notDetermined) == "Agent Notifications: Off — Turn On…")
+        #expect(AgentNotifications.menuTitle(for: .allowed) == "Agent Notifications: On")
+        #expect(AgentNotifications.menuTitle(for: .muted) == "Agent Notifications: Muted in Beaver")
+    }
+
+    @Test("What journal_note tells the agent, per state")
+    func outcomes() {
+        #expect(AgentNotifications.outcome(state: .allowed, frontmost: false, held: false) == NotifyOutcome(notified: true))
+        #expect(AgentNotifications.outcome(state: .allowed, frontmost: false, held: true).notified)
+        // In front, the toast is enough, whatever the permission.
+        #expect(AgentNotifications.outcome(state: .denied, frontmost: true, held: false).notified)
+        let denied = AgentNotifications.outcome(state: .denied, frontmost: false, held: false)
+        #expect(!denied.notified)
+        #expect(denied.howToEnable == AgentNotifications.howToEnable)
+        let asked = AgentNotifications.outcome(state: .notDetermined, frontmost: false, held: false)
+        #expect(!asked.notified)
+        #expect(asked.howToEnable == AgentNotifications.howToEnable)
+        let muted = AgentNotifications.outcome(state: .muted, frontmost: false, held: false)
+        #expect(!muted.notified)
+        #expect(muted.howToEnable == nil)
+    }
+
+    @Test("Review focus: at most one notification per 30 s; the rest become one summary")
+    func throttle() {
+        let t0 = Date(timeIntervalSince1970: 1_000)
+        var t = NotificationThrottle()
+        let admit1 = t.admit(at: t0)
+        let admit2 = t.admit(at: t0 + 10)
+        let admit3 = t.admit(at: t0 + 20)
+        let windowEnds1 = t.windowEnds
+        let drain1 = t.drain(at: t0 + 30)
+        let windowEnds2 = t.windowEnds
+        let admit4 = t.admit(at: t0 + 40)
+        let drain2 = t.drain(at: t0 + 60)
+        let drain3 = t.drain(at: t0 + 61)
+        let admit5 = t.admit(at: t0 + 91)
+        #expect(admit1)
+        #expect(!admit2)
+        #expect(!admit3)
+        #expect(windowEnds1 == t0 + 30)
+        #expect(drain1 == 2)
+        #expect(windowEnds2 == nil)
+        #expect(!admit4)      // the summary opened a new window
+        #expect(drain2 == 1)
+        #expect(drain3 == 0)
+        #expect(admit5)
+        #expect(AgentNotifications.summary(count: 1) == "1 new finding from the agent")
+        #expect(AgentNotifications.summary(count: 3) == "3 new findings from the agent")
+    }
 }
