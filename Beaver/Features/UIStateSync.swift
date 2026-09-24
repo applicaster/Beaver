@@ -24,44 +24,54 @@ struct UIStateSync: ViewModifier {
 
     func body(content: Content) -> some View {
         content
+            // Every handler reads both sides live and ignores the value its
+            // onChange captured: an agent's apply and a person's edit can land
+            // in the same run-loop turn, and writing captured values would
+            // swap env and model back and forth forever. Read live, the
+            // handler that runs second sees them equal and stops (last
+            // writer wins).
+            //
             // env → models. Only the models of the session on screen: right
             // after a switch the old ones are about to go, and MainWindow
             // starts the new ones from env.
-            .onChange(of: LogTarget(filter: env.activeFilter, eventId: env.selectedEventId)) { _, target in
+            .onChange(of: LogTarget(filter: env.activeFilter, eventId: env.selectedEventId)) {
                 guard let vm = logFeed, vm.sessionId == env.viewingSessionId else { return }
-                vm.show(filter: target.filter,
-                        select: target.eventId == vm.selectedEventId ? nil : target.eventId)
+                let id = env.selectedEventId
+                vm.show(filter: env.activeFilter, select: id == vm.selectedEventId ? nil : id)
             }
-            .onChange(of: NetworkTarget(filter: env.networkFilter, id: env.selectedNetworkId)) { _, target in
+            .onChange(of: NetworkTarget(filter: env.networkFilter, id: env.selectedNetworkId)) {
                 guard let vm = network, vm.sessionId == env.viewingSessionId else { return }
-                vm.show(filter: target.filter, select: target.id == vm.selection ? nil : target.id)
+                let id = env.selectedNetworkId
+                vm.show(filter: env.networkFilter, select: id == vm.selection ? nil : id)
             }
-            .onChange(of: env.storageLayer) { _, layer in
+            .onChange(of: env.storageLayer) {
                 guard let vm = storages, vm.sessionId == env.viewingSessionId else { return }
-                if vm.selectedNamespace != layer { vm.selectedNamespace = layer }
+                if vm.selectedNamespace != env.storageLayer { vm.selectedNamespace = env.storageLayer }
             }
-            .onChange(of: env.storageSearch) { _, term in
+            .onChange(of: env.storageSearch) {
                 guard let vm = storages, vm.sessionId == env.viewingSessionId else { return }
-                if vm.searchTerm != term { vm.searchTerm = term }
+                if vm.searchTerm != env.storageSearch { vm.searchTerm = env.storageSearch }
             }
             // models → env: the person's own changes.
-            .onChange(of: logFeed?.filter, initial: true) { _, filter in
-                if let filter, env.activeFilter != filter { env.activeFilter = filter }
+            .onChange(of: logFeed?.filter, initial: true) {
+                if let filter = logFeed?.filter, env.activeFilter != filter { env.activeFilter = filter }
             }
-            .onChange(of: logFeed?.selectedEventId) { _, id in
-                if logFeed != nil, env.selectedEventId != id { env.selectedEventId = id }
+            .onChange(of: logFeed?.selectedEventId) {
+                guard let vm = logFeed else { return }
+                if env.selectedEventId != vm.selectedEventId { env.selectedEventId = vm.selectedEventId }
             }
-            .onChange(of: network?.filter) { _, filter in
-                if let filter, env.networkFilter != filter { env.networkFilter = filter }
+            .onChange(of: network?.filter) {
+                if let filter = network?.filter, env.networkFilter != filter { env.networkFilter = filter }
             }
-            .onChange(of: network?.selection) { _, id in
-                if network != nil, env.selectedNetworkId != id { env.selectedNetworkId = id }
+            .onChange(of: network?.selection) {
+                guard let vm = network else { return }
+                if env.selectedNetworkId != vm.selection { env.selectedNetworkId = vm.selection }
             }
-            .onChange(of: storages?.selectedNamespace) { _, layer in
-                if let layer, env.storageLayer != layer { env.storageLayer = layer }
+            .onChange(of: storages?.selectedNamespace) {
+                if let layer = storages?.selectedNamespace, env.storageLayer != layer { env.storageLayer = layer }
             }
-            .onChange(of: storages?.searchTerm) { _, term in
-                if let term, env.storageSearch != term { env.storageSearch = term }
+            .onChange(of: storages?.searchTerm) {
+                if let term = storages?.searchTerm, env.storageSearch != term { env.storageSearch = term }
             }
     }
 }
