@@ -400,11 +400,29 @@ Beaver becomes active) and always offers the one action that works:
 | still `notDetermined` (prompt ignored) or `denied` | A strip at the top of the Agent panel: "Notifications are off — the agent can't call you while Beaver is in the background." The menu item "Agent Notifications: Off — Turn On…" says the same | `notDetermined`: shows the system prompt. `denied`: opens System Settings on Beaver's notification page (`x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=com.applicaster.LoggerNext`) |
 | `allowed` | The strip disappears; the panel has a "Notifications from the agent" switch to mute them within Beaver | — |
 
+- **The strip always spells out where to go**, so it works even if the button
+  doesn't (or the person prefers to do it by hand):
+
+  ```
+  ┌─────────────────────────────────────────────────────────────────┐
+  │ 🔕 Notifications are off — the agent can't call you while       │
+  │    Beaver is in the background.                                 │
+  │    Turn on: System Settings → Notifications → Beaver →          │
+  │    Allow Notifications (style: Banners)                          │
+  │                                        [Open System Settings]   │
+  └─────────────────────────────────────────────────────────────────┘
+  ```
+
+  For `notDetermined` the text is "Beaver hasn't asked yet" and the button is
+  [Allow Notifications]. The menu item opens the same strip in the Agent
+  panel. The path text lives in one constant, next to the deep link, because
+  Apple renames System Settings panes between releases.
 - An `attention` note that could not be delivered as a notification is marked
   in the journal ("not notified: notifications are off"), with the same
   button inline.
-- The agent is told too: `journal_note` returns `notified: true|false` and a
-  reason, and `beaver_status` includes `notifications: allowed|denied|
+- The agent is told too: `journal_note` returns `notified: true|false`, a
+  reason, and the same path text (`howToEnable`), so it can tell the person in
+  chat exactly where to click; and `beaver_status` includes `notifications: allowed|denied|
   notDetermined|muted`. The agent can then ask the person in chat to turn
   them on.
 
@@ -452,7 +470,8 @@ Three layers, each covering what the others cannot:
    > shown to the user in Beaver's agent journal; use `journal_note`, with
    > links, to tell them what you found. Use `level: attention` only when
    > they must look now; it may raise a macOS notification. If the result
-   > says `notified: false`, tell them notifications are off in Beaver.
+   > says `notified: false`, tell them notifications are off and pass on the
+   > `howToEnable` text.
 
 2. **Tool and parameter descriptions**: what each does, defaults, limits.
 
@@ -516,7 +535,7 @@ Swift Testing, `swift test`, no device and no app host:
 | `MCPHTTPListenerTests` | one real loopback round-trip with `URLSession`; notification → 202; foreign `Origin` → 403; `GET` → 405 |
 | `BeaverToolsTests` | each group against `LogStore(databaseURL: .inMemory)` and a `FakeDeviceLink`: filter mapping equals the UI's `Filter`; pagination cursors; `logs_wait` returns on append and times out; `storage_set` rejects whitespace, reports `applied` / `notApplied` from the read-back; session resolution order *(M9)* |
 | `AgentJournalTests` | every call is recorded with the right kind; failed calls carry the error; notes keep their links; the 2 000-row trim; entries survive session delete with the link nulled; `SessionExport` output contains no journal data |
-| `AgentSignalTests` | which calls produce a toast / Dock badge / notification (the table in §7.2); coalescing to one per 30 s with a fake clock; each permission state maps to the right strip and button action; an undelivered note is marked and returns `notified: false` |
+| `AgentSignalTests` | which calls produce a toast / Dock badge / notification (the table in §7.2); coalescing to one per 30 s with a fake clock; each permission state maps to the right strip text, path and button action; an undelivered note is marked and returns `notified: false` |
 | `FollowDeviceTests` | omitted `sessionId` carries a wait across a disconnect/reconnect and reports `sessionChanged`; a pinned session reports `sessionEnded`; no reconnect → `deviceDisconnected` |
 | `AgentAccessTests` | the menu toggle starts and stops the listener; toggled off, the port is closed |
 | `MCPDocDriftTests` | the tool names in `MCP.md`'s tables equal the registered names |
