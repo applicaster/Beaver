@@ -28,6 +28,18 @@
     <language>en</language>
 
     <item>
+      <title>Version 1.15.1</title>
+      <pubDate>Thu, 24 Sep 2026 00:21:40 +0000</pubDate>
+      <sparkle:version>32</sparkle:version>
+      <sparkle:shortVersionString>1.15.1</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>15.5</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/applicaster/Beaver/releases/download/1.15.1/Beaver-1.15.1.zip"
+        sparkle:edSignature="afQTCUbd3uF9DA+Mx1CWJ8n+dSujHu50hUdJRMxXr4q+vm1U7nR+6f+/kj9a4zCl0xzlcziakyemvrbWQmsjBw==" length="8365312"
+        type="application/octet-stream" />
+    </item>
+
+    <item>
       <title>Version 1.15.0</title>
       <pubDate>Wed, 23 Sep 2026 21:36:29 +0000</pubDate>
       <sparkle:version>31</sparkle:version>
