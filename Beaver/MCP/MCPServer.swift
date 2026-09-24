@@ -26,7 +26,9 @@ public struct MCPServer: Sendable {
         Rows are one line each; full payloads come from logs_get and network_get. Network bodies \
         are capped at 100 KB by the SDK and some headers are [REDACTED], so a replayed cURL may \
         fail. Every result ends with Next: suggestions. Everything you call is listed in \
-        Beaver's Agent panel for the user. If unsure how to do something, call beaver_guide.
+        Beaver's Agent panel for the user. To point the user at something in Beaver, use \
+        ui_show (tab, filter, select); it works in the background. Pass reveal: true only \
+        when the user asks to see it. If unsure how to do something, call beaver_guide.
         """
 
     let tools: [MCPTool]

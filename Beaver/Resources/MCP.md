@@ -64,12 +64,17 @@ or a release):
 | `commands_list` | Commands the connected app accepts |
 | `bookmarks_list` | Events and requests the user bookmarked |
 | `filters_list` | The user's saved filters |
+| `ui_state` | What Beaver's window shows: tab, session, filters, selection, whether it is in front |
+| `ui_show` | Point the window at a tab, session, filter or row — in the background unless `reveal: true` |
 | `beaver_guide` | These recipes, by topic |
 
 Conventions: omitting `sessionId` means the live session, else the viewed one,
 else the most recent. Subsystem and category values accept `*` globs, name
 fragments and any case; results say what they matched. `since: "5m"` works
 wherever ids do. Every result ends with `Next:` suggestions.
+
+UI tools work in the background: the window changes where it is and nothing
+takes focus, unless you pass `reveal: true`.
 
 ## Recipes
 
@@ -119,3 +124,24 @@ wherever ids do. Every result ends with `Next:` suggestions.
 1. `bookmarks_list()` — events and requests the user bookmarked.
 2. `filters_list()` — their saved filters; reuse one's conditions in
    `logs_query`.
+
+### ui — point the user at something
+
+Everything here happens in the background: Beaver's window changes where it
+is, and nothing takes focus. Pass `reveal: true` only when the user asks to
+see it.
+
+1. `ui_state()` — what the user is looking at now.
+2. `ui_show(filter: {minLevel: "error", subsystems: ["*auth*"]}, select: "first")`
+   — the Log feed, filtered, first match selected. `filter` takes the same
+   keys as `logs_query`.
+3. `ui_show(networkFilter: {status: "errors"}, select: "first")` — the first
+   failing request. One method, one status and one host at a time.
+4. `ui_show(storage: {layer: "secure", search: "token"})` — the keychain,
+   searched.
+5. The user says "show me": `ui_show(reveal: true)`. "Next one":
+   `ui_show(select: {eventId: <next id>})` — it opens the event's session if
+   needed.
+6. An event or request hidden by the user's filter fails with the call that
+   shows it. `filter: {}` shows every event, including ones the user cleared
+   from view.

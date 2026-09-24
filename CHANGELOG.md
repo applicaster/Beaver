@@ -40,7 +40,11 @@ When releasing:
   Access (MCP)** turns it off. The new **Agent** toolbar button lists
   everything an agent did, with a badge for what you haven't seen, and
   **Connect agent** shows how to hook up Claude Code, Cursor or any other
-  MCP client — Claude Code, Cursor, Perplexity (also in the README).
+  MCP client — Claude Code, Cursor, Perplexity (also in the README). An
+  agent can now point Beaver's window at something (`ui_show`: a tab,
+  session, filter or row) and read what it currently shows (`ui_state`);
+  it works in the background — nothing takes focus unless the agent
+  passes `reveal: true`, which only happens when you ask to see it.
 - **Log feed: the filter survives reconnects and relaunches**, and
   changing it keeps the selected row when it still matches.
   Right-click → **Show in Context** clears the filter and lands on the

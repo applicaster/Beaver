@@ -8,27 +8,27 @@ import Foundation
 enum NetworkTools {
     static let all = [query, get, copy]
 
-    /// `errors`, `2xx`…`5xx`, `failed`, `noStatus`, or codes; any of them.
-    static func statusMatcher(_ picks: [String]) throws -> @Sendable (NetworkEntry) -> Bool {
-        let matchers: [@Sendable (NetworkEntry) -> Bool] = try picks.map { raw in
-            let p = raw.trimmingCharacters(in: .whitespaces).lowercased()
-            if let code = Int(p) { return { $0.status == code } }
-            let pick: NetworkFilter.StatusPick? = switch p {
-            case "errors", "error": .errors
-            case "2xx": .statusClass(.success)
-            case "3xx": .statusClass(.redirect)
-            case "4xx": .statusClass(.clientError)
-            case "5xx": .statusClass(.serverError)
-            case "failed": .statusClass(.failed)
-            case "nostatus", "none": .noStatus
-            default: nil
-            }
-            guard let pick else {
-                throw ToolError("Unknown status \"\(raw)\". Use errors, 2xx, 3xx, 4xx, 5xx, failed, noStatus, or a code like 401.")
-            }
-            return { pick.matches($0) }
+    /// `errors`, `2xx`…`5xx`, `failed`, `noStatus`, or a code.
+    static func statusPick(_ raw: String) throws -> NetworkFilter.StatusPick {
+        let p = raw.trimmingCharacters(in: .whitespaces).lowercased()
+        if let code = Int(p) { return .code(code) }
+        switch p {
+        case "errors", "error": return .errors
+        case "2xx": return .statusClass(.success)
+        case "3xx": return .statusClass(.redirect)
+        case "4xx": return .statusClass(.clientError)
+        case "5xx": return .statusClass(.serverError)
+        case "failed": return .statusClass(.failed)
+        case "nostatus", "none": return .noStatus
+        default:
+            throw ToolError("Unknown status \"\(raw)\". Use errors, 2xx, 3xx, 4xx, 5xx, failed, noStatus, or a code like 401.")
         }
-        return { entry in matchers.contains { $0(entry) } }
+    }
+
+    /// Any of `picks`.
+    static func statusMatcher(_ picks: [String]) throws -> @Sendable (NetworkEntry) -> Bool {
+        let matchers = try picks.map(statusPick)
+        return { entry in matchers.contains { $0.matches(entry) } }
     }
 
     static func line(_ e: NetworkEntry) -> String {
