@@ -38,6 +38,14 @@ private struct LogFeedContent: View {
             HSplitView {
                 LogFeedTable(vm: vm)
                     .frame(minWidth: 600, maxWidth: .infinity, maxHeight: .infinity)
+                    // D3: off the tail (scrolled up, jumped, or paused),
+                    // a pill offers the way back and counts arrivals.
+                    .overlay(alignment: .bottom) {
+                        if !vm.follow.isFollowing {
+                            NewRowsPill(vm: vm)
+                                .padding(.bottom, 14)
+                        }
+                    }
                 DetailPaneView(event: selectedEvent,
                                data: vm.selectedData,
                                context: vm.selectedContext,
@@ -194,27 +202,6 @@ private struct LogFeedFilterBar: View {
                 .help("Bring back the events Clear hid — they were never deleted")
             }
 
-            // "↓ N new events" pill — shown only when paused with
-            // unseen events queued up. Click resumes the live feed.
-            if vm.isPaused && vm.unseenCount > 0 {
-                Button {
-                    vm.resume()
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "arrow.down")
-                        Text("\(vm.unseenCount) new")
-                            .monospacedDigit()
-                    }
-                    .font(.caption.weight(.semibold))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Capsule().fill(Color.accentColor))
-                    .foregroundStyle(.white)
-                }
-                .buttonStyle(.plain)
-                .help("Resume and scroll to latest")
-            }
-
             Button {
                 vm.isPaused.toggle()
             } label: {
@@ -225,20 +212,7 @@ private struct LogFeedFilterBar: View {
             }
             .help(vm.isPaused
                   ? "Resume the live feed (catch up on new events)"
-                  : "Freeze the table so you can read without new events shifting it")
-
-            // Tail-following toggle. Off by default so high-volume
-            // streaming doesn't yank the user's scroll position
-            // to the bottom every time an event arrives. Flipping
-            // ON snaps to the latest event; the moment the user
-            // scrolls manually, ScrollWatcher flips it back OFF
-            // so they're never trapped.
-            Toggle("Auto-scroll", isOn: $vm.autoScrollEnabled)
-                .toggleStyle(.switch)
-                .fixedSize()
-                .help(vm.autoScrollEnabled
-                      ? "Following the tail. Scrolling manually turns this off."
-                      : "Click to start following new events. Off by default — turn on while you want live tailing.")
+                  : "Freeze the table so you can read without new events shifting it. Scrolling up already stops following; this also stops new rows arriving.")
 
             Toggle("Collapse", isOn: $vm.collapseRepeats)
                 .toggleStyle(.switch)
@@ -1103,58 +1077,43 @@ private struct LogFeedTable: View {
             .contextMenu(forSelectionType: EventRecord.ID.self) { ids in
                 rowContextMenu(for: events(forSelection: ids))
             }
-            // Detect user-initiated scrolls on the table's underlying
-            // NSScrollView. When the user manually moves the scroll
-            // position, we flip `autoScrollEnabled` off so the next
-            // new event doesn't yank them back to the bottom.
+            // D3: user scrolls decide following. At (or within three rows
+            // of) the bottom follows; anywhere else stops and counts.
+            // Programmatic scrolls don't report, so there's no loop.
             .background {
-                ScrollWatcher {
-                    if vm.autoScrollEnabled { vm.autoScrollEnabled = false }
+                ScrollWatcher { atBottom in
+                    vm.userScrolled(atBottom: atBottom)
                 }
             }
-            // Auto-scroll to the newest row whenever a new event
-            // lands in the page — but only when the user has
-            // explicitly opted into tail-following via the
-            // "Auto-scroll" toggle. Default is OFF, so this is a
-            // no-op until the user asks for it.
+            // Following: keep the newest row in view as rows arrive.
             //
             // NOT animated — under fast streaming the animation
             // would move row positions while the user tries to
             // click, causing hit-tests to resolve to the wrong row.
             // Instant scroll keeps clicks reliable.
             //
-            // Paused state means `page` doesn't grow, so no scroll
-            // fires. Match-jump scrolls to its own target separately
-            // via scrollTarget below (which IS animated, because
-            // that's a one-shot user action).
-            .onChange(of: vm.page.last?.id) { _, newLastId in
-                guard let newLastId, vm.autoScrollEnabled else { return }
+            // Watches the last *row*, not the last event: with Collapse
+            // on, a new event can fold into it (its count changes) and
+            // the last event's id isn't a row id to scroll to.
+            .onChange(of: vm.collapsedRows.last) { _, last in
+                guard let last, vm.follow.isFollowing else { return }
                 // Defer one runloop so SwiftUI Table finishes
-                // committing the new `page` before we ask its
+                // committing the new rows before we ask its
                 // internal NSTableView to scroll. Without this defer,
                 // applying a filter that replaces the whole page can
                 // panic with "Index out of range" when scrollTo races
                 // the data update.
                 DispatchQueue.main.async {
-                    proxy.scrollTo(newLastId, anchor: .bottom)
+                    proxy.scrollTo(last.id, anchor: .bottom)
                 }
             }
-            // Toggling Auto-scroll ON snaps the table to the latest
-            // row immediately — otherwise the user would have to
-            // wait for the next event to see anything happen.
-            .onChange(of: vm.autoScrollEnabled) { _, enabled in
-                guard enabled, let lastId = vm.page.last?.id else { return }
-                DispatchQueue.main.async {
-                    proxy.scrollTo(lastId, anchor: .bottom)
-                }
+            // The "N new ↓" pill, and Resume: back to the newest row.
+            .onChange(of: vm.latestScrollToken) { _, _ in
+                scrollToLatest(proxy)
             }
-            // Resuming from paused should snap to the latest row.
-            // Same instant-scroll reasoning.
             .onChange(of: vm.isPaused) { _, paused in
-                guard !paused, let lastId = vm.page.last?.id else { return }
-                DispatchQueue.main.async {
-                    proxy.scrollTo(lastId, anchor: .bottom)
-                }
+                guard !paused else { return }
+                scrollToLatest(proxy)
             }
             // Jump-to-match: when the view model signals a scroll
             // target (via Up/Down on the match navigator), center the
@@ -1165,6 +1124,13 @@ private struct LogFeedTable: View {
                     proxy.scrollTo(target, anchor: .center)
                 }
             }
+        }
+    }
+
+    private func scrollToLatest(_ proxy: ScrollViewProxy) {
+        guard let lastId = vm.collapsedRows.last?.id else { return }
+        DispatchQueue.main.async {
+            proxy.scrollTo(lastId, anchor: .bottom)
         }
     }
 
@@ -1326,7 +1292,35 @@ private struct LogFeedTable: View {
     }
 }
 
-// MARK: - Shortcuts
+// MARK: - Follow pill and shortcuts
+
+/// "N new ↓" (or "Latest ↓" when nothing arrived): back to the newest
+/// row, following again.
+private struct NewRowsPill: View {
+    let vm: LogFeedViewModel
+
+    var body: some View {
+        Button {
+            vm.jumpToLatest()
+        } label: {
+            HStack(spacing: 4) {
+                Text(vm.unseenCount > 0 ? "\(vm.unseenCount) new" : "Latest")
+                    .monospacedDigit()
+                Image(systemName: "arrow.down")
+            }
+            .font(.caption.weight(.semibold))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(Capsule().fill(Color.accentColor))
+            .foregroundStyle(.white)
+            .shadow(color: .black.opacity(0.2), radius: 3, y: 1)
+        }
+        .buttonStyle(.plain)
+        .help(vm.isPaused
+              ? "Resume and jump to the newest event"
+              : "Jump to the newest event and keep following")
+    }
+}
 
 /// Window-level shortcuts while the Log feed is showing. Invisible
 /// buttons, so the shortcuts work wherever focus is in the feed.
@@ -1355,15 +1349,17 @@ private struct LogFeedShortcuts: View {
 /// user-initiated scroll events back via the `onUserScroll`
 /// closure.
 ///
-/// Used by `LogFeedTable` to flip the Auto-scroll toggle off when
-/// the user manually scrolls — programmatic scrolls
+/// Used by `LogFeedTable` to follow the tail while the user is at the
+/// bottom and stop when they scroll away (D3) — programmatic scrolls
 /// (`proxy.scrollTo`) don't fire `didLiveScrollNotification`, so
 /// there's no feedback loop.
 ///
 /// Placed as a `.background` of the Table; the empty NSView walks
 /// up its superview chain to find the table's scroll view.
 private struct ScrollWatcher: NSViewRepresentable {
-    let onUserScroll: () -> Void
+    /// `true` when the scroll left the view at (or within three rows
+    /// of) the bottom.
+    let onUserScroll: (Bool) -> Void
 
     func makeNSView(context: Context) -> NSView {
         let view = ScrollWatcherView()
@@ -1379,7 +1375,7 @@ private struct ScrollWatcher: NSViewRepresentable {
 }
 
 private final class ScrollWatcherView: NSView {
-    var onUserScroll: (() -> Void)?
+    var onUserScroll: ((Bool) -> Void)?
     private weak var observed: NSScrollView?
 
     override func viewDidMoveToWindow() {
@@ -1430,7 +1426,11 @@ private final class ScrollWatcherView: NSView {
     }
 
     @objc private func handleScroll() {
-        onUserScroll?()
+        guard let scrollView = observed, let document = scrollView.documentView else { return }
+        let rowHeight = (document as? NSTableView)
+            .map { $0.rowHeight + $0.intercellSpacing.height } ?? 24
+        let visibleBottom = scrollView.contentView.bounds.maxY
+        onUserScroll?(visibleBottom >= document.frame.height - 3 * rowHeight)
     }
 
     /// Walk the parent chain to find the scroll view SwiftUI's
