@@ -112,8 +112,9 @@ MCP client (Claude Code / Cursor / Codex)
 | `Beaver/MCP/MCPServer.swift` | BeaverCore | JSON-RPC dispatch, protocol-version negotiation *(M21)*, `instructions` *(M13)* |
 | `Beaver/MCP/MCPHTTPListener.swift` | BeaverCore | Minimal HTTP/1.1 over `NWListener`: `POST /mcp`, `GET` → 405, Origin check, `Content-Length` bodies |
 | `Beaver/MCP/MCPTool.swift` | BeaverCore | `MCPTool`, `ToolResult`, a small JSON Schema builder, argument decoding helpers |
-| `Beaver/MCP/BeaverTools.swift` | BeaverCore | The catalog in §5, one `static func` per group |
-| `Beaver/MCP/ToolContext.swift` | BeaverCore | `ToolContext { store, device: DeviceLink, ui: AgentUI, clock }` plus the `DeviceLink` and `AgentUI` protocols *(M14, M15)* |
+| `Beaver/MCP/Tools/*.swift` | BeaverCore | The catalog in §5, one file per group (`StatusTools`, `LogTools`, `NetworkTools`, `StateTools`, `GuideTool`) |
+| `Beaver/MCP/BeaverTools.swift` | BeaverCore | The registry: `BeaverTools.all`, the sum of every group |
+| `Beaver/MCP/ToolContext.swift` | BeaverCore | PR 1: `ToolContext { store, ui: AgentUI, now }`. `DeviceLink` (and the `device`/`clock` members) arrive in PR 2 with the first tool that sends *(M14, M15)* |
 | `Beaver/MCP/AgentJournal.swift` | BeaverCore | Records every tool call, agent notes and system entries; unseen count *(M17)* |
 | `Beaver/Store/Schema.swift` | BeaverCore | One migration: the `agent_activity` table (§7.2) |
 | `Beaver/Features/AgentActivity/AgentActivityView.swift` | app | The Agent panel (inspector), toolbar button with badge, Dock badge *(M17)* |
@@ -123,7 +124,7 @@ MCP client (Claude Code / Cursor / Codex)
 | `Beaver/MCP/AgentAccess.swift` | BeaverCore | The only entry point the app calls: `start(env:)`, `stop()`. The future access check goes here *(M24)* |
 | `Beaver/AppEnvironment.swift` | app | Conforms to `AgentUI`; gains `selectedTab`, `selection`, `reveal()` *(M12)* |
 | `Beaver/BeaverApp.swift` | app | Starts and stops the listener with the menu toggle *(M4, M22)* |
-| `MCP.md` | repo root | Tool reference + usage rules, the source of truth for agents and humans *(M13)* |
+| `Beaver/Resources/MCP.md` | BeaverCore (bundled resource) | Tool reference + usage rules, the source of truth for agents and humans *(M13)* |
 
 ### 3.2 A separate feature, open in phase 1 *(M4, M24)*
 
@@ -248,7 +249,7 @@ Conventions for every tool:
 | `logs_facets` | `sessionId`, `filter`, `afterId` / `beforeId` (or `since` / `until`) — what arrived in a range | counts per level, subsystem and category under the other facets (same as `LogStore.facetCounts`) | R |
 | `logs_query` | `sessionId`, `filter`, `afterId`, `beforeId`, `limit` (default 100, max 500), `order` (`newest` default / `oldest`), `includeData` (default false) | one line per event, `#<id> HH:mm:ss.SSS LEVEL subsystem/category: message`; `total` matching; `nextCursor` | R |
 | `logs_get` | `ids[]` (max 50) | full events with `data` and `context` JSON; payloads over 256 KB truncated with a `truncated` flag | R |
-| `logs_wait` | `sessionId`, `filter`, `afterId` (default: latest id now), `timeoutMs` (default 15 000, max 60 000), `limit` | the matching events that arrived, or `timedOut: true`; plus `sessionChanged` / `sessionEnded` / `deviceDisconnected` when they happen *(M26)* | R. Long-poll on `LogStore.changes()` *(M11)* |
+| `logs_wait` | `sessionId`, `filter`, `afterId` (default: latest id now), `timeoutMs` (default 15 000, max 60 000), `limit` | the matching events that arrived (with `total` / `hasMore`), or `timedOut: true`; plus `sessionChanged` / `sessionEnded` / `deviceDisconnected` when they happen *(M26)* | R. Polls the store every 250 ms rather than long-polling `LogStore.changes()` — same behavior, a third of the code *(M11)* |
 | `logs_clear` | `sessionId` | the watermark event id | W. Same as the toolbar's Clear: hides events up to now via `hiddenThroughEventId`, deletes nothing |
 
 ### 5.4 Network
@@ -676,6 +677,9 @@ unnecessary for anyone running Beaver.
 ---
 
 ## 12. Decisions
+
+Migrated to DECISIONS.md as D43–D71 (M18, M19 stay here) — DECISIONS.md is
+now the source of truth.
 
 Each decision: what, why, alternatives, and what changing it touches.
 

@@ -203,6 +203,17 @@ CREATE TABLE network_entry (
 );
 
 CREATE INDEX idx_network_session_ts ON network_entry(session_id, timestamp_ms);
+
+-- Added in migration v9 (D59 / spec M17). The agent activity journal.
+-- Not part of any session export; session_id is SET NULL on delete.
+CREATE TABLE agent_activity (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL,
+  client TEXT, tool TEXT, kind TEXT NOT NULL, summary TEXT NOT NULL,
+  level TEXT, is_error INTEGER NOT NULL DEFAULT 0, error TEXT,
+  links_json TEXT,
+  session_id INTEGER REFERENCES session(id) ON DELETE SET NULL,
+  seen INTEGER NOT NULL DEFAULT 0
+);
 ```
 
 **Operations.**
@@ -497,6 +508,22 @@ These are deliberately deferred until first running build:
 - **Multi-window.** Today the app is single-window. SwiftUI supports
   multi-window cleanly with the session model. Decide if the UX benefit
   justifies the additional state management.
+
+---
+
+## 12a. Agent Access (MCP)
+
+An MCP server inside the app lets AI agents read what Beaver collected
+(D43–D71, `Beaver/Resources/MCP.md`):
+
+    MCP client ──HTTP POST 127.0.0.1:9081/mcp──► MCPHTTPListener (NWListener)
+        ► MCPServer (JSON-RPC, stateless) ► BeaverTools (MCPTool values)
+        ► LogStore actor + AgentUI (read-only view of AppEnvironment)
+        ► every call journaled to agent_activity ► Agent panel
+
+`AgentAccess` is the only entry point the app uses. All of it except the
+`AgentUI` conformance and the panel lives in BeaverCore and is covered by
+`swift test`.
 
 ---
 
