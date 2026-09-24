@@ -64,11 +64,53 @@ extension NetworkEntry {
     /// `237 B`, `4.2 KB`, `42 KB`, `1.5 MB` — decimal units like
     /// `ByteCountFormatter`'s `.file` style, so a 100 000-character body
     /// reads `100 KB`; short enough for the table's Size column.
+    /// Table-width duration: milliseconds under a second, then seconds with
+    /// one decimal ("2.3 s", "16.0 s"), whole seconds from 100 s. The detail
+    /// pane keeps the exact milliseconds.
+    public static func compactDuration(_ ms: Int) -> String {
+        guard ms >= 1000 else { return "\(ms) ms" }
+        let seconds = Double(ms) / 1000
+        return seconds < 99.95 ? String(format: "%.1f s", seconds) : "\(Int(seconds.rounded())) s"
+    }
+
     public static func compactSize(_ bytes: Int) -> String {
         guard bytes >= 1000 else { return "\(bytes) B" }
         var value = Double(bytes) / 1000, unit = "KB"
         if value >= 999.5 { value /= 1000; unit = "MB" }
         return value < 9.95 ? String(format: "%.1f ", value) + unit : "\(Int(value.rounded())) \(unit)"
+    }
+
+    /// Traffic-light tier shared by the Size and Duration columns:
+    /// grey is fine, yellow deserves a look, red is a problem.
+    public enum Tier: Sendable { case normal, attention, critical }
+
+    /// Grey under 50 KB, yellow 50–100 KB, red from 100 KB. The SDK cuts
+    /// bodies at 100 000 chars and doesn't send the real size, so live
+    /// traffic tops out at "100 KB+": red means "too big to even capture".
+    public var tableSizeTier: Tier {
+        guard let bytes = responseBodySize ?? responseBytes else { return .normal }
+        if bytes >= 100_000 || (isResponseBodyTruncated && responseBodySize == nil) { return .critical }
+        if bytes >= 50_000 { return .attention }
+        return .normal
+    }
+
+    /// Duration colour tier: quiet under 1 s, slow to 3 s, very slow after.
+    public enum DurationTier: Sendable {
+        case normal, slow, verySlow
+
+        public init(millis: Int?) {
+            switch millis ?? 0 {
+            case ..<1000: self = .normal
+            case ..<3000: self = .slow
+            default: self = .verySlow
+            }
+        }
+    }
+
+    /// Headers by name, ignoring case (ties broken by the exact name), for
+    /// the detail pane's grid and its Raw lines.
+    public static func sortedHeaders(_ h: [String: String]) -> [(name: String, value: String)] {
+        h.sorted { ($0.key.lowercased(), $0.key) < ($1.key.lowercased(), $1.key) }.map { ($0.key, $0.value) }
     }
 
     public var requestJSON: String {

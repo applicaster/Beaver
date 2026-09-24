@@ -413,4 +413,47 @@ struct NetworkCopyTests {
     func shortURLOfUnparsableStringIsTheString() {
         #expect(url("http://[::1?q=1").shortURL == "http://[::1?q=1")
     }
+
+    // MARK: Table colour helpers
+
+    @Test
+    func durationTiers() {
+        #expect(NetworkEntry.DurationTier(millis: nil) == .normal)
+        #expect(NetworkEntry.DurationTier(millis: 999) == .normal)
+        #expect(NetworkEntry.DurationTier(millis: 1000) == .slow)
+        #expect(NetworkEntry.DurationTier(millis: 2999) == .slow)
+        #expect(NetworkEntry.DurationTier(millis: 3000) == .verySlow)
+    }
+
+    @Test
+    func compactDurationSwitchesToSecondsFromOneSecond() {
+        #expect(NetworkEntry.compactDuration(0) == "0 ms")
+        #expect(NetworkEntry.compactDuration(830) == "830 ms")
+        #expect(NetworkEntry.compactDuration(999) == "999 ms")
+        #expect(NetworkEntry.compactDuration(1000) == "1.0 s")
+        #expect(NetworkEntry.compactDuration(2266) == "2.3 s")
+        #expect(NetworkEntry.compactDuration(15959) == "16.0 s")
+        #expect(NetworkEntry.compactDuration(99_949) == "99.9 s")
+        #expect(NetworkEntry.compactDuration(125_000) == "125 s")
+    }
+
+    @Test
+    func sizeTiersGreyYellowRed() {
+        // Grey under 50 KB, yellow 50–100 KB, red from 100 KB — which includes every body the SDK cut.
+        #expect(e(#"{"url":"https://a.io","responseBody":"ok"}"#).tableSizeTier == .normal)
+        #expect(e(#"{"url":"https://a.io"}"#).tableSizeTier == .normal)
+        #expect(e(#"{"url":"https://a.io","responseBodySize":49999,"responseBody":"x"}"#).tableSizeTier == .normal)
+        #expect(e(#"{"url":"https://a.io","responseBodySize":50000,"responseBody":"x"}"#).tableSizeTier == .attention)
+        #expect(e(#"{"url":"https://a.io","responseBodySize":99999,"responseBody":"x"}"#).tableSizeTier == .attention)
+        #expect(e(#"{"url":"https://a.io","responseBodySize":100000,"responseBody":"x"}"#).tableSizeTier == .critical)
+        #expect(e(#"{"url":"https://a.io","responseBody":"{\"a\":1... [TRUNCATED]"}"#).tableSizeTier == .critical)
+        #expect(e(#"{"url":"https://a.io","responseBodySize":5000,"responseBody":"x... [TRUNCATED]"}"#).tableSizeTier == .normal)
+    }
+
+    @Test
+    func headersSortIgnoringCase() {
+        let rows = NetworkEntry.sortedHeaders(["x-b": "2", "Content-Type": "j", "Accept": "a", "age": "1"])
+        #expect(rows.map(\.name) == ["Accept", "age", "Content-Type", "x-b"])
+        #expect(rows.map(\.value) == ["a", "1", "j", "2"])
+    }
 }
