@@ -94,31 +94,17 @@ public final class AppEnvironment {
         self.server = server
     }
 
-    /// The session that was live when the client most recently
-    /// disconnected. Used to decide whether the user was "following
-    /// live" at disconnect time — if so, we auto-advance them into the
-    /// next live session on reconnect.
-    private var lastEndedSessionId: Int64?
-
     /// Called when the WebSocket transitions to `.clientConnected`
     /// and a new session row is created in the store.
     ///
-    /// Follows the user into the new session unless they had manually
-    /// navigated to a past session via the Sessions sidebar (in which
-    /// case `viewingSessionId` points at something other than the
-    /// just-ended live session, and we preserve that choice).
+    /// Always shows the new session, even over a past or imported one
+    /// the user opened: a device that connects is what they want to see.
     public func didConnectSession(_ id: Int64) {
         currentSessionId = id
-        if viewingSessionId == nil || viewingSessionId == lastEndedSessionId {
-            viewingSessionId = id
-        }
-        lastEndedSessionId = nil
+        viewingSessionId = id
     }
 
     public func didDisconnectSession() {
-        // Remember which session was live so the next connect knows
-        // whether the user was "following live".
-        lastEndedSessionId = currentSessionId
         currentSessionId = nil
         // viewingSessionId stays — the user can keep reading the now-ended
         // session.

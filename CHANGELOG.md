@@ -15,6 +15,8 @@ When releasing:
 ## [Unreleased]
 
 ### Fixed
+- A device that connects is shown at once, even if a past or imported
+  session was open — before, you had to pick it in Sessions by hand.
 - Double-clicking empty space in the toolbar zooms the window again —
   before, only the strip above the sidebar did.
 
