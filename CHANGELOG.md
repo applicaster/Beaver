@@ -14,6 +14,10 @@ When releasing:
 
 ## [Unreleased]
 
+### Fixed
+- Double-clicking empty space in the toolbar zooms the window again —
+  before, only the strip above the sidebar did.
+
 ## [4.0.1] - 2026-09-24
 
 ### Changed

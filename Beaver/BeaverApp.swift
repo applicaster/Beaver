@@ -83,8 +83,11 @@ struct BeaverApp: App {
                 .environment(toasts)
                 .task { await scheduleAgentAccessApply() }
                 .onChange(of: agentAccessEnabled) { Task { await scheduleAgentAccessApply() } }
+                // Hides the title but keeps a real title bar, so a double-click
+                // on the toolbar's empty space zooms. `.hiddenTitleBar` left only
+                // the sidebar's strip doing that.
+                .toolbar(removing: .title)
         }
-        .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1200, height: 800)
         .commands {
             CommandGroup(replacing: .newItem) { /* disable new window */ }
