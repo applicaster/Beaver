@@ -35,6 +35,16 @@ struct ClientHandshakeTests {
         #expect(h.platformParts.name == nil)
     }
 
+    @Test("A deviceId equal to model (the SDK's fallback) is ignored")
+    func modelAsDeviceIdIgnored() throws {
+        let data = try frame(["type": "handshake", "deviceId": "iPhone15,2", "model": "iPhone15,2"])
+        guard case .success(.clientHandshake(let h)) = ProtocolDecoder.decode(data) else {
+            Issue.record("expected .clientHandshake"); return
+        }
+        #expect(h.deviceId == nil)
+        #expect(h.model == "iPhone15,2")
+    }
+
     @Test("A platform without a version keeps the name")
     func platformWithoutVersion() {
         #expect(ClientHandshake(platform: "tvOS").platformParts.name == "tvOS")

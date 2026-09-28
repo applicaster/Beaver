@@ -49,6 +49,8 @@ When releasing:
   out — call those directly instead); `devices_set_default` picks the app
   device tools use when `deviceId` is omitted — it follows the app across
   restarts. `beaver_status.devices` gains `default`, `uid`, `appPackage`.
+  An app tool that deletes, removes, clears, kills or resets shows the
+  destructive toast in the Agent panel.
 
 ### Changed
 - An app that restarts is recognised by its device id, so two identical builds

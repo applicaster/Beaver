@@ -90,7 +90,8 @@ enum ToolboxTools {
                 + boxes.map(\.name).joined(separator: ", ")
                 + ". Example: toolboxes_list(deviceId: \"\(deviceId)\", toolbox: \"\(boxes.first?.name ?? "storage")\").")
         }
-        let first = box.tools[0]
+        // Suggest a read, never storage.delete because it sorts first.
+        let first = box.tools.first { localName($0.name, startsWith: readVerbs) } ?? box.tools[0]
         return ToolResult(
             summary: "\(box.name) on \(on): \(box.tools.count) tool(s).",
             body: box.tools.map { $0.signature + ($0.description.isEmpty ? "" : " — " + $0.description) }
@@ -139,7 +140,9 @@ enum ToolboxTools {
                     : "\(name) is destructive, so Beaver doesn't run it through tools_call. Example: \(local)(\(required))."
                 throw ToolError(message)
             }
-            return try await tool.run(ToolArguments(arguments), ctx)
+            var result = try await tool.run(ToolArguments(arguments), ctx)
+            result.journalKind = tool.kind
+            return result
         }
         let (_, id) = try await ctx.requireDevice(args, doing: "call \(name)", call: "tools_call(name: \"\(name)\")")
         let label = try await appLabel(ctx, id)
@@ -171,11 +174,24 @@ enum ToolboxTools {
             body: text,
             structured: .object(structured),
             next: ["logs_wait(afterId: \(before), timeoutMs: 15000) for what the app logged"],
-            sessionId: id
+            sessionId: id,
+            journalKind: localName(name, startsWith: destructiveVerbs) ? .destructive : nil
         )
     }
 
     // MARK: Helpers
+
+    /// An app tool named like these is journaled as destructive (its toast).
+    static let destructiveVerbs = ["delete", "remove", "clear", "kill", "reset"]
+    /// A tool named like these is safe to suggest in `Next:`.
+    static let readVerbs = ["get", "list", "info", "dump", "tail", "facets"]
+
+    /// Whether the name after its toolbox (`storage.delete` → `delete`)
+    /// starts with one of `verbs`, in any case.
+    static func localName(_ tool: String, startsWith verbs: [String]) -> Bool {
+        let local = (tool.firstIndex(of: ".").map { tool[tool.index(after: $0)...] } ?? tool[...]).lowercased()
+        return verbs.contains { local.hasPrefix($0) }
+    }
 
     /// The device's tools, or Beaver's own for "beaver".
     private static func tools(_ args: ToolArguments, _ ctx: ToolContext) async throws
@@ -191,8 +207,8 @@ enum ToolboxTools {
     }
 
     /// Beaver's own tools as toolboxes: not the gateway (no recursion) and
-    /// not the destructive ones — tools_call would skip their journal
-    /// toast and destructiveHint, so they're only callable directly.
+    /// not the destructive ones — tools_call has no destructiveHint, so
+    /// they're only callable directly.
     private static func beaverDeviceTools() -> [DeviceTool] {
         BeaverTools.all.filter { !gatewayNames.contains($0.name) && $0.kind != .destructive }.map {
             DeviceTool(name: Toolboxes.beaverName($0.name), description: $0.description, inputSchema: $0.inputSchema)

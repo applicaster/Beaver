@@ -66,6 +66,17 @@ struct ToolboxToolsTests {
         #expect(r.next.contains { $0.contains("tools_call(") && $0.contains("{key: …}") })
     }
 
+    @Test("toolboxes_list(toolbox:): Next suggests a read, not the delete that sorts first")
+    func nextSuggestsRead() async throws {
+        let (store, _, ui, device) = try await alpha { _, _ in ["tools": [
+            ["name": "storage.delete", "inputSchema": ["type": "object"]],
+            ["name": "storage.get", "inputSchema": ["type": "object"]],
+            ["name": "storage.set", "inputSchema": ["type": "object"]],
+        ]] }
+        let r = try await run(ToolboxTools.toolboxesList, ["toolbox": "storage"], store, ui, device)
+        #expect(r.next.first?.contains("name: \"storage.get\"") == true)
+    }
+
     @Test("toolboxes_list: an unknown toolbox lists the real ones")
     func unknownToolbox() async throws {
         let (store, _, ui, device) = try await alpha()
@@ -102,6 +113,19 @@ struct ToolboxToolsTests {
         #expect(r.body == "set volume\nsecond line")
         #expect(r.structured["structuredContent"]?["echo"]?["name"] == "storage.set")
         #expect(r.sessionId == a.id)
+    }
+
+    @Test("tools_call journals a delete/remove/clear/kill/reset app tool as destructive, others by default")
+    func journalKind() async throws {
+        let (store, _, ui, device) = try await alpha()
+        for name in ["storage.delete", "storage.removeNamespace", "app.killProcess", "Cache.CLEAR", "app.reset"] {
+            let r = try await run(ToolboxTools.toolsCall, ["name": .string(name)], store, ui, device)
+            #expect(r.journalKind == .destructive, "\(name)")
+        }
+        let get = try await run(ToolboxTools.toolsCall, ["name": "storage.get"], store, ui, device)
+        #expect(get.journalKind == nil)
+        let beaver = try await run(ToolboxTools.toolsCall, ["deviceId": "beaver", "name": "beaver.status"], store, ui, device)
+        #expect(beaver.journalKind == .read)
     }
 
     @Test("Review focus: arguments sent as a JSON string are parsed")

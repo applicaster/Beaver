@@ -68,6 +68,18 @@ struct MCPServerTests {
         #expect(journal.first?.summary == "echo hi 🔥")
     }
 
+    @Test("The journal records the result's journalKind over the tool's kind")
+    func journalKindFromResult() async throws {
+        let store = try LogStore(source: .inMemory)
+        let gateway = MCPTool(name: "gateway", title: "Gateway", description: "Use when testing.", kind: .change,
+                              inputSchema: ToolSchema.object([:])) { _, _ in
+            ToolResult(summary: "deleted", journalKind: .destructive)
+        }
+        let s = MCPServer(tools: [gateway], context: makeContext(store), journal: AgentJournal(store: store))
+        _ = try await call(s, #"{"jsonrpc":"2.0","id":12,"method":"tools/call","params":{"name":"gateway"}}"#)
+        #expect(try await store.agentActivity().first?.kind == .destructive)
+    }
+
     @Test("A tool error is a result with isError, and is journaled as an error")
     func toolError() async throws {
         let (s, store) = try server()

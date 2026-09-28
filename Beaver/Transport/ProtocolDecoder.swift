@@ -155,12 +155,17 @@ public enum ProtocolDecoder {
 
     // MARK: - Client handshake
 
-    /// Every field is optional; an empty string counts as missing.
+    /// Every field is optional; an empty string counts as missing. A
+    /// `deviceId` equal to `model` is the SDK's fallback when it has no
+    /// installation id — identical simulators would share it (D77), so
+    /// it counts as missing too.
     private static func decodeHandshake(envelope: [String: Any]) -> ClientHandshake {
         func str(_ key: String) -> String? {
             (envelope[key] as? String).flatMap { $0.isEmpty ? nil : $0 }
         }
-        return ClientHandshake(deviceId: str("deviceId"), deviceName: str("deviceName"), model: str("model"),
+        let model = str("model")
+        let deviceId = str("deviceId").flatMap { $0 == model ? nil : $0 }
+        return ClientHandshake(deviceId: deviceId, deviceName: str("deviceName"), model: model,
                                platform: str("platform"), appPackage: str("appPackage"), version: str("version"))
     }
 

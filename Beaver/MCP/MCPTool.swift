@@ -32,13 +32,18 @@ public struct ToolResult: Sendable {
     public var level: String?
     public var links: [JournalLink]
     public var notice: String?
+    /// The journal kind when it isn't the tool's own: `tools_call` runs
+    /// tools of any kind (a destructive app tool gets the destructive toast).
+    public var journalKind: AgentActivity.Kind?
 
     public init(summary: String, body: String = "", structured: JSON = .object([:]),
                 next: [String] = [], sessionId: Int64? = nil,
-                level: String? = nil, links: [JournalLink] = [], notice: String? = nil) {
+                level: String? = nil, links: [JournalLink] = [], notice: String? = nil,
+                journalKind: AgentActivity.Kind? = nil) {
         self.summary = summary; self.body = body; self.structured = structured
         self.next = next; self.sessionId = sessionId
         self.level = level; self.links = links; self.notice = notice
+        self.journalKind = journalKind
     }
 
     public var text: String {

@@ -368,7 +368,8 @@ Sent once per connection, right after the socket opens (before any `event` /
  "appPackage": "com.example.app", "version": "11.0.1"}
 ```
 
-- All six fields are optional; an empty string counts as missing.
+- All six fields are optional; an empty string counts as missing. Beaver
+  ignores a `deviceId` equal to `model` (the SDK's fallback).
 - Beaver stores `deviceId` as `session.device_uid`, `appPackage` as
   `session.app_package`, `model` as `device_model`, `version` as
   `app_version`; `platform` (`"iOS 18.6"`) is split on the first space into

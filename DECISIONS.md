@@ -2637,8 +2637,10 @@ won't decode, and the feed starts unfiltered once.
   Beaver's destructive tools (`sessions_delete`, `storage_delete`,
   `filters_delete`, …): `toolboxes_list(deviceId: "beaver")` doesn't list
   them, and `tools_call(deviceId: "beaver", …)` refuses one with the direct
-  call to make instead — `tools_call` has no destructive toast and no
-  `destructiveHint`, so those stay reachable only by calling the tool itself.
+  call to make instead — `tools_call` has no `destructiveHint`, so those
+  stay reachable only by calling the tool itself. An app tool whose name
+  after the toolbox starts with delete, remove, clear, kill or reset is
+  journaled as destructive (the toast); other app tools as a change.
 - **Why:** the user wants one set of commands for Beaver and apps; MCP
   clients cache `tools/list` and ignore `list_changed`; device tools differ
   per app.
