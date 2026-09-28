@@ -128,7 +128,7 @@ struct ToolboxToolsTests {
     func unknownTool() async throws {
         let (store, _, ui, device) = try await alpha { method, _ in
             method == "tools/list" ? ToolboxToolsTests.toolsList
-                : ["content": [["type": "text", "text": "Unknown tool 'storage.sett'"]], "isError": true]
+                : ["content": [["type": "text", "text": "Tool storage.sett not found"]], "isError": true]
         }
         let m = await message { _ = try await run(ToolboxTools.toolsCall, ["name": "storage.sett"], store, ui, device) }
         #expect(m.contains("storage.get, storage.set"))
@@ -145,7 +145,7 @@ struct ToolboxToolsTests {
 
     @Test("Beaver as a device: its tools as toolboxes, without the gateway")
     func beaverToolboxes() async throws {
-        let (store, a, ui, device) = try await alpha()
+        let (store, _, ui, device) = try await alpha()
         let r = try await run(ToolboxTools.toolboxesList, ["deviceId": "beaver", "toolbox": "logs"], store, ui, device)
         let names = r.structured["tools"]?.array?.compactMap { $0["name"]?.string } ?? []
         #expect(names.contains("logs.query"))
@@ -153,6 +153,15 @@ struct ToolboxToolsTests {
         #expect(!all.body.contains("tools.call"))
         #expect(!all.body.contains("toolboxes.list"))
         #expect(device.mcpCalls.isEmpty)
+    }
+
+    @Test("A destructive Beaver tool isn't listed under beaver")
+    func beaverExcludesDestructive() async throws {
+        let (store, _, ui, device) = try await alpha()
+        let r = try await run(ToolboxTools.toolboxesList, ["deviceId": "beaver"], store, ui, device)
+        #expect(!r.body.contains("sessions.delete"))
+        #expect(!r.body.contains("storage.delete"))
+        #expect(!r.body.contains("filters.delete"))
     }
 
     @Test("tools_call on beaver runs Beaver's tool; the gateway can't be called through it")
@@ -164,6 +173,25 @@ struct ToolboxToolsTests {
             _ = try await run(ToolboxTools.toolsCall, ["deviceId": "beaver", "name": "tools.call"], store, ui, device)
         }
         #expect(m.contains("toolboxes_list(deviceId: \"beaver\")"))
+    }
+
+    @Test("tools_call on beaver refuses a destructive tool, naming the direct call")
+    func beaverCallRefusesDestructive() async throws {
+        let (store, _, ui, device) = try await alpha()
+        let m = await message {
+            _ = try await run(ToolboxTools.toolsCall, ["deviceId": "beaver", "name": "sessions.delete"], store, ui, device)
+        }
+        #expect(m.contains("sessions.delete is destructive"))
+        #expect(m.contains("sessions_delete("))
+    }
+
+    @Test("tools_call on beaver, an unknown name: lists the tools in its toolbox")
+    func beaverUnknownToolListsToolbox() async throws {
+        let (store, _, ui, device) = try await alpha()
+        let m = await message {
+            _ = try await run(ToolboxTools.toolsCall, ["deviceId": "beaver", "name": "logs.quer"], store, ui, device)
+        }
+        #expect(m.contains("logs.query"))
     }
 
     // MARK: devices_set_default

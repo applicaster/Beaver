@@ -122,7 +122,18 @@ enum ToolboxTools {
         if try args.string("deviceId") == beaverId {
             let local = Toolboxes.beaverToolName(name)
             guard !gatewayNames.contains(local), let tool = BeaverTools.all.first(where: { $0.name == local }) else {
-                throw ToolError("Beaver has no tool \"\(name)\" here. Example: toolboxes_list(deviceId: \"beaver\") for its tools.")
+                let own = beaverDeviceTools()
+                let box = Toolboxes.name(of: name)
+                let same = own.filter { Toolboxes.name(of: $0.name) == box }.map(\.name).sorted()
+                let hint = same.isEmpty
+                    ? " Toolboxes: " + Toolboxes.group(own).map(\.name).joined(separator: ", ") + "."
+                    : " Tools in \(box): " + same.joined(separator: ", ") + "."
+                throw ToolError("Beaver has no tool \"\(name)\" here.\(hint) Example: toolboxes_list(deviceId: \"beaver\") for its tools.")
+            }
+            guard tool.kind != .destructive else {
+                let params = DeviceTool(name: local, description: "", inputSchema: tool.inputSchema).parameters
+                    .filter(\.required).map { "\($0.name): …" }.joined(separator: ", ")
+                throw ToolError("\(name) is destructive, so Beaver doesn't run it through tools_call. Example: \(local)(\(params)).")
             }
             return try await tool.run(ToolArguments(arguments), ctx)
         }
@@ -135,14 +146,15 @@ enum ToolboxTools {
         let box = Toolboxes.name(of: name)
         if reply["isError"]?.bool == true {
             var hint = ""
-            if text.hasPrefix("Unknown tool"),
-               let listed = try? await device(ctx, "tools/list", [:], sessionId: id, timeout: DeviceMCPClient.listTimeout,
+            if let listed = try? await device(ctx, "tools/list", [:], sessionId: id, timeout: DeviceMCPClient.listTimeout,
                                               what: "tools/list", label: label) {
                 let tools = Toolboxes.tools(fromListResult: listed)
-                let same = tools.filter { Toolboxes.name(of: $0.name) == box }.map(\.name).sorted()
-                hint = same.isEmpty
-                    ? " Toolboxes: " + Toolboxes.group(tools).map(\.name).joined(separator: ", ") + "."
-                    : " Tools in \(box): " + same.joined(separator: ", ") + "."
+                if !tools.contains(where: { $0.name == name }) {
+                    let same = tools.filter { Toolboxes.name(of: $0.name) == box }.map(\.name).sorted()
+                    hint = same.isEmpty
+                        ? " Toolboxes: " + Toolboxes.group(tools).map(\.name).joined(separator: ", ") + "."
+                        : " Tools in \(box): " + same.joined(separator: ", ") + "."
+                }
             }
             throw ToolError("\(name) failed on \(label): \(text).\(hint) Example: toolboxes_list(deviceId: \"\(id)\", toolbox: \"\(box)\") for its arguments.")
         }
@@ -165,16 +177,22 @@ enum ToolboxTools {
     private static func tools(_ args: ToolArguments, _ ctx: ToolContext) async throws
         -> (deviceId: String, label: String, tools: [DeviceTool]) {
         if try args.string("deviceId") == beaverId {
-            let own = BeaverTools.all.filter { !gatewayNames.contains($0.name) }.map {
-                DeviceTool(name: Toolboxes.beaverName($0.name), description: $0.description, inputSchema: $0.inputSchema)
-            }
-            return (beaverId, "Beaver", own)
+            return (beaverId, "Beaver", beaverDeviceTools())
         }
         let (_, id) = try await ctx.requireDevice(args, doing: "list its toolboxes", call: "toolboxes_list()")
         let label = try await appLabel(ctx, id)
         let result = try await device(ctx, "tools/list", [:], sessionId: id, timeout: DeviceMCPClient.listTimeout,
                                       what: "tools/list", label: label)
         return (String(id), label, Toolboxes.tools(fromListResult: result))
+    }
+
+    /// Beaver's own tools as toolboxes: not the gateway (no recursion) and
+    /// not the destructive ones — tools_call would skip their journal
+    /// toast and destructiveHint, so they're only callable directly.
+    private static func beaverDeviceTools() -> [DeviceTool] {
+        BeaverTools.all.filter { !gatewayNames.contains($0.name) && $0.kind != .destructive }.map {
+            DeviceTool(name: Toolboxes.beaverName($0.name), description: $0.description, inputSchema: $0.inputSchema)
+        }
     }
 
     /// `Alpha 1.0 (iPhone 15, iOS 18.0)`: how summaries and errors name the app.
