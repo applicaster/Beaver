@@ -213,7 +213,9 @@ public actor LogStore {
         appVersion: String?,
         deviceModel: String?,
         platform: String?,
-        osVersion: String?
+        osVersion: String?,
+        deviceUID: String? = nil,
+        appPackage: String? = nil
     ) async throws {
         let updated: Session? = try await dbQueue.write { db in
             try db.execute(
@@ -223,11 +225,13 @@ public actor LogStore {
                         app_version  = COALESCE(?, app_version),
                         device_model = COALESCE(?, device_model),
                         platform     = COALESCE(?, platform),
-                        os_version   = COALESCE(?, os_version)
+                        os_version   = COALESCE(?, os_version),
+                        device_uid   = COALESCE(?, device_uid),
+                        app_package  = COALESCE(?, app_package)
                     WHERE id = ?
                 """,
                 arguments: [
-                    appName, appVersion, deviceModel, platform, osVersion, id,
+                    appName, appVersion, deviceModel, platform, osVersion, deviceUID, appPackage, id,
                 ]
             )
             return try Self.fetchSession(id: id, db: db)
@@ -241,6 +245,16 @@ public actor LogStore {
             // alongside this method).
             broadcast(.sessionUpdated(updated))
         }
+    }
+
+    /// Writes the SDK's client handshake onto a session (D76). Same
+    /// COALESCE rule: the applicaster.v2 harvest, which arrives later,
+    /// overwrites the model, version and platform where it has them.
+    public func applyHandshake(_ h: ClientHandshake, to sessionId: Int64) async throws {
+        let platform = h.platformParts
+        try await setSessionDeviceInfo(id: sessionId, appName: nil, appVersion: h.version, deviceModel: h.model,
+                                       platform: platform.name, osVersion: platform.version,
+                                       deviceUID: h.deviceId, appPackage: h.appPackage)
     }
 
     public func endSession(_ id: Int64) async throws {
@@ -1260,7 +1274,7 @@ public actor LogStore {
     /// columns added in v3 are picked up everywhere.
     private static let sessionColumns = """
         id, started_at, ended_at, source, client_label,
-        app_name, app_version, device_model, platform, os_version
+        app_name, app_version, device_model, platform, os_version, device_uid, app_package
     """
 
     private static func fetchSession(id: Int64, db: Database) throws -> Session? {
@@ -1298,7 +1312,9 @@ public actor LogStore {
             appVersion:  row["app_version"],
             deviceModel: row["device_model"],
             platform:    row["platform"],
-            osVersion:   row["os_version"]
+            osVersion:   row["os_version"],
+            deviceUID:   row["device_uid"],
+            appPackage:  row["app_package"]
         )
     }
 

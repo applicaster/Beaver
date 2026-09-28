@@ -14,6 +14,8 @@ public enum ProtocolDecoder {
         case event(DecodedEvent)
         case storage(namespaces: [StorageSnapshot.Namespace: String])
         case network(NetworkCapture)
+        /// PROTOCOL.md §4.4 (D76).
+        case clientHandshake(ClientHandshake)
         case unknown(typeRaw: String)
     }
 
@@ -44,6 +46,8 @@ public enum ProtocolDecoder {
             return decodeStorage(envelope: envelope)
         case "network":
             return decodeNetwork(envelope: envelope)
+        case "handshake":
+            return .success(.clientHandshake(decodeHandshake(envelope: envelope)))
         default:
             return .success(.unknown(typeRaw: typeRaw))
         }
@@ -139,6 +143,17 @@ public enum ProtocolDecoder {
             return .failure(.malformedNetwork("payload is not a JSON object with a string 'url'"))
         }
         return .success(.network(capture))
+    }
+
+    // MARK: - Client handshake
+
+    /// Every field is optional; an empty string counts as missing.
+    private static func decodeHandshake(envelope: [String: Any]) -> ClientHandshake {
+        func str(_ key: String) -> String? {
+            (envelope[key] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        }
+        return ClientHandshake(deviceId: str("deviceId"), deviceName: str("deviceName"), model: str("model"),
+                               platform: str("platform"), appPackage: str("appPackage"), version: str("version"))
     }
 
     // MARK: - Helpers
