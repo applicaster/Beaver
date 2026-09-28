@@ -210,9 +210,9 @@ public actor AgentAccess {
         Capability(
             icon: "tray.2",
             title: "Read and change storage",
-            note: "Session, local and keychain storage, fresh from the app. Set or delete a key and Beaver checks the app applied it.",
+            note: "Session, local and keychain storage, fresh from the app, and what changed in it during the session. Set or delete a key and Beaver checks the app applied it.",
             example: "Use beaver: set local storage key onboardingSeen to false.",
-            tools: ["storage_snapshot", "storage_set", "storage_delete"]),
+            tools: ["storage_snapshot", "storage_diff", "storage_set", "storage_delete"]),
         Capability(
             icon: "terminal",
             title: "Drive the app",

@@ -39,6 +39,14 @@ When releasing:
   "n of N", and Return / ⇧Return step through them, opening collapsed rows
   and "Show more" pages to scroll each one into view. `.*` for regex, Esc
   closes. ⌘F still filters the feed.
+- **Storage changes.** Storages → **Changes** compares the layer on screen
+  with an earlier snapshot of the session (pick its time): keys added,
+  removed and changed with old → new, and for a JSON value the fields that
+  changed inside it. Works on past and imported sessions; an imported one
+  usually has a single snapshot, so there is nothing to compare. Agents:
+  new tool `storage_diff` (earliest → latest by default; `since`,
+  `beforeEventId`, or `fromId` / `toId`), and a `storage-changes` recipe —
+  "what changed in storage after login".
 - Drop a session file (`.json`) or HAR anywhere on the window to import
   it, the same as Import. A file Beaver can't open now says so instead of
   doing nothing.

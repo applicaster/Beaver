@@ -1264,6 +1264,63 @@ public actor LogStore {
         }
     }
 
+    /// Every snapshot of one layer, oldest first, without its data (D80).
+    /// A row's time is when the device last reported that content: an
+    /// unchanged report moves it (`recordStorageSnapshot`).
+    public func storageSnapshotHistory(
+        sessionId: Int64,
+        namespace: StorageSnapshot.Namespace
+    ) async throws -> [(id: Int64, takenAt: Date)] {
+        try await dbQueue.read { db in
+            try Row.fetchAll(
+                db,
+                sql: """
+                    SELECT id, taken_at FROM storage_snapshot
+                    WHERE session_id = ? AND namespace = ?
+                    ORDER BY taken_at, id
+                """,
+                arguments: [sessionId, namespace.rawValue]
+            ).map { row in
+                (id: row["id"], takenAt: Date(timeIntervalSince1970: TimeInterval(row["taken_at"] as Int) / 1000.0))
+            }
+        }
+    }
+
+    public func storageSnapshot(id: Int64) async throws -> StorageSnapshot? {
+        try await dbQueue.read { db in
+            try Row.fetchOne(
+                db,
+                sql: "SELECT id, session_id, taken_at, namespace, data_json FROM storage_snapshot WHERE id = ?",
+                arguments: [id]
+            ).map(Self.makeStorageSnapshot)
+        }
+    }
+
+    /// The last snapshot the device reported at or before `date` — what
+    /// storage held just before it, as far as Beaver saw. Nil when the
+    /// layer's first report came later. A content first reported just
+    /// before `date` and re-reported after it has moved past `date`, so
+    /// the one before it is returned (D80).
+    public func storageSnapshot(
+        sessionId: Int64,
+        namespace: StorageSnapshot.Namespace,
+        asOf date: Date
+    ) async throws -> StorageSnapshot? {
+        try await dbQueue.read { db in
+            try Row.fetchOne(
+                db,
+                sql: """
+                    SELECT id, session_id, taken_at, namespace, data_json
+                    FROM storage_snapshot
+                    WHERE session_id = ? AND namespace = ? AND taken_at <= ?
+                    ORDER BY taken_at DESC, id DESC
+                    LIMIT 1
+                """,
+                arguments: [sessionId, namespace.rawValue, Int(date.timeIntervalSince1970 * 1000)]
+            ).map(Self.makeStorageSnapshot)
+        }
+    }
+
     func storageSnapshotCount(sessionId: Int64) async throws -> Int {
         try await dbQueue.read { db in
             try Int.fetchOne(

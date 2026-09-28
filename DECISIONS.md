@@ -221,7 +221,7 @@ into a writeable surface so you can poke the device into specific states.
 **Alternatives considered.**
 - *Keep as-is, polished only.* Doesn't justify the rewrite for this screen.
 - *Diff between snapshots.* Useful but secondary; can layer on later once
-  history is in place.
+  history is in place. Done in D80.
 
 **Implications.**
 - `StoragesViewModel` issues `storage.list` on tab activation, debounced
@@ -2821,3 +2821,33 @@ won't decode, and the feed starts unfiltered once.
 - **MCP:** no tool. Find is a way to look at a payload agents already read
   whole through `logs_get` (and filter events by text with `logs_query`);
   the CLAUDE.md MCP rule covers capabilities, not ways of viewing.
+## D80. Storage diff: compare two snapshots of a layer
+
+**Status:** Accepted (2026-09-28). Picks up D6's deferred "diff between snapshots".
+
+- **Decision:** `storage_snapshot` rows already are each layer's history —
+  a new row only when the content changes (an unchanged report moves the
+  latest row's `taken_at`). Storages → **Changes** compares the layer on
+  screen with an earlier row picked by time; `storage_diff` compares two
+  rows per layer, earliest → latest by default, or from `since` /
+  `beforeEventId` / `fromId` to the latest / `toId`. No schema change.
+- The diff (`StorageDiff`) is per SDK namespace, key by key: added,
+  removed, changed with old and new value as stored. When both sides of a
+  change are JSON — an object or array, or JSON text in a string, as the
+  SDK stores most things — it also lists the fields inside that differ
+  (`user.roles[1]`), unwrapping JSON text nested in JSON text. Arrays are
+  compared index by index. The SDK's `{"ns": {"undefined": v}}` is one
+  plain key, as in the Storages list.
+- "Before time T" is the last row whose `taken_at` is at or before T: the
+  last content the device reported before T. A row's time is when it was
+  last reported, not first, so a content that appeared shortly before T
+  and was re-reported after it counts as after T. `beforeEventId` uses
+  the event's timestamp, which is the device's clock; `taken_at` is
+  Beaver's. No row before T → from the earliest, and the result says so.
+- **Why:** "what changed after login" was a manual side-by-side of two
+  exports. The history was already stored; only the read side was missing.
+- **Alternatives:** store a first-seen time per row (a migration, for a
+  better "before T" at the edges — add it if that edge bites); diff
+  only the last two reports in memory, like the change flash (no past or
+  imported sessions, nothing for agents); leave JSON text as one opaque
+  value (the changed field is what a person looks for in a user object).
