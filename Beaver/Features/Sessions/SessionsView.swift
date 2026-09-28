@@ -315,6 +315,9 @@ private struct SessionRow: View {
             .allowsHitTesting(isHovered && !isLive)
         }
         .contentShape(Rectangle())
+        // The separator starts under the title, like every row. Without
+        // this, List lined it up with the Disconnect button's text.
+        .alignmentGuide(.listRowSeparatorLeading) { _ in 36 }
         .onHover { isHovered = $0 }
     }
 }
