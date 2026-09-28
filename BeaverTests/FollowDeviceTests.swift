@@ -104,4 +104,90 @@ struct FollowDeviceTests {
             #expect(error.message.contains("beaver_status()"))
         }
     }
+
+    private func session(_ id: Int64, app: String? = nil, model: String? = nil) -> Session {
+        Session(id: id, startedAt: Date(), source: .live, appName: app, deviceModel: model, platform: "iOS")
+    }
+
+    @Test("successor: same fingerprint wins; a different one is never followed")
+    func successorByFingerprint() {
+        let a = session(1, app: "Alpha", model: "iPhone")
+        #expect(DeviceFollower.successor(of: a, live: [session(2, app: "Beta", model: "Pixel"),
+                                                       session(3, app: "Alpha", model: "iPhone")],
+                                         appeared: [3]) == 3)
+        #expect(DeviceFollower.successor(of: a, live: [session(2, app: "Beta", model: "Pixel")],
+                                         appeared: [2]) == nil)
+    }
+
+    @Test("successor: unknown fingerprint follows only the one session that just came up")
+    func successorWithoutFingerprint() {
+        let a = session(1, app: "Alpha", model: "iPhone")
+        #expect(DeviceFollower.successor(of: a, live: [session(4)], appeared: [4]) == 4)
+        #expect(DeviceFollower.successor(of: a, live: [session(4), session(5)], appeared: [4, 5]) == nil)
+        // Connected before A dropped: not A's restart.
+        #expect(DeviceFollower.successor(of: a, live: [session(2)], appeared: []) == nil)
+    }
+
+    @Test("Review focus: A restarts while B stays connected — the wait follows A, not B")
+    func followsTheRightDevice() async throws {
+        let store = try LogStore(source: .inMemory)
+        let a = try await store.createSession(source: .live)
+        let b = try await store.createSession(source: .live)
+        try await store.setSessionDeviceInfo(id: a.id, appName: "Alpha", appVersion: nil, deviceModel: "iPhone",
+                                             platform: "iOS", osVersion: nil)
+        try await store.setSessionDeviceInfo(id: b.id, appName: "Beta", appVersion: nil, deviceModel: "Pixel",
+                                             platform: "Android", osVersion: nil)
+        let ui = FakeUI(value: HostSnapshot(liveSessionIds: [a.id, b.id], viewingSessionId: a.id))
+        Task {
+            try? await Task.sleep(for: .milliseconds(300))
+            ui.update { $0.liveSessionIds = [b.id] }
+            await store.append(event("App started"), to: b.id)   // B's log must not count
+            try? await Task.sleep(for: .milliseconds(400))
+            guard let a2 = try? await store.createSession(source: .live) else { return }
+            ui.update { $0.liveSessionIds = [b.id, a2.id] }
+            try? await Task.sleep(for: .milliseconds(300))
+            await store.append(event("App started"), to: a2.id)
+        }
+        let r = try await LogTools.wait.run(
+            ToolArguments(["filter": ["search": "App started"], "timeoutMs": 5000]),
+            makeContext(store, fakeUI: ui))
+        #expect(r.structured["timedOut"] == false)
+        #expect(r.structured["sessionChanged"]?["from"] == JSON(a.id))
+        #expect(r.structured["sessionChanged"]?["to"] != JSON(b.id))
+        #expect(r.structured["sessionId"] != JSON(b.id))
+    }
+
+    @Test("Review focus: another device connecting doesn't end a pinned wait")
+    func otherDeviceDoesNotEndPinned() async throws {
+        let (store, a, ui) = try await liveFixture()
+        Task {
+            try? await Task.sleep(for: .milliseconds(300))
+            guard let b = try? await store.createSession(source: .live) else { return }
+            ui.update { $0.liveSessionIds = [a.id, b.id] }
+        }
+        let r = try await LogTools.wait.run(ToolArguments(["sessionId": JSON(a.id), "timeoutMs": 1500]),
+                                            makeContext(store, fakeUI: ui))
+        #expect(r.structured["sessionEnded"] == false)
+        #expect(r.structured["timedOut"] == true)
+    }
+
+    @Test("Another device restarting doesn't move a wait off the device it follows")
+    func otherDeviceRestartIsIgnored() async throws {
+        let store = try LogStore(source: .inMemory)
+        let b = try await store.createSession(source: .live)
+        let a = try await store.createSession(source: .live)
+        let ui = FakeUI(value: HostSnapshot(liveSessionIds: [b.id, a.id], viewingSessionId: b.id))
+        Task {
+            try? await Task.sleep(for: .milliseconds(300))
+            ui.update { $0.liveSessionIds = [b.id] }
+            try? await Task.sleep(for: .milliseconds(400))
+            guard let a2 = try? await store.createSession(source: .live) else { return }
+            ui.update { $0.liveSessionIds = [b.id, a2.id] }
+        }
+        let r = try await LogTools.wait.run(ToolArguments(["timeoutMs": 1500]), makeContext(store, fakeUI: ui))
+        #expect(r.structured["sessionChanged"] == .null)
+        #expect(r.structured["sessionId"] == JSON(b.id))
+        #expect(r.structured["deviceDisconnected"] == false)
+    }
 }
+
