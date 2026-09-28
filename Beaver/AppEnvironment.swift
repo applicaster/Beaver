@@ -92,6 +92,9 @@ public final class AppEnvironment {
     public var selectedEventId: Int64?
     public var selectedNetworkId: Int64?
 
+    /// The Scheme Generator's form; the view edits it in place.
+    public var schemeLink = SchemeLink()
+
     public init(store: LogStore, server: WSServer) {
         self.store = store
         self.server = server

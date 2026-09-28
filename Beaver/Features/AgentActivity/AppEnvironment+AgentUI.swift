@@ -46,6 +46,7 @@ extension AppEnvironment: AgentUI {
         s.storageSearch = storageSearch
         s.selectedEventId = selectedEventId
         s.selectedNetworkId = selectedNetworkId
+        s.scheme = schemeLink
         return s
     }
 
@@ -62,6 +63,7 @@ extension AppEnvironment: AgentUI {
         if storageSearch != target.storageSearch { storageSearch = target.storageSearch }
         if selectedEventId != target.selectedEventId { selectedEventId = target.selectedEventId }
         if selectedNetworkId != target.selectedNetworkId { selectedNetworkId = target.selectedNetworkId }
+        if schemeLink != target.scheme { schemeLink = target.scheme }
         if change.reveal { reveal() }
     }
 
@@ -109,5 +111,12 @@ extension AppEnvironment: AgentUI {
 
     nonisolated public func notify(_ note: AgentNote) async -> NotifyOutcome {
         await MainActor.run { AgentNotifier.shared.notify(note) }
+    }
+
+    nonisolated public func copyToClipboard(_ text: String) async {
+        await MainActor.run {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+        }
     }
 }
