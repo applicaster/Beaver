@@ -711,6 +711,15 @@ private struct StorageChangesPopover: View {
 
     private var current: StorageSnapshot? { vm.snapshots[vm.selectedNamespace] }
 
+    /// Roughly how tall the rows are: a key line, then its value or up to
+    /// 20 field lines. An underestimate only means scrolling a bit.
+    private var listHeight: CGFloat {
+        changes.reduce(0) { sum, c in
+            let lines = 1 + (c.fields.isEmpty ? 1 : min(c.fields.count, 20) + (c.fields.count > 20 ? 1 : 0))
+            return sum + CGFloat(lines) * 18 + 8
+        }
+    }
+
     /// Snapshots before the one on screen, newest first.
     private var earlier: [(id: Int64, takenAt: Date)] {
         history.filter { $0.id < (current?.id ?? .max) }.reversed()
@@ -738,11 +747,15 @@ private struct StorageChangesPopover: View {
                     Text("\(changes.count) change\(changes.count == 1 ? "" : "s") since then")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    // A ScrollView has no height of its own, so in a popover
+                    // it collapses to nothing: size it to the rows, up to 380.
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 8) {
                             ForEach(changes, id: \.self) { StorageChangeRow(change: $0) }
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
+                    .frame(height: min(380, listHeight))
                 }
             }
         }
