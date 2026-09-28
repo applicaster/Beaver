@@ -84,6 +84,23 @@ When releasing:
   dropping them, and doesn't repeat the app's answer three times;
   `deviceId: "Beaver"` works in any case; `beaver_status` marks one default
   device; a toolbox without a read tool no longer suggests a mutating one.
+- Toolbox loading retries after a native app that was merely slow to answer
+  once — it no longer gets stuck saying the app doesn't support MCP until it
+  reconnects.
+- Requests to a connected app's toolboxes go one at a time, so a slow tool
+  call no longer makes an unrelated request to the same app time out.
+- The toolbar badge and device popover show the app's real device model,
+  platform and OS once quick-brick-xray's own storage harvest arrives,
+  instead of sticking with whatever the handshake alone reported.
+- Device popover: a Retry button when an app doesn't answer MCP,
+  accessibility labels on the icon-only buttons and the live/connected
+  indicator, and long app- or device-supplied text now wraps within a limit
+  instead of overflowing the popover.
+- Only the one live session a shared device id resolves to is marked
+  "default for agents" — not every session that happens to share it.
+- PROTOCOL.md, the design plan and DECISIONS.md corrected against the real
+  SDK behavior found in the bug hunt (frame encoding, Android's handshake
+  order and lack of reconnect, and more).
 
 ## [4.0.1] - 2026-09-24
 

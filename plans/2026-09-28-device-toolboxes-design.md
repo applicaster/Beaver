@@ -61,7 +61,9 @@ Source: `Zapp-Frameworks/plugins/quick-brick-xray`,
   dropped by the device.
 - The **JS-only socket sink** (`src/sinks/socket.ts`) ignores `mcp` frames and
   sends no client handshake. Such apps have no toolboxes in Beaver.
-- The SDK reconnects forever (1 s → 30 s backoff).
+- iOS reconnects forever (1 s → 30 s backoff). Android's sink does not
+  reconnect at all — after a drop it stays gone until the app is
+  relaunched by hand (F5, bug hunt).
 
 ## 3. Wire side (D77)
 

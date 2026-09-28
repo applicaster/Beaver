@@ -2637,16 +2637,22 @@ won't decode, and the feed starts unfiltered once.
   Beaver's destructive tools (`sessions_delete`, `storage_delete`,
   `filters_delete`, …): `toolboxes_list(deviceId: "beaver")` doesn't list
   them, and `tools_call(deviceId: "beaver", …)` refuses one with the direct
-  call to make instead — `tools_call` has no `destructiveHint`, so those
-  stay reachable only by calling the tool itself. An app tool whose name
-  after the toolbox starts with delete, remove, clear, kill or reset is
-  journaled as destructive (the toast); other app tools as a change.
+  call to make instead — Beaver's own destructive tools stay reachable only
+  by calling the tool itself, never through the gateway. An app tool whose
+  name after the toolbox starts with delete, remove, clear, kill, reset,
+  restart, execute or launch is journaled as destructive (the toast); other
+  app tools as a change.
 - **Why:** the user wants one set of commands for Beaver and apps; MCP
   clients cache `tools/list` and ignore `list_changed`; device tools differ
   per app.
 - **Alternatives:** merge device tools into `tools/list` (dynamic list, name
   clashes, renaming Beaver's tools breaks agents); only the gateway, Beaver's
   tools behind it too (breaks agents, schemas unseen).
+- `tools_call` carries `destructiveHint: true` unconditionally (clients
+  confirm before running an app tool call; decided 2026-09-28 after the bug
+  hunt), and the same name heuristic above (delete/remove/clear/kill/reset/
+  restart/execute/launch) that journals a call as destructive also drives
+  the Agent-panel toast.
 
 ## D76. One default device for agents, kept by the SDK's device id
 
@@ -2662,6 +2668,9 @@ won't decode, and the feed starts unfiltered once.
 - **Alternatives:** the viewed device (agent and user move each other); one
   default per MCP connection (needs session ids through `ToolContext`, can't
   be shown in the UI).
+- `devices_disconnect` ignores the default: it always requires an explicit
+  `deviceId`, never falls back to it. Disconnecting the wrong app by leaving
+  `deviceId` off is a mistake too easy to make silent.
 
 ## D77. Beaver reads the client handshake
 
@@ -2673,3 +2682,10 @@ won't decode, and the feed starts unfiltered once.
   for a connection without one.
 - **Why:** the SDK already sent a stable id that Beaver ignored.
 - **Alternatives:** keep the heuristic (two identical builds look alike).
+- The handshake fills the session's display columns (`device_model`,
+  `platform`, `os_version`, `app_version`) only while they're still empty
+  (`COALESCE`); the `applicaster.v2` storage harvest always wins them,
+  whichever lands first. `device_uid` / `app_package` go the other way — the
+  handshake is their source, so it overwrites. Android's
+  `event`-before-`handshake` ordering (PROTOCOL.md §4.4) relies on this rule
+  to lose nothing either way.
