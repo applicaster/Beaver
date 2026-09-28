@@ -2,7 +2,7 @@ import Testing
 import Foundation
 @testable import BeaverCore
 
-@Suite("Client handshake (D76)")
+@Suite("Client handshake (D77)")
 struct ClientHandshakeTests {
 
     private func frame(_ object: [String: Any]) throws -> Data {

@@ -271,7 +271,7 @@ enum Schema {
             """)
         }
 
-        // D76: the SDK's stable device id and bundle id, from its handshake.
+        // D77: the SDK's stable device id and bundle id, from its handshake.
         migrator.registerMigration("v10_device_identity", foreignKeyChecks: .immediate) { db in
             try db.execute(sql: """
                 ALTER TABLE session ADD COLUMN device_uid TEXT;

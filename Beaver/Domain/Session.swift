@@ -32,7 +32,7 @@ public struct Session: Identifiable, Hashable, Sendable {
     public var platform: String?
     public var osVersion: String?
 
-    /// From the SDK's client handshake (D76): stable per installation,
+    /// From the SDK's client handshake (D77): stable per installation,
     /// so it tells a device apart across reconnects. Nil for SDKs without
     /// a client handshake and for imported sessions.
     public var deviceUID: String?

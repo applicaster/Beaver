@@ -2,7 +2,7 @@
 //  ClientHandshake.swift
 //  Beaver
 //
-//  D76: the handshake the SDK sends right after the socket opens
+//  D77: the handshake the SDK sends right after the socket opens
 //  (PROTOCOL.md §4.4). `deviceId` is stable per installation, so it
 //  identifies a device across reconnects.
 

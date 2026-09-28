@@ -8,7 +8,7 @@
 
 **Tech Stack:** Swift 6, SwiftUI (macOS 26), GRDB 7, Swift Testing, Network.framework.
 
-**Spec:** `plans/2026-09-28-device-toolboxes-design.md` (read it first; decisions D74–D76).
+**Spec:** `plans/2026-09-28-device-toolboxes-design.md` (read it first; decisions D75–D77).
 
 ## Global Constraints
 
@@ -35,7 +35,7 @@
 
 | File | Change | Responsibility |
 |---|---|---|
-| `Beaver/Domain/ClientHandshake.swift` | create | The client handshake value (D76) |
+| `Beaver/Domain/ClientHandshake.swift` | create | The client handshake value (D77) |
 | `Beaver/Transport/ProtocolDecoder.swift` | modify | Decode `handshake` and `mcp` frames |
 | `Beaver/Store/Schema.swift` | modify | Migration `v10_device_identity` |
 | `Beaver/Domain/Session.swift` | modify | `deviceUID`, `appPackage` |
@@ -49,7 +49,7 @@
 | `Beaver/MCP/ToolContext.swift` | modify | `DeviceLink.mcp`, `AgentUI.setDefaultDevice`, `HostSnapshot.defaultDevice` |
 | `Beaver/AppEnvironment.swift` | modify | `mcpClients`, `defaultDevice`, `DeviceLink.mcp` |
 | `Beaver/Features/AgentActivity/AppEnvironment+AgentUI.swift` | modify | Snapshot + `setDefaultDevice` |
-| `Beaver/Domain/DefaultDevice.swift` | create | The default device and how it resolves (D75) |
+| `Beaver/Domain/DefaultDevice.swift` | create | The default device and how it resolves (D76) |
 | `Beaver/MCP/Tools/ToolboxTools.swift` | create | `devices_set_default`, `toolboxes_list`, `tools_call` |
 | `Beaver/MCP/Tools/StatusTools.swift` | modify | `default`, `uid`, `appPackage`, `beaver.deviceId` |
 | `Beaver/MCP/MCPTool.swift` | modify | `ToolSchema.deviceId` text |
@@ -69,7 +69,7 @@
 
 ---
 
-### Task 1: Read the client handshake and keep it on the session (D76)
+### Task 1: Read the client handshake and keep it on the session (D77)
 
 **Files:**
 - Create: `Beaver/Domain/ClientHandshake.swift`
@@ -98,7 +98,7 @@ import Testing
 import Foundation
 @testable import BeaverCore
 
-@Suite("Client handshake (D76)")
+@Suite("Client handshake (D77)")
 struct ClientHandshakeTests {
 
     private func frame(_ object: [String: Any]) throws -> Data {
@@ -186,7 +186,7 @@ Expected: compile errors — `ClientHandshake`, `.clientHandshake`, `applyHandsh
 //  ClientHandshake.swift
 //  Beaver
 //
-//  D76: the handshake the SDK sends right after the socket opens
+//  D77: the handshake the SDK sends right after the socket opens
 //  (PROTOCOL.md §4.4). `deviceId` is stable per installation, so it
 //  identifies a device across reconnects.
 
@@ -221,7 +221,7 @@ public struct ClientHandshake: Sendable, Equatable {
 In `ProtocolDecoder.swift`, add to `InboundPacket` (after `network`):
 
 ```swift
-        /// PROTOCOL.md §4.4 (D76).
+        /// PROTOCOL.md §4.4 (D77).
         case clientHandshake(ClientHandshake)
 ```
 
@@ -254,7 +254,7 @@ Then find every exhaustive switch over `InboundPacket`: `grep -rn "case .success
 `Schema.swift`, after the `v9_agent_activity` migration:
 
 ```swift
-        // D76: the SDK's stable device id and bundle id, from its handshake.
+        // D77: the SDK's stable device id and bundle id, from its handshake.
         migrator.registerMigration("v10_device_identity", foreignKeyChecks: .immediate) { db in
             try db.execute(sql: """
                 ALTER TABLE session ADD COLUMN device_uid TEXT;
@@ -266,7 +266,7 @@ Then find every exhaustive switch over `InboundPacket`: `grep -rn "case .success
 `Session.swift`: add after `osVersion`:
 
 ```swift
-    /// From the SDK's client handshake (D76): stable per installation,
+    /// From the SDK's client handshake (D77): stable per installation,
     /// so it tells a device apart across reconnects. Nil for SDKs without
     /// a client handshake and for imported sessions.
     public var deviceUID: String?
@@ -289,7 +289,7 @@ and extend the init: add parameters `deviceUID: String? = nil, appPackage: Strin
 - Add after `setSessionDeviceInfo`:
 
 ```swift
-    /// Writes the SDK's client handshake onto a session (D76). Same
+    /// Writes the SDK's client handshake onto a session (D77). Same
     /// COALESCE rule: the applicaster.v2 harvest, which arrives later,
     /// overwrites the model, version and platform where it has them.
     public func applyHandshake(_ h: ClientHandshake, to sessionId: Int64) async throws {
@@ -305,7 +305,7 @@ and extend the init: add parameters `deviceUID: String? = nil, appPackage: Strin
 `LiveDevices.swift`, add a property after `waiting`:
 
 ```swift
-    /// Each connection's client handshake (D76). The SDK sends it once per
+    /// Each connection's client handshake (D77). The SDK sends it once per
     /// connection, so a replacement session (the live one was deleted)
     /// gets it from here.
     public private(set) var handshakes: [UUID: ClientHandshake] = [:]
@@ -398,7 +398,7 @@ Expected: `successorByUID` FAILS (returns 5, the newest same fingerprint); `succ
 Replace the first line of `successor` (`let newer = live.filter { $0.id > ended.id }`) with:
 
 ```swift
-        // D76: a known device id decides; a different known one is another device.
+        // D77: a known device id decides; a different known one is another device.
         let newer = live.filter {
             $0.id > ended.id && (ended.deviceUID == nil || $0.deviceUID == nil || $0.deviceUID == ended.deviceUID)
         }
@@ -411,7 +411,7 @@ Update the `DeviceFollower` doc comment's `ponytail:` lines to:
 
 ```swift
 // ponytail: the fingerprint heuristic is now the fallback for SDKs without a
-// client handshake (D76). A session whose handshake lands after the 250 ms
+// client handshake (D77). A session whose handshake lands after the 250 ms
 // poll that sees it appear is judged by fingerprint on that poll.
 ```
 
@@ -450,7 +450,7 @@ import Testing
 import Foundation
 @testable import BeaverCore
 
-@Suite("Toolboxes (D74)")
+@Suite("Toolboxes (D75)")
 struct ToolboxTests {
 
     static let list: JSON = ["tools": [
@@ -514,7 +514,7 @@ Run: `swift test --filter ToolboxTests` → compile error, `Toolboxes` undefined
 //  Toolbox.swift
 //  Beaver
 //
-//  D74: a connected app's tools, from its MCP `tools/list`, grouped into
+//  D75: a connected app's tools, from its MCP `tools/list`, grouped into
 //  toolboxes by the name's prefix (`storage.set` → `storage`). Beaver's
 //  own tools are device "beaver", its toolboxes named the same way
 //  (`logs_query` → `logs.query`).
@@ -690,7 +690,7 @@ final class ScriptedDevice: Sendable {
     }
 }
 
-@Suite("DeviceMCPClient (D74)")
+@Suite("DeviceMCPClient (D75)")
 struct DeviceMCPClientTests {
 
     private func connect(_ answer: @escaping @Sendable (String, JSON) async -> JSON?) -> (DeviceMCPClient, ScriptedDevice) {
@@ -809,7 +809,7 @@ Run: `swift test --filter DeviceMCPClientTests` → compile errors (`DeviceMCPCl
 //  DeviceMCPClient.swift
 //  Beaver
 //
-//  D74: JSON-RPC to one connected app's MCP server over the same WebSocket
+//  D75: JSON-RPC to one connected app's MCP server over the same WebSocket
 //  as its logs (PROTOCOL.md §3.3, §4.5). One per connection; the envelope
 //  is {"type":"mcp","payload":…} and replies are matched by JSON-RPC id.
 
@@ -934,7 +934,7 @@ public actor DeviceMCPClient {
 - [ ] **Step 4: Decode `mcp` frames**
 
 `ProtocolDecoder.swift`:
-- `InboundPacket`: add `case mcp(JSON)` with doc `/// A JSON-RPC message from the app's MCP server (PROTOCOL.md §4.5, D74).`
+- `InboundPacket`: add `case mcp(JSON)` with doc `/// A JSON-RPC message from the app's MCP server (PROTOCOL.md §4.5, D75).`
 - `DecodeError`: add `case malformedMCP(String)`.
 - In `decode(_:)`, replace the `guard let typeRaw = envelope["type"] as? String else { return .failure(.noTypeField) }` with:
 
@@ -974,7 +974,7 @@ public actor DeviceMCPClient {
 In the `// MARK: - Outbound` section, after `send(command:to:)`:
 
 ```swift
-    /// Send a ready-made frame (an `mcp` request, D74) to one client.
+    /// Send a ready-made frame (an `mcp` request, D75) to one client.
     /// No-op when that connection is gone.
     public func send(data: Data, to connection: UUID) {
         guard let target = connections[connection] else { return }
@@ -987,7 +987,7 @@ In the `// MARK: - Outbound` section, after `send(command:to:)`:
 `ToolContext.swift`, in `protocol DeviceLink`:
 
 ```swift
-    /// One MCP request to the app whose live session is `sessionId` (D74).
+    /// One MCP request to the app whose live session is `sessionId` (D75).
     /// Throws `DeviceMCPError`; `.disconnected` once it's gone.
     func mcp(_ method: String, params: JSON, to sessionId: Int64, timeout: Duration) async throws -> JSON
 ```
@@ -1017,7 +1017,7 @@ In the `// MARK: - Outbound` section, after `send(command:to:)`:
 `AppEnvironment.swift`, add a property after `live`:
 
 ```swift
-    /// Each connection's MCP client (D74). Keyed by connection, not session:
+    /// Each connection's MCP client (D75). Keyed by connection, not session:
     /// a deleted live session's replacement keeps talking to the same app.
     @ObservationIgnored public var mcpClients: [UUID: DeviceMCPClient] = [:]
 ```
@@ -1047,7 +1047,7 @@ and in `extension AppEnvironment: DeviceLink`:
 - `handleInbound`, before `.unknown`:
   ```swift
         case .success(.mcp(let message)):
-            // D74: an answer to Beaver's request; not a log line.
+            // D75: an answer to Beaver's request; not a log line.
             let client = await MainActor.run { env.mcpClients[connection] }
             await client?.receive(message)
   ```
@@ -1065,7 +1065,7 @@ git commit -m "feat: talk MCP to each connected app over its WebSocket"
 
 ---
 
-### Task 5: Default device (D75)
+### Task 5: Default device (D76)
 
 **Files:**
 - Create: `Beaver/Domain/DefaultDevice.swift`
@@ -1094,7 +1094,7 @@ import Testing
 import Foundation
 @testable import BeaverCore
 
-@Suite("Default device (D75)")
+@Suite("Default device (D76)")
 struct DefaultDeviceTests {
 
     /// Alpha (uid A) and Beta (uid B), both live.
@@ -1183,14 +1183,14 @@ Run: `swift test --filter DefaultDeviceTests` → compile errors (`DefaultDevice
 //  DefaultDevice.swift
 //  Beaver
 //
-//  D75: the app agents' device tools use when a call names no device.
+//  D76: the app agents' device tools use when a call names no device.
 //  One for all of Beaver, in memory. Kept by the SDK's device id so it
 //  survives the app restarting (a new live session each time).
 
 import Foundation
 
 public enum DefaultDevice: Sendable, Equatable {
-    /// The SDK's handshake `deviceId` (D76).
+    /// The SDK's handshake `deviceId` (D77).
     case uid(String)
     /// An app that sent no handshake: only this live session, lost on reconnect.
     case session(Int64)
@@ -1221,10 +1221,10 @@ public enum DefaultDevice: Sendable, Equatable {
 `ToolContext.swift`:
 - `AgentUI`: add
   ```swift
-      /// Sets or clears the default device (D75). Doesn't change the window.
+      /// Sets or clears the default device (D76). Doesn't change the window.
       func setDefaultDevice(_ device: DefaultDevice?) async
   ```
-- `HostSnapshot`: add `public var defaultDevice: DefaultDevice?` (doc: `/// The agents' default device (D75), if set.`), an init parameter `defaultDevice: DefaultDevice? = nil` after `notifications`, and `self.defaultDevice = defaultDevice`.
+- `HostSnapshot`: add `public var defaultDevice: DefaultDevice?` (doc: `/// The agents' default device (D76), if set.`), an init parameter `defaultDevice: DefaultDevice? = nil` after `notifications`, and `self.defaultDevice = defaultDevice`.
 
 `MCPTestSupport.swift`, `FakeUI`: add
 
@@ -1235,7 +1235,7 @@ public enum DefaultDevice: Sendable, Equatable {
 `AppEnvironment.swift`, after `mcpClients`:
 
 ```swift
-    /// The device agents' device tools use without a deviceId (D75).
+    /// The device agents' device tools use without a deviceId (D76).
     /// In memory until Beaver quits.
     public var defaultDevice: DefaultDevice?
 
@@ -1263,7 +1263,7 @@ In `DeviceWait.swift`, replace the line
 
 ```swift
         if wanted == nil || wanted == "current" {
-            // D75: the default, when set, is the only fallback — never another device.
+            // D76: the default, when set, is the only fallback — never another device.
             if let preferred = host.defaultDevice {
                 if let id = preferred.liveSession(in: try await store.sessions(), live: live) { return (host, id) }
                 let list = try await describeDevices(live)
@@ -1275,7 +1275,7 @@ In `DeviceWait.swift`, replace the line
         }
 ```
 
-Update the doc comment above `requireDevice` to: `/// … With one device it may be omitted (or be "current", as before D73); with a default set (D75) an omitted one means the default; otherwise with several it may not. …`
+Update the doc comment above `requireDevice` to: `/// … With one device it may be omitted (or be "current", as before D73); with a default set (D76) an omitted one means the default; otherwise with several it may not. …`
 
 Add after `describeDevices`:
 
@@ -1346,7 +1346,7 @@ Run: `swift test --filter ToolboxTests` → compile error, `ToolboxLoad` undefin
 - [ ] **Step 3: Implement** (append to `Toolbox.swift`)
 
 ```swift
-/// What the device popover shows under Toolboxes (D74).
+/// What the device popover shows under Toolboxes (D75).
 public enum ToolboxLoad: Sendable, Equatable {
     case loading
     case loaded([Toolbox])
@@ -1412,7 +1412,7 @@ import Testing
 import Foundation
 @testable import BeaverCore
 
-@Suite("Toolbox tools (D74, D75)")
+@Suite("Toolbox tools (D75, D76)")
 struct ToolboxToolsTests {
 
     static let toolsList: JSON = ["tools": [
@@ -1625,7 +1625,7 @@ Run: `swift test --filter ToolboxToolsTests` → compile error, `ToolboxTools` u
 //  ToolboxTools.swift
 //  Beaver
 //
-//  D74/D75: the connected apps' toolboxes through one gateway, Beaver's
+//  D75/D76: the connected apps' toolboxes through one gateway, Beaver's
 //  own tools as device "beaver", and the default device.
 
 import Foundation
@@ -1942,7 +1942,7 @@ git commit -m "feat: agents reach apps' toolboxes — toolboxes_list, tools_call
 //  DevicePopover.swift
 //  Beaver
 //
-//  D74/D75: what the viewed device runs, Disconnect, the agents' default,
+//  D75/D76: what the viewed device runs, Disconnect, the agents' default,
 //  and the app's toolboxes (read-only). Opened from the leading device badge.
 
 import AppKit
@@ -2177,13 +2177,13 @@ git commit -m "feat: device popover — app, Disconnect, default for agents, too
   - §3.3 / §4.5: envelope `{"type":"mcp","payload":<JSON-RPC 2.0>}`, correlation by JSON-RPC `id` (the envelope has none); Beaver sends `initialize` (then `notifications/initialized`) once, lazily, before its first request; methods used: `tools/list`, `tools/call`; timeouts 5 s / 5 s / 20 s; no reply to `initialize` → Beaver treats the app as having no toolboxes until it reconnects; a bare JSON-RPC frame (no `type`, has `jsonrpc`) is read as `mcp`; `mcp` frames are not log events; the device drops frames over 5 MB.
 - §10: add "8. Toolbox descriptions are not in `tools/list` (toolboxes are named only by prefix). An `_meta.toolbox` description per tool would let Beaver describe them."
 
-- [ ] **Step 2: DECISIONS.md** — append after D73, same format as D73 (`## D74. …`, `**Status:** Accepted (2026-09-28). Spec: plans/2026-09-28-device-toolboxes-design.md.`, then `- **Decision:**`, `- **Why:**`, `- **Alternatives:**`):
-  - **D74. Apps' toolboxes through a gateway; Beaver is device "beaver".** Decision: `toolboxes_list` / `tools_call` reach any app's MCP tools over its WebSocket; Beaver's `tools/list` stays stable; Beaver's own tools are device `"beaver"` (`logs_query` ↔ `logs.query`). Why: the user wants one set of commands for Beaver and apps; MCP clients cache `tools/list` and ignore `list_changed`; device tools differ per app. Alternatives: merge device tools into `tools/list` (dynamic list, name clashes, renaming Beaver's tools breaks agents); only the gateway, Beaver's tools behind it (breaks agents, schemas unseen).
-  - **D75. One default device for agents, kept by the SDK's device id.** Decision: `devices_set_default` or the popover toggle; omitted `deviceId` → explicit, default, only one, else error; a default that isn't connected is an error, never a fallback; in memory. Why: agreed with the user; the id survives `app.restart`. Alternatives: the viewed device (agent and user move each other); one per MCP connection (needs session ids through `ToolContext`, can't be shown in the UI).
-  - **D76. Beaver reads the client handshake.** Decision: `device_uid`, `app_package` on the session; restart following matches on `device_uid`, D73's fingerprint heuristic is the fallback. Why: the SDK already sent a stable id that Beaver ignored. Alternatives: keep the heuristic (two identical builds look alike).
-  - In D73, after "Two identical builds look alike until the SDK sends a device id." add " — it does; see D76."
+- [ ] **Step 2: DECISIONS.md** — append after D74 (Scheme Generator, from the merged scheme-generator branch), same format as D73 (`## D75. …`, `**Status:** Accepted (2026-09-28). Spec: plans/2026-09-28-device-toolboxes-design.md.`, then `- **Decision:**`, `- **Why:**`, `- **Alternatives:**`):
+  - **D75. Apps' toolboxes through a gateway; Beaver is device "beaver".** Decision: `toolboxes_list` / `tools_call` reach any app's MCP tools over its WebSocket; Beaver's `tools/list` stays stable; Beaver's own tools are device `"beaver"` (`logs_query` ↔ `logs.query`). Why: the user wants one set of commands for Beaver and apps; MCP clients cache `tools/list` and ignore `list_changed`; device tools differ per app. Alternatives: merge device tools into `tools/list` (dynamic list, name clashes, renaming Beaver's tools breaks agents); only the gateway, Beaver's tools behind it (breaks agents, schemas unseen).
+  - **D76. One default device for agents, kept by the SDK's device id.** Decision: `devices_set_default` or the popover toggle; omitted `deviceId` → explicit, default, only one, else error; a default that isn't connected is an error, never a fallback; in memory. Why: agreed with the user; the id survives `app.restart`. Alternatives: the viewed device (agent and user move each other); one per MCP connection (needs session ids through `ToolContext`, can't be shown in the UI).
+  - **D77. Beaver reads the client handshake.** Decision: `device_uid`, `app_package` on the session; restart following matches on `device_uid`, D73's fingerprint heuristic is the fallback. Why: the SDK already sent a stable id that Beaver ignored. Alternatives: keep the heuristic (two identical builds look alike).
+  - In D73, after "Two identical builds look alike until the SDK sends a device id." add " — it does; see D77."
 
-- [ ] **Step 3: ARCHITECTURE.md** — in the transport section (search `WSServer`), add a paragraph: "`DeviceMCPClient` (D74): one per connection, created on connect and closed on disconnect by `BeaverApp.bootstrap`, held in `AppEnvironment.mcpClients`. Sends JSON-RPC in `mcp` frames through `WSServer.send(data:to:)`, matches replies by id, times out, initializes lazily. Tools reach it through `DeviceLink.mcp`."
+- [ ] **Step 3: ARCHITECTURE.md** — in the transport section (search `WSServer`), add a paragraph: "`DeviceMCPClient` (D75): one per connection, created on connect and closed on disconnect by `BeaverApp.bootstrap`, held in `AppEnvironment.mcpClients`. Sends JSON-RPC in `mcp` frames through `WSServer.send(data:to:)`, matches replies by id, times out, initializes lazily. Tools reach it through `DeviceLink.mcp`."
 
 - [ ] **Step 4: CHANGELOG.md** — under `[Unreleased]`:
 
@@ -2213,5 +2213,5 @@ Run: `swift test` → all PASS. `make build` → succeeds. `git status` → only
 
 ```bash
 git add PROTOCOL.md DECISIONS.md ARCHITECTURE.md CHANGELOG.md
-git commit -m "docs: device toolboxes — protocol, D74–D76, architecture, changelog"
+git commit -m "docs: device toolboxes — protocol, D75–D77, architecture, changelog"
 ```

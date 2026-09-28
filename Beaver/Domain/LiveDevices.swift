@@ -14,7 +14,7 @@ public struct LiveDevices: Sendable, Equatable {
     public private(set) var commands: [Int64: [CommandHint]] = [:]
     /// Connections whose live session was deleted, waiting for a fresh one.
     public private(set) var waiting: Set<UUID> = []
-    /// Each connection's client handshake (D76). The SDK sends it once per
+    /// Each connection's client handshake (D77). The SDK sends it once per
     /// connection, so a replacement session (the live one was deleted)
     /// gets it from here.
     public private(set) var handshakes: [UUID: ClientHandshake] = [:]

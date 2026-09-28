@@ -247,7 +247,7 @@ public actor LogStore {
         }
     }
 
-    /// Writes the SDK's client handshake onto a session (D76). Same
+    /// Writes the SDK's client handshake onto a session (D77). Same
     /// COALESCE rule: the applicaster.v2 harvest, which arrives later,
     /// overwrites the model, version and platform where it has them.
     public func applyHandshake(_ h: ClientHandshake, to sessionId: Int64) async throws {

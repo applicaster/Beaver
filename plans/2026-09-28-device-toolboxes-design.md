@@ -1,6 +1,6 @@
 # Device toolboxes over MCP — design
 
-**Date:** 2026-09-28 · **Decisions:** D74, D75, D76 · **Release:** `feat:`
+**Date:** 2026-09-28 · **Decisions:** D75, D76, D77 · **Release:** `feat:`
 
 ## 1. Goal
 
@@ -63,7 +63,7 @@ Source: `Zapp-Frameworks/plugins/quick-brick-xray`,
   sends no client handshake. Such apps have no toolboxes in Beaver.
 - The SDK reconnects forever (1 s → 30 s backoff).
 
-## 3. Wire side (D76)
+## 3. Wire side (D77)
 
 ### 3.1 Client handshake
 
@@ -136,7 +136,7 @@ public struct Toolbox: Sendable, Equatable { name: String; tools: [DeviceTool] }
 public enum Toolboxes { static func group(_ tools: [DeviceTool]) -> [Toolbox] }  // sorted by name
 ```
 
-## 4. Default device (D75)
+## 4. Default device (D76)
 
 - `AppEnvironment.defaultDevice: DefaultDevice?`, in memory,
   `enum DefaultDevice { case uid(String), session(Int64) }`. It is `.uid`
@@ -163,7 +163,7 @@ public enum Toolboxes { static func group(_ tools: [DeviceTool]) -> [Toolbox] } 
   system entry when it comes from the UI; an agent's call is journaled by the
   dispatcher as usual.
 
-## 5. MCP (D74)
+## 5. MCP (D75)
 
 ### 5.1 New tools (`Beaver/MCP/Tools/ToolboxTools.swift`)
 
@@ -263,9 +263,9 @@ small "Default" label after its name. No new actions there.
   §10 open question: toolbox descriptions in `tools/list` (would let the
   popover and `toolboxes_list` describe toolboxes).
 - `DECISIONS.md`:
-  - **D74** Device toolboxes through a gateway; Beaver is device `"beaver"`.
-  - **D75** One default device for agents, kept by the SDK's device id.
-  - **D76** Beaver reads the client handshake; `device_uid` identifies a
+  - **D75** Device toolboxes through a gateway; Beaver is device `"beaver"`.
+  - **D76** One default device for agents, kept by the SDK's device id.
+  - **D77** Beaver reads the client handshake; `device_uid` identifies a
     device across reconnects (D73's fingerprint heuristic becomes the
     fallback).
 - `ARCHITECTURE.md`: `DeviceMCPClient` in the transport section.

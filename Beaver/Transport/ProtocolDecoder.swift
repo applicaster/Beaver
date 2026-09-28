@@ -14,7 +14,7 @@ public enum ProtocolDecoder {
         case event(DecodedEvent)
         case storage(namespaces: [StorageSnapshot.Namespace: String])
         case network(NetworkCapture)
-        /// PROTOCOL.md §4.4 (D76).
+        /// PROTOCOL.md §4.4 (D77).
         case clientHandshake(ClientHandshake)
         case unknown(typeRaw: String)
     }
