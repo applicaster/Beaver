@@ -79,6 +79,10 @@ Source: `Zapp-Frameworks/plugins/quick-brick-xray`,
     `"iOS 18.6"` is split on the first space into `platform` / `os_version`.
     All through `COALESCE`, so the `applicaster.v2` harvest, which arrives
     later, still wins where it has a value.
+- `LiveDevices` keeps each connection's handshake until it disconnects. When
+  the user deletes a live session, the replacement session for the same
+  connection (`replaceDeletedLiveSessions`) gets the handshake written again —
+  the SDK sends it only once per connection.
 - **Following a restart** (D66/D73, `DeviceWait`): when both the ended and
   the new session have a `device_uid`, match on it. Otherwise keep today's
   fingerprint heuristic (its `ponytail:` comment now says it is the fallback
@@ -201,9 +205,11 @@ public enum Toolboxes { static func group(_ tools: [DeviceTool]) -> [Toolbox] } 
 
 ### 5.3 Changed
 
-- `beaver_status.devices[]` gains `default: Bool`, `uid`, `appPackage`, and
-  lists a first entry `{deviceId: "beaver", name: "Beaver", …}`. Summary
-  names the default device when one is set.
+- `beaver_status.devices[]` gains `default: Bool`, `uid`, `appPackage`.
+  Beaver itself is **not** added to `devices` (agents count that array as
+  connected apps; D65 keeps shapes stable): the existing `structured.beaver`
+  object gains `deviceId: "beaver"`. Summary names the default device when
+  one is set.
 - `ToolSchema.deviceId` description: "Omit it to use the default device
   (devices_set_default), or the only connected one."
 - `MCPServer.instructions`: one paragraph — apps' toolboxes are reached
@@ -223,8 +229,9 @@ public enum Toolboxes { static func group(_ tools: [DeviceTool]) -> [Toolbox] } 
 `ToolbarDeviceBadge` (leading, read-only since D73) becomes a plain button
 opening a popover (`.popover(arrowEdge: .bottom)`, like Bookmarks). The
 context menu's "Copy device fingerprint" stays. New view
-`Beaver/Features/Devices/DevicePopover.swift` with a small
-`DevicePopoverModel` (`@Observable`, `@MainActor`).
+`Beaver/Features/Devices/DevicePopover.swift`. Its loading logic is
+`ToolboxLoad.fetch(from:sessionId:)` in core (`Beaver/Domain/Toolbox.swift`),
+because `Features/` is not built by `swift test`.
 
 - **Header:** app name (`appName ?? appPackage ?? "Device #<id>"`) and
   version; `appPackage`; `model · platform OS`; the device uid, selectable
@@ -289,10 +296,10 @@ small "Default" label after its name. No new actions there.
     `structuredContent`; device `isError` → `ToolError`; timeout;
     `"beaver"` runs the mapped tool; a gateway tool through `"beaver"` is
     refused.
-  - `beaver_status`: `default`, `uid`, the `"beaver"` entry.
+  - `beaver_status`: `default`, `uid`, `structured.beaver.deviceId`.
 - Drift tests stay green (new tools in MCP.md's table and a recipe).
-- UI: no snapshot tests; `DevicePopoverModel` state transitions are covered
-  by a unit test with a fake link.
+- UI: no snapshot tests; `ToolboxLoad.fetch` (loaded, empty, unsupported,
+  timeout, disconnected) is covered with a fake link.
 
 ## 9. Risks
 
