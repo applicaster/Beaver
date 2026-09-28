@@ -63,6 +63,7 @@ struct MainWindow: View {
         .frame(minWidth: 900, minHeight: 600)
         // Agent-settable window state lives in env (D54); the models follow it.
         .modifier(UIStateSync(logFeed: logFeedVM, network: networkVM, storages: storagesVM))
+        .background { SavedFilterShortcuts() }
         // Toast surface — single chip that slides down from the top
         // when any action posts to ToastCenter (copy, save, delete, …).
         // `allowsHitTesting(false)` is applied inside ToastPresenter
@@ -591,6 +592,24 @@ struct MainWindow: View {
 }
 
 // MARK: - Subviews
+
+/// ⌘1…⌘9 apply the ★ popover's 1st…9th saved filter from any tab,
+/// switching to the Log feed (D82). Invisible buttons, like LogFeedShortcuts.
+private struct SavedFilterShortcuts: View {
+    @Environment(AppEnvironment.self) private var env
+
+    var body: some View {
+        Group {
+            ForEach(0..<9, id: \.self) { index in
+                Button("Saved Filter \(index + 1)") { env.applySavedFilter(at: index) }
+                    .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: .command)
+            }
+        }
+        .opacity(0)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
 
 /// Compact "what device + app am I looking at" badge on the leading
 /// edge of the main toolbar (placement `.navigation`). Reads the

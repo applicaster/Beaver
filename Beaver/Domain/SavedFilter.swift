@@ -20,10 +20,18 @@ public struct SavedFilter: Identifiable, Hashable, Sendable {
     public let id: Int64
     public let name: String
     public let filter: Filter
+    /// A new session starts from this one (D82). At most one is.
+    public let isDefault: Bool
 
-    public init(id: Int64, name: String, filter: Filter) {
+    public init(id: Int64, name: String, filter: Filter, isDefault: Bool = false) {
         self.id = id
         self.name = name
         self.filter = filter
+        self.isDefault = isDefault
+    }
+
+    /// ⌘1…⌘9 apply the first nine, in `LogStore.savedFilters()` order (D82).
+    public static func shortcut(at index: Int) -> String? {
+        (0..<9).contains(index) ? "⌘\(index + 1)" : nil
     }
 }

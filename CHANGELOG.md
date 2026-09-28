@@ -15,6 +15,14 @@ When releasing:
 ## [Unreleased]
 
 ### Added
+- **⌘1…⌘9 apply your saved filters** — the 1st…9th in the ★ popover,
+  which shows each one's shortcut. From another tab, they switch to the
+  Log feed.
+- **A default saved filter.** Click the pin next to a saved filter in the
+  ★ popover: Beaver starts from it at launch and whenever a device
+  connects, instead of the last filter used. Agents: `filters_list` shows
+  the default and the shortcuts; `filters_save(name:, default: true)`
+  sets it.
 - Drop a session file (`.json`) or HAR anywhere on the window to import
   it, the same as Import. A file Beaver can't open now says so instead of
   doing nothing.

@@ -105,8 +105,8 @@ or a release):
 | `commands_send` | Send a command to the app; optionally collect the logs it causes, following a restart |
 | `bookmarks_list` | Events and requests the user bookmarked |
 | `bookmarks_set` | Bookmark an event or request, or remove the bookmark |
-| `filters_list` | The user's saved filters |
-| `filters_save` | Save a named filter (replaces one with the same name) |
+| `filters_list` | The user's saved filters, each one's ⌘1…⌘9 shortcut, and which is the default |
+| `filters_save` | Save a named filter (replaces one with the same name); `default: true` makes new sessions start from it |
 | `filters_delete` | Delete a saved filter |
 | `watch_start` | Count matching events for minutes to hours; optionally notify the user at a count |
 | `watch_status` | What a watch caught: counts, first/last, breakdown, whether it fired |
@@ -223,9 +223,11 @@ takes focus, unless you pass `reveal: true`.
 2. `bookmarks_set(eventId: <id>)` or `bookmarks_set(networkId: <id>)` — mark
    what you found; `on: false` removes the mark.
 3. `filters_list()` — their saved filters; reuse one's conditions in
-   `logs_query`.
+   `logs_query`. The user applies the first nine with ⌘1…⌘9 (alphabetical).
 4. `filters_save(name: "Auth problems", filter: {minLevel: "warning", subsystems: ["*auth*"]})`
    — the user can pick it in the Log feed; `filters_delete(name: "Auth problems")`.
+   `filters_save(name: "Auth problems", default: true)` makes Beaver start
+   from it at launch and when a device connects; `default: false` undoes it.
 5. `logs_clear()` — before the user reproduces something: the viewed Log feed
    hides what's there now. Nothing is deleted; note the `watermark` and use
    `logs_wait(afterId: <watermark>)`.

@@ -62,11 +62,15 @@ enum StateTools {
     static let filtersList = MCPTool(
         name: "filters_list",
         title: "Saved filters",
-        description: "Use to see the filters the user saved in Beaver, with what each one matches.",
+        description: "Use to see the filters the user saved in Beaver, with what each one matches, its ⌘1…⌘9 shortcut in the Log feed, and which one is the default new sessions start from.",
         kind: .read,
         inputSchema: ToolSchema.object([:])
     ) { _, ctx in
         let saved = try await ctx.store.savedFilters()
+        func line(_ index: Int, _ f: SavedFilter) -> String {
+            let marks = [SavedFilter.shortcut(at: index), f.isDefault ? "default" : nil].compactMap { $0 }
+            return "\(f.name) — \(ToolText.describe(f.filter))" + (marks.isEmpty ? "" : " (\(marks.joined(separator: ", ")))")
+        }
         let nextSuggestions: [String]
         if saved.isEmpty {
             nextSuggestions = ["beaver_guide(topic: \"organise\")"]
@@ -78,8 +82,13 @@ enum StateTools {
         }
         return ToolResult(
             summary: saved.isEmpty ? "No saved filters." : "\(saved.count) saved filter(s).",
-            body: saved.map { "\($0.name) — \(ToolText.describe($0.filter))" }.joined(separator: "\n"),
-            structured: ["filters": .array(saved.map { ["name": .string($0.name), "describes": .string(ToolText.describe($0.filter))] })],
+            body: saved.enumerated().map { line($0.offset, $0.element) }.joined(separator: "\n"),
+            structured: ["filters": .array(saved.enumerated().map { index, f in
+                var o: [String: JSON] = ["name": .string(f.name), "describes": .string(ToolText.describe(f.filter)),
+                                         "default": .bool(f.isDefault)]
+                if let shortcut = SavedFilter.shortcut(at: index) { o["shortcut"] = .string(shortcut) }
+                return .object(o)
+            })],
             next: nextSuggestions
         )
     }
@@ -150,18 +159,42 @@ enum StateTools {
     static let filtersSave = MCPTool(
         name: "filters_save",
         title: "Save a filter",
-        description: "Use to save a named log filter the user can pick in Beaver's Log feed (filters_list shows them). Saving under an existing name replaces it. Subsystem and category patterns are resolved to exact names first.",
+        description: "Use to save a named log filter the user can pick in Beaver's Log feed (filters_list shows them). Saving under an existing name replaces it. Subsystem and category patterns are resolved to exact names first. default: true makes it the filter new sessions start from; to change only that on a saved filter, pass name and default without filter.",
         kind: .change,
         idempotent: true,
         inputSchema: ToolSchema.object([
             "name": ToolSchema.string("The name the user sees, e.g. \"Auth problems\"."),
             "filter": ToolSchema.filter,
+            "default": ToolSchema.boolean("true: launches and newly connected devices start from this filter (one default at most); false: it stops being the default. Omit to leave it as is."),
             "sessionId": ToolSchema.integer("Resolve subsystem / category patterns against this session. Default: live, viewed, most recent."),
-        ], required: ["name", "filter"])
+        ], required: ["name"])
     ) { args, ctx in
         let example = "Example: filters_save(name: \"Auth problems\", filter: {minLevel: \"warning\", subsystems: [\"*auth*\"]})."
         guard let name = try args.string("name").flatMap(ToolContext.trimmedNonEmpty) else {
             throw ToolError("name is required. \(example)")
+        }
+        let makeDefault = try args.bool("default")
+        // D82: without a filter, only the default mark of a saved one changes.
+        let filterGiven = args["filter"] != nil || ToolContext.filterKeys.contains { args[$0] != nil }
+        if !filterGiven, let makeDefault {
+            let saved = try await ctx.store.savedFilters()
+            guard let match = saved.first(where: { $0.name == name }) else {
+                let names = saved.map(\.name).joined(separator: ", ")
+                throw ToolError("No saved filter “\(name)”. Saved: \(names.isEmpty ? "none" : names). Pass filter to create it. \(example)")
+            }
+            if makeDefault || match.isDefault {
+                try await ctx.store.setDefaultSavedFilter(id: makeDefault ? match.id : nil)
+            }
+            return ToolResult(
+                summary: makeDefault ? "“\(name)” is the default filter: new sessions start with it."
+                                     : "“\(name)” is not the default filter.",
+                structured: ["name": .string(name), "default": .bool(makeDefault)],
+                next: ["filters_list()"],
+                links: [.savedFilter(name)]
+            )
+        }
+        guard filterGiven else {
+            throw ToolError("filter is required, or default to only mark a saved filter as the default. \(example)")
         }
         // A filter without subsystems or categories needs no session, so
         // this works on a fresh install too — but if it does have one of
@@ -180,12 +213,20 @@ enum StateTools {
         let f = try await ctx.resolveFilter(args, sessionId: sessionId)
         guard !f.filter.isEmpty else { throw ToolError("filter is empty: a saved filter needs at least one condition. \(example)") }
         let existed = try await ctx.store.savedFilters().contains { $0.name == name }
-        try await ctx.store.upsertSavedFilter(name: name, filter: f.filter)
+        let stored = try await ctx.store.upsertSavedFilter(name: name, filter: f.filter)
+        if makeDefault == true {
+            try await ctx.store.setDefaultSavedFilter(id: stored.id)
+        } else if makeDefault == false, try await ctx.store.savedFilters().contains(where: { $0.id == stored.id && $0.isDefault }) {
+            try await ctx.store.setDefaultSavedFilter(id: nil)
+        }
         let resolved = f.notes.isEmpty ? "" : " Resolved: " + f.notes.joined(separator: "; ") + "."
+        var structured: [String: JSON] = ["name": .string(name), "describes": .string(ToolText.describe(f.filter)),
+                                          "replaced": .bool(existed), "resolved": .array(f.notes.map(JSON.string))]
+        if let makeDefault { structured["default"] = .bool(makeDefault) }
         return ToolResult(
-            summary: "Saved filter “\(name)”: \(ToolText.describe(f.filter))" + (existed ? " (replaced the old one)." : ".") + resolved,
-            structured: ["name": .string(name), "describes": .string(ToolText.describe(f.filter)),
-                         "replaced": .bool(existed), "resolved": .array(f.notes.map(JSON.string))],
+            summary: "Saved filter “\(name)”: \(ToolText.describe(f.filter))" + (existed ? " (replaced the old one)." : ".") + resolved
+                + (makeDefault == true ? " New sessions start with it." : ""),
+            structured: .object(structured),
             next: ["filters_list()", "logs_query(filter: {…same…}) to see what it matches"],
             links: [.savedFilter(name)]
         )

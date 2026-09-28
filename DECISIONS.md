@@ -949,7 +949,7 @@ not part of the persisted preset.
   don't affect the sessions sidebar).
 
 **Future work.**
-- ⌘1…⌘9 keyboard shortcuts per preset for power users.
+- ⌘1…⌘9 keyboard shortcuts per preset for power users. Done in D82.
 - Sync presets across teammates via a shared JSON export (would
   need `Filter`-to-JSON Codable on top of the existing struct).
 
@@ -1948,7 +1948,7 @@ pass as a computed property.
 **Alternatives considered.**
 - *A saved filter marked Default.* Deferred. Remembering the last
   filter covers relaunch without a new setting, and presets still work
-  as before.
+  as before. Added in D82, which takes precedence when one is set.
 - *Store the last filter in the database.* It's a per-user view
   preference, not session data. `UserDefaults` already holds the
   column layout.
@@ -2709,3 +2709,32 @@ won't decode, and the feed starts unfiltered once.
 - `LiveDevices` remembers which sessions await a quiet reply; the first
   reply after the request clears it. An SDK that never answers leaves the
   mark until the device disconnects, so its next `cmdlist` reply is quiet too.
+
+## D82. Saved filters: ⌘1…⌘9 and a default
+
+**Status:** Accepted (2026-09-28). Picks up D24's and D42's deferred items.
+
+- **Decision:** ⌘1…⌘9 apply the 1st…9th saved filter in the ★ popover's
+  order, which stays alphabetical (`LogStore.savedFilters()`); the popover
+  shows each row's key. They work from any tab: another tab switches to the
+  Log feed first. One saved filter can be marked Default (the pin in the
+  popover, or `filters_save(name:, default: true)`).
+- **Precedence:** with a default set, a launch and a newly connected
+  device's session start from it; without one, D42 applies (last filter,
+  carried over). Picking a session in the sidebar or device menu, an import,
+  and an agent's `ui_show` keep the current filter, as in D42 and D54.
+- **Persistence:** a v11 migration adds `saved_filter.is_default`, with a
+  partial unique index so at most one row is the default. It lives and dies
+  with its row: deleting the filter clears the default, and re-saving it
+  under the same name keeps it. `UserDefaults` would hold a name that goes
+  stale when the filter is deleted, and the MCP tools already read the store.
+- **Why alphabetical, no position column:** a position needs a reorder UI
+  and a migration of its own. A new filter can shift the keys, but the
+  popover shows them, and a name prefix ("1 Errors") pins one in place.
+- **Alternatives:** the default wins on every session switch (would override
+  an agent's `ui_show` filter and the one you're comparing sessions with);
+  only at launch (a device's new session would keep the last filter, not the
+  default the user asked for).
+- **Trade-off:** while a default is set, an ad-hoc filter doesn't survive a
+  device reconnecting (app restart); D42's carry-over does that only without
+  a default. ⌘-digits get any saved filter back in one key.

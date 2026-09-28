@@ -451,13 +451,17 @@ private struct SavedFiltersMenu: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
             } else {
-                ForEach(vm.savedFilters) { saved in
+                ForEach(Array(vm.savedFilters.enumerated()), id: \.element.id) { index, saved in
                     SavedFilterRow(
                         saved: saved,
+                        shortcut: SavedFilter.shortcut(at: index),
                         isActive: saved.filter == vm.filter,
                         onApply: {
                             vm.applySavedFilter(saved)
                             isPopoverShown = false
+                        },
+                        onToggleDefault: {
+                            vm.setDefaultSavedFilter(id: saved.isDefault ? nil : saved.id)
                         },
                         onDelete: {
                             vm.deleteSavedFilter(id: saved.id)
@@ -556,8 +560,10 @@ private struct SavedFiltersMenu: View {
 /// preset; the trash icon (revealed on hover) deletes it.
 private struct SavedFilterRow: View {
     let saved: SavedFilter
+    let shortcut: String?
     let isActive: Bool
     let onApply: () -> Void
+    let onToggleDefault: () -> Void
     let onDelete: () -> Void
 
     @State private var isHovered = false
@@ -578,6 +584,23 @@ private struct SavedFilterRow: View {
                         .lineLimit(1)
                 }
                 Spacer(minLength: 6)
+                // The default shows always; hover offers to set it (D82).
+                Button(action: onToggleDefault) {
+                    Image(systemName: saved.isDefault ? "pin.fill" : "pin")
+                        .font(.caption)
+                        .foregroundStyle(saved.isDefault ? Color.accentColor : .secondary)
+                }
+                .buttonStyle(.plain)
+                .help(saved.isDefault
+                      ? "Default: new sessions start with this filter. Click to stop"
+                      : "Make this the default: new sessions start with it")
+                .opacity(saved.isDefault || isHovered ? 1 : 0)
+                .allowsHitTesting(saved.isDefault || isHovered)
+                if let shortcut {
+                    Text(shortcut)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 Button(role: .destructive, action: onDelete) {
                     Image(systemName: "trash")
                         .font(.caption)
