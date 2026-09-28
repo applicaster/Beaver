@@ -63,6 +63,9 @@ When releasing:
   session was open — before, you had to pick it in Sessions by hand.
 - Double-clicking empty space in the toolbar zooms the window again —
   before, only the strip above the sidebar did.
+- A device whose app closes its socket is disconnected at once. Before, if
+  the socket closed cleanly (no reset), Beaver never noticed, and the
+  device and its session stayed live until you disconnected it by hand.
 
 ## [4.0.1] - 2026-09-24
 
