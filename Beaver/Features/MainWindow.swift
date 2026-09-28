@@ -98,7 +98,7 @@ struct MainWindow: View {
             sessions = (try? await env.store.sessions()) ?? []
             for await change in await env.store.changes() {
                 switch change {
-                case .sessionStarted, .sessionEnded, .sessionDeleted, .sessionUpdated, .sessionsCleared:
+                case .sessionStarted, .sessionEnded, .sessionsDeleted, .sessionUpdated, .sessionsCleared:
                     sessions = (try? await env.store.sessions()) ?? []
                 default:
                     break

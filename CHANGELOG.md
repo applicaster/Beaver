@@ -23,6 +23,16 @@ When releasing:
   connects, instead of the last filter used. Agents: `filters_list` shows
   the default and the shortcuts; `filters_save(name:, default: true)`
   sets it.
+- **Old sessions are deleted automatically.** Beaver menu → **Delete
+  Sessions Older Than** 7 / 30 / 90 Days / Never (default 30 days); the
+  menu also shows how much disk the sessions use. Checked a few seconds
+  after launch and then daily; a toast says how many went and the space
+  freed. Never deleted: a connected device's session, imported sessions,
+  and any session with a bookmarked event or request. The first launch
+  with this only announces it (with **Keep All** to switch to Never);
+  deleting starts a day later, or at once when you pick a period in the
+  menu. `beaver_status` reports the setting
+  (`retentionDays`) and the store's size (`storeBytes`).
 - Drop a session file (`.json`) or HAR anywhere on the window to import
   it, the same as Import. A file Beaver can't open now says so instead of
   doing nothing.

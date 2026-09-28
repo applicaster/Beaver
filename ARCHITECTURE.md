@@ -253,6 +253,14 @@ CREATE TABLE agent_activity (
   `clearEvents` keeps `network_entry` rows: they go only with their
   session, through the cascade.
 
+- `deleteSessions(ids:)` / `retentionCandidates()` / `reclaimSpace()`
+  The retention purge (D83, `SessionRetention.run`): picks old sessions
+  that aren't connected, imported or bookmarked, deletes them one
+  transaction each with one `.sessionsDeleted(ids:)` broadcast (the
+  manual delete goes the same way), then converts the store to
+  incremental auto-vacuum once (full `VACUUM`) or runs
+  `incremental_vacuum`.
+
 **Why GRDB over SwiftData.** Predictable performance under high-throughput
 append load; mature FTS5 integration; explicit migrations; explicit
 transaction control; battle-tested over a decade. SwiftData is improving
@@ -508,6 +516,9 @@ These are deliberately deferred until first running build:
 - **Crash-safe append batching.** Default 50 ms transaction window; if
   the app crashes mid-window we lose those events. Acceptable for a
   debug tool, revisit if it bites.
+- **Store growth.** Decided in D83: sessions older than 30 days (app menu,
+  7 / 30 / 90 / Never) are deleted at launch and daily, except connected,
+  imported and bookmarked ones, and the space goes back to the disk.
 - **Backup/restore.** Should sessions be exportable as a single archive
   (sqlite + metadata) for sharing? Likely yes, but not in v1.
 - **Multi-window.** Today the app is single-window. SwiftUI supports

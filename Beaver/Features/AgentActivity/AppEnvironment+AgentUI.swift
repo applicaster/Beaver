@@ -27,7 +27,8 @@ extension AppEnvironment: AgentUI {
                 windowOpen: mainWindow != nil,
                 frontmost: NSApp.isActive,
                 notifications: AgentNotifier.shared.state,
-                defaultDevice: defaultDevice
+                defaultDevice: defaultDevice,
+                retention: SessionRetention.current()
             )
         }
     }

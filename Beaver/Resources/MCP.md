@@ -76,12 +76,20 @@ or a release):
 12. Toolboxes: connect an app built with quick-brick-xray's **native** WebSocket
    sink (the JS-only sink has none), click the device badge on the left of the
    toolbar — the popover lists its toolboxes. Nothing to turn on in Beaver.
+13. Session retention: app menu → **Delete Sessions Older Than** shows 30
+   Days checked, and "Sessions on disk: …" appears a few seconds after
+   launch. `beaver_status` reports `retentionDays: 30` and `storeBytes`.
+   With sessions older than 30 days, the first launch only shows a toast
+   (**Keep All** sets Never); a launch a day later deletes them and toasts
+   "Deleted N old sessions, freed …". Picking a period in the menu deletes
+   right away, no waiting day (try 7 Days). Bookmarked and imported
+   sessions stay, and so does a connected device's session.
 
 ## Tools
 
 | Tool | What it does |
 |---|---|
-| `beaver_status` | Every connected device (its `id` is the `deviceId` other tools take), live and viewed session, latest event id, where the device connects |
+| `beaver_status` | Every connected device (its `id` is the `deviceId` other tools take), live and viewed session, latest event id, where the device connects, how long old sessions are kept (`retentionDays`) and the store's size (`storeBytes`) |
 | `sessions_list` | Stored sessions, newest first, with app, device and counts |
 | `sessions_import` | Open a Beaver / zapp-support JSON or a HAR file as a new session |
 | `sessions_export` | Write a session (or a filtered part) as JSON, or its requests as HAR |
@@ -244,6 +252,10 @@ takes focus, unless you pass `reveal: true`.
 4. `sessions_delete(sessionId: <id>)` when the user asks to remove it
    (not the live session while the device is connected);
    `sessions_delete(all: true)` removes every session.
+5. Imported sessions stay until deleted. Other sessions older than
+   `retentionDays` in `beaver_status()` go on their own unless they have a
+   bookmark: to keep one, `bookmarks_set(eventId: <id>)` in it, or tell the user
+   the setting is in the app menu → Delete Sessions Older Than.
 
 ### review-errors — go through the errors with the user
 

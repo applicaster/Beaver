@@ -16,7 +16,10 @@ struct BeaverApp: App {
     /// view that wants to confirm an action ("Copied!", "Bookmark
     /// added", …). Lives at the App level so it survives every
     /// tab / window mutation.
-    @State private var toasts = ToastCenter()
+    @State private var toasts: ToastCenter
+
+    /// App menu → Delete Sessions Older Than (D83), in days; 0 is Never.
+    @AppStorage(SessionRetention.key) private var retentionDays = SessionRetention.default.rawValue
 
     /// Agent Access (design §3.2): on by default, one toggle in the app menu.
     @AppStorage(AgentAccess.enabledKey) private var agentAccessEnabled = true
@@ -56,6 +59,8 @@ struct BeaverApp: App {
         environment.activeFilter = LogFeedViewModel.rememberedFilter()
         environment.startFromDefaultFilter()
         _env = State(initialValue: environment)
+        let toastCenter = ToastCenter()
+        _toasts = State(initialValue: toastCenter)
         agentAccess = AgentAccess(store: store, ui: environment, device: environment)
         // design M28: permission read and click delegate ready at launch,
         // before the first attention note or an old notification's click.
@@ -77,6 +82,16 @@ struct BeaverApp: App {
         Task { [env = _env.wrappedValue] in
             await Self.bootstrap(env: env)
         }
+
+        // D83: delete old sessions a few seconds after launch, once the
+        // window's first loads are done, then daily while Beaver runs.
+        Task { [env = _env.wrappedValue] in
+            try? await Task.sleep(for: .seconds(5))
+            while !Task.isCancelled {
+                await Self.deleteOldSessions(env: env, toasts: toastCenter)
+                try? await Task.sleep(for: .seconds(86_400))
+            }
+        }
     }
 
     var body: some Scene {
@@ -86,6 +101,11 @@ struct BeaverApp: App {
                 .environment(toasts)
                 .task { await scheduleAgentAccessApply() }
                 .onChange(of: agentAccessEnabled) { Task { await scheduleAgentAccessApply() } }
+                .onChange(of: retentionDays) {
+                    // A choice made in the menu is informed: no grace day (D83).
+                    UserDefaults.standard.set(Date(), forKey: SessionRetention.startsAtKey)
+                    Task { await Self.deleteOldSessions(env: env, toasts: toasts) }
+                }
                 // Hides the title but keeps a real title bar, so a double-click
                 // on the toolbar's empty space zooms. `.hiddenTitleBar` left only
                 // the sidebar's strip doing that.
@@ -108,6 +128,13 @@ struct BeaverApp: App {
                     toasts.success("Copied \(url)")
                 }
                 .keyboardShortcut("c", modifiers: [.command, .shift])
+                Divider()
+                Picker("Delete Sessions Older Than", selection: $retentionDays) {
+                    ForEach(SessionRetention.allCases, id: \.self) { Text($0.title).tag($0.rawValue) }
+                }
+                if let size = env.storeSize {
+                    Text("Sessions on disk: \(size.formatted(.byteCount(style: .file)))")
+                }
                 Divider()
                 Toggle("Agent Access (MCP)", isOn: $agentAccessEnabled)
                 Text("MCP: \(env.agentAccessStatus)")
@@ -212,10 +239,10 @@ struct BeaverApp: App {
                     await env.refreshViewingEventCount()
                 case .sessionStarted, .sessionEnded:
                     await env.refreshViewingEventCount()
-                case .sessionDeleted(let id):
+                case .sessionsDeleted(let ids):
                     let viewed = env.viewingSessionId
-                    if viewed == id { env.viewingSessionId = nil }
-                    await replaceDeletedLiveSessions(env: env, viewed: viewed) { $0 == id }
+                    if let viewed, ids.contains(viewed) { env.viewingSessionId = nil }
+                    await replaceDeletedLiveSessions(env: env, viewed: viewed) { ids.contains($0) }
                     await env.refreshViewingEventCount()
                 case .sessionsCleared:
                     let viewed = env.viewingSessionId
@@ -269,6 +296,34 @@ struct BeaverApp: App {
     }
 
     private static let log = Logger(subsystem: "com.applicaster.LoggerNext", category: "AgentAccess")
+
+    /// One retention pass (D83); says what it did in a toast, or nothing.
+    @MainActor
+    private static func deleteOldSessions(env: AppEnvironment, toasts: ToastCenter) async {
+        do {
+            switch try await SessionRetention.run(store: env.store, live: Set(env.live.sessionIds)) {
+            case .nothing:
+                break
+            case .notice(let pending):
+                // The first pass after upgrade only announces (D83).
+                let days = SessionRetention.current().rawValue
+                toasts.show(
+                    "From tomorrow Beaver deletes sessions older than \(days) days (\(pending) now). Set it in the Beaver menu.",
+                    icon: "info.circle.fill", tint: .accentColor, duration: 15,
+                    action: ToastAction(title: "Keep All") {
+                        UserDefaults.standard.set(SessionRetention.never.rawValue, forKey: SessionRetention.key)
+                    })
+            case .deleted(let count, let freed):
+                toasts.show("Deleted \(count) old session\(count == 1 ? "" : "s"), freed \(freed.formatted(.byteCount(style: .file)))",
+                            icon: "trash.circle.fill", tint: .accentColor, duration: 5)
+            }
+        } catch {
+            retentionLog.error("Deleting old sessions failed: \(error.localizedDescription)")
+        }
+        env.storeSize = try? await env.store.databaseSize()
+    }
+
+    private static let retentionLog = Logger(subsystem: "com.applicaster.LoggerNext", category: "Retention")
 
     private static func handleInbound(frame: Data, connection: UUID, sessionId: Int64, env: AppEnvironment) async {
         switch ProtocolDecoder.decode(frame) {

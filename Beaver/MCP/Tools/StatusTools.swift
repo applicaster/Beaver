@@ -11,7 +11,7 @@ enum StatusTools {
     static let status = MCPTool(
         name: "beaver_status",
         title: "Beaver status",
-        description: "Use first, and whenever you are unsure what is connected: which apps are connected (each with the deviceId to pass to device tools), their live and the viewed session ids, the latest event id (a starting point for afterId), and where the device should connect.",
+        description: "Use first, and whenever you are unsure what is connected: which apps are connected (each with the deviceId to pass to device tools), their live and the viewed session ids, the latest event id (a starting point for afterId), where the device should connect, and how long old sessions are kept.",
         kind: .read,
         inputSchema: ToolSchema.object([:])
     ) { _, ctx in
@@ -43,7 +43,12 @@ enum StatusTools {
         lines.append("Beaver \(host.beaverVersion) · WebSocket \(host.serverState)"
             + (host.deviceURL.map { " · the device connects to \($0)" } ?? ""))
         if let viewing = host.viewingSessionId { lines.append("The user is viewing session #\(viewing).") }
-        lines.append("\(sessions.count) session(s) stored.")
+        let storeBytes = try await ctx.store.databaseSize()
+        let retentionDays: Int? = host.retention == .never ? nil : host.retention.rawValue
+        lines.append("\(sessions.count) session(s) stored, \(storeBytes.formatted(.byteCount(style: .file))). "
+            + (retentionDays.map { "Sessions older than \($0) days are deleted automatically, except imported, bookmarked and connected ones" }
+               ?? "Sessions are kept until deleted")
+            + " (the user sets this: app menu → Delete Sessions Older Than).")
         let notificationsSuffix: String = switch host.notifications {
         case .allowed: "."
         case .muted: " (the user muted them in Beaver)."
@@ -81,6 +86,8 @@ enum StatusTools {
                 "devices": .array(devices),
                 "viewingSessionId": JSON(host.viewingSessionId),
                 "sessionCount": JSON(sessions.count),
+                "storeBytes": JSON(storeBytes),
+                "retentionDays": JSON(retentionDays),
                 "notifications": .string(host.notifications.rawValue),
             ],
             next: next,

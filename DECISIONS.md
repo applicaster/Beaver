@@ -2738,3 +2738,50 @@ won't decode, and the feed starts unfiltered once.
 - **Trade-off:** while a default is set, an ad-hoc filter doesn't survive a
   device reconnecting (app restart); D42's carry-over does that only without
   a default. ⌘-digits get any saved filter back in one key.
+## D83. Old sessions are deleted after 30 days, from the app menu
+
+**Status:** Accepted (2026-09-28). Closes "the store grows forever"
+(ARCHITECTURE.md §12); real stores reached several GB.
+
+- **Decision:** app menu → **Delete Sessions Older Than** 7 / 30 / 90 Days
+  / Never, default 30 (`UserDefaults` `sessionRetentionDays`, 0 = Never;
+  menu per D62). A pass runs 5 s after launch (after the window's first
+  reads), daily while Beaver runs, and when the setting changes. It
+  deletes sessions whose **last activity** is older than the setting:
+  `ended_at`, or for an unended session (a crash leaves one) the later of
+  its start and its last event. Never deleted: sessions of connected
+  devices (`LiveDevices`, not `ended_at IS NULL` — see `sessions_list`),
+  imported sessions, sessions with any event or network bookmark.
+- **Same path as a manual delete:** `LogStore.deleteSessions(ids:)`, which
+  `deleteSession(id:)` now calls — the FK cascades, the journal's
+  `ON DELETE SET NULL`, and one `.sessionsDeleted(ids:)` broadcast
+  (renamed from `.sessionDeleted(id:)`) so the Sessions list reloads once,
+  not once per session. One transaction per session keeps live appends
+  and reads flowing during a long purge.
+- **Space:** deleted pages only go back to the disk with a vacuum. On the
+  2.8 GB reference store (325 live sessions): selecting 143 expired ones
+  6 ms, deleting them 4.6 s (1.5 GB freed pages), then
+  `auto_vacuum = INCREMENTAL` + `VACUUM` 11.6 s; later, deleting 20 more
+  (106 MB) and `incremental_vacuum` 0.6 s. So the first purge converts
+  the store once (full `VACUUM`, skipped while free disk is below the
+  store's size), and every later one runs `incremental_vacuum`. Not a
+  migration: a VACUUM in `LogStore.init` would block launch for seconds.
+- **First run after upgrade doesn't surprise:** the first pass deletes
+  nothing. It stores `sessionRetentionStartsAt` = now + 1 day and, if
+  sessions would go, shows a toast ("From tomorrow Beaver deletes sessions
+  older than 30 days (N now)") with **Keep All**, which sets Never.
+  Passes before that date do nothing. Picking a period in the menu ends
+  the wait at once: the choice is informed (and testers can check the
+  purge without waiting a day, CLAUDE.md MCP rule 7).
+- **Told unobtrusively:** a toast "Deleted N old sessions, freed X MB";
+  nothing when nothing went. The menu shows "Sessions on disk: X" as of
+  the last pass.
+- **MCP:** `beaver_status` reports `retentionDays` (null = Never) and
+  `storeBytes`. No tool changes the setting: it's the person's standing
+  choice about deleting their data, and an agent that needs a session
+  gone already has `sessions_delete`.
+- **Alternatives:** delete in SQL in one statement (one 4.6 s write lock,
+  and bookmarks/live checks duplicated in SQL); size-based cap (harder to
+  explain than an age); purge on the very first launch (a 3-month store
+  loses two months without warning); `VACUUM` after every purge (seconds
+  each time and needs free disk the store's size).
