@@ -252,4 +252,189 @@ struct ToolboxToolsTests {
         #expect(r.structured["beaver"]?["deviceId"] == "beaver")
         #expect(r.summary.contains("Default device: Alpha"))
     }
+
+    // MARK: Bug hunt fixes (batch B)
+
+    /// Alpha (older) and Beta, both live; the default is `defaultDevice`.
+    private func alphaBeta(default defaultDevice: DefaultDevice?,
+                           _ answer: @escaping @Sendable (String, JSON) async throws -> JSON = ToolboxToolsTests.ok)
+        async throws -> (LogStore, Session, Session, FakeUI, FakeDevice) {
+        let (store, a, ui, device) = try await alpha(answer)
+        let b = try await store.createSession(source: .live)
+        try await store.setSessionDeviceInfo(id: b.id, appName: "Beta", appVersion: "2.0", deviceModel: "Pixel 8",
+                                             platform: "Android", osVersion: "15", deviceUID: "B")
+        ui.update { $0.liveSessionIds = [a.id, b.id]; $0.defaultDevice = defaultDevice }
+        return (store, a, b, ui, device)
+    }
+
+    @Test("B1: tools_call asks the client to confirm; its kind stays change")
+    func toolsCallDestructiveHint() {
+        #expect(ToolboxTools.toolsCall.listing["annotations"]?["destructiveHint"] == true)
+        #expect(ToolboxTools.toolsCall.kind == .change)
+        #expect(ToolboxTools.toolsCall.description.contains("confirm"))
+        #expect(ToolboxTools.toolboxesList.listing["annotations"]?["destructiveHint"] == false)
+    }
+
+    @Test("B1: restart, execute and launch app tools are journaled destructive; storage.set stays a change")
+    func widerHeuristic() async throws {
+        let (store, _, ui, device) = try await alpha()
+        for name in ["app.restart", "console.execute", "app.launchMainActivity"] {
+            let r = try await run(ToolboxTools.toolsCall, ["name": .string(name)], store, ui, device)
+            #expect(r.journalKind == .destructive, "\(name)")
+        }
+        for name in ["storage.set", "storage.setBatch"] {
+            let r = try await run(ToolboxTools.toolsCall, ["name": .string(name)], store, ui, device)
+            #expect(r.journalKind == nil, "\(name)")
+        }
+    }
+
+    @Test("B4: a destructive app tool that drops the connection: may have run, journaled destructive")
+    func disconnectedDestructive() async throws {
+        for error in [DeviceMCPError.disconnected, .timeout] {
+            let (store, _, ui, device) = try await alpha { _, _ in throw error }
+            do {
+                _ = try await run(ToolboxTools.toolsCall, ["name": "app.killProcess"], store, ui, device)
+                Issue.record("expected a ToolError")
+            } catch let e as ToolError {
+                #expect(e.journalKind == .destructive)
+                #expect(e.message.contains("may still have run"))
+                #expect(e.message.contains("app.killProcess end the app"))
+                #expect(e.message.contains("beaver_status()"))
+            }
+            do {
+                _ = try await run(ToolboxTools.toolsCall, ["name": "storage.get"], store, ui, device)
+            } catch let e as ToolError {
+                #expect(e.journalKind == nil)
+            }
+        }
+    }
+
+    @Test("B4: tools_call app.restart watches for the app dropping, like commands_send")
+    func restartWatchesDisconnect() async throws {
+        let (store, a, ui, _) = try await alpha()
+        let device = FakeDevice(onMCP: { [ui] _, _ in
+            ui.update { $0.liveSessionIds = [] }
+            throw DeviceMCPError.disconnected
+        })
+        let ctx = makeContext(store, fakeUI: ui, device: device)
+        _ = try? await ToolboxTools.toolsCall.run(ToolArguments(["name": "app.restart"]), ctx)
+        try await Task.sleep(for: .milliseconds(400))
+        let b = try await store.createSession(source: .live)
+        try await store.setSessionDeviceInfo(id: b.id, appName: "Alpha", appVersion: "1.0", deviceModel: "iPhone 15",
+                                             platform: "iOS", osVersion: "18.0", deviceUID: "A")
+        ui.update { $0.liveSessionIds = [b.id] }
+        var rows: [AgentActivity] = []
+        for _ in 0..<40 where rows.isEmpty {
+            try await Task.sleep(for: .milliseconds(100))
+            rows = try await store.agentActivity().filter { $0.kind == .system }
+        }
+        #expect(rows.first?.summary == "Device disconnected after \"app.restart\" → session #\(b.id)")
+        #expect(a.id != b.id)
+    }
+
+    @Test("B2/B3: tools_call names the default target and points logs_wait at its session")
+    func callNamesTargetAndSession() async throws {
+        let (store, a, _, ui, device) = try await alphaBeta(default: .uid("A"))
+        let r = try await run(ToolboxTools.toolsCall, ["name": "storage.get"], store, ui, device)
+        #expect(device.mcpCalls.last?.sessionId == a.id)
+        #expect(r.summary.hasPrefix("storage.get on Alpha 1.0 (iPhone 15, iOS 18.0) (default): "))
+        #expect(r.next.first?.hasPrefix("logs_wait(sessionId: \(a.id), afterId: ") == true)
+        #expect(r.next.first?.contains("beaver_status()") == true)
+        let explicit = try await run(ToolboxTools.toolsCall, ["deviceId": JSON(a.id), "name": "storage.get"],
+                                     store, ui, device)
+        #expect(!explicit.summary.contains("(default)"))
+    }
+
+    @Test("B5: non-text items are counted; empty text says done (no text)")
+    func nonText() async throws {
+        let (store, _, ui, device) = try await alpha { method, _ in
+            method == "tools/list" ? ToolboxToolsTests.toolsList
+                : ["content": [["type": "image", "data": "…"], ["type": "text", "text": ""],
+                               ["type": "resource", "resource": [:]]], "isError": false]
+        }
+        let r = try await run(ToolboxTools.toolsCall, ["name": "app.screenshot"], store, ui, device)
+        #expect(r.summary == "app.screenshot on Alpha 1.0 (iPhone 15, iOS 18.0): done (no text)")
+        #expect(r.body.contains("(+2 non-text item(s): image, resource)"))
+    }
+
+    @Test("B5: structured keeps structuredContent and drops the duplicate text")
+    func noTripleCopy() async throws {
+        let (store, _, ui, device) = try await alpha()
+        let r = try await run(ToolboxTools.toolsCall, ["name": "storage.get"], store, ui, device)
+        #expect(r.structured["structuredContent"] != nil)
+        #expect(r.structured["text"] == nil)
+        let (store2, _, ui2, device2) = try await alpha { _, _ in ["content": [["type": "text", "text": "hi"]]] }
+        let plain = try await run(ToolboxTools.toolsCall, ["name": "storage.get"], store2, ui2, device2)
+        #expect(plain.structured["text"] == "hi")
+    }
+
+    @Test("B5: the beaver path returns the app path's shape")
+    func beaverShape() async throws {
+        let (store, _, ui, device) = try await alpha()
+        let r = try await run(ToolboxTools.toolsCall, ["deviceId": "beaver", "name": "beaver.status"], store, ui, device)
+        #expect(r.structured["deviceId"] == "beaver")
+        #expect(r.structured["name"] == "beaver.status")
+        #expect(r.structured["isError"] == false)
+        #expect(r.structured["text"]?.string?.hasPrefix("A device is connected") == true)
+        #expect(r.structured["structuredContent"]?["devices"]?.array?.count == 1)
+        #expect(r.summary.hasPrefix("A device is connected"))
+        #expect(r.journalKind == .read)
+    }
+
+    @Test("B5: \"Beaver\" and \" beaver \" are Beaver, even with no app connected")
+    func beaverAnyCase() async throws {
+        let store = try LogStore(source: .inMemory)
+        let ui = FakeUI()
+        let device = FakeDevice()
+        for id in ["Beaver", " beaver ", "BEAVER"] {
+            let r = try await run(ToolboxTools.toolsCall, ["deviceId": .string(id), "name": "beaver.status"],
+                                  store, ui, device)
+            #expect(r.structured["deviceId"] == "beaver")
+            let list = try await run(ToolboxTools.toolboxesList, ["deviceId": .string(id)], store, ui, device)
+            #expect(list.structured["deviceId"] == "beaver")
+        }
+        let m = await message { _ = try await run(ToolboxTools.setDefault, ["deviceId": "Beaver"], store, ui, device) }
+        #expect(m.contains("The default is for apps"))
+    }
+
+    @Test("B5: other device tools given deviceId beaver point at Beaver's tools")
+    func beaverOnDeviceTool() async throws {
+        let (store, _, ui, device) = try await alpha()
+        let m = await message {
+            _ = try await CommandTools.send.run(ToolArguments(["deviceId": "Beaver", "command": "x"]),
+                                                makeContext(store, fakeUI: ui, device: device))
+        }
+        #expect(m.contains("toolboxes_list(deviceId: \"beaver\")"))
+        #expect(device.sent.isEmpty)
+    }
+
+    @Test("B5: an app with no tools says so, and doesn't repeat the failed call")
+    func noToolsHints() async throws {
+        let (store, _, ui, device) = try await alpha { method, _ in
+            method == "tools/list" ? ["tools": []] : ["content": [["type": "text", "text": "unknown tool"]], "isError": true]
+        }
+        let m = await message { _ = try await run(ToolboxTools.toolboxesList, ["toolbox": "storage"], store, ui, device) }
+        #expect(m.contains("This app has no tools."))
+        #expect(m.contains("Example: beaver_status()"))
+        #expect(!m.contains("Toolboxes: ."))
+        let c = await message { _ = try await run(ToolboxTools.toolsCall, ["name": "storage.get"], store, ui, device) }
+        #expect(c.contains("This app has no tools."))
+        #expect(c.contains("Example: beaver_status()"))
+        #expect(!c.contains("toolboxes_list(deviceId"))
+    }
+
+    @Test("B5: a toolbox with no read tool suggests a placeholder, never a mutating tool")
+    func nextWithoutRead() async throws {
+        let (store, a, ui, device) = try await alpha { _, _ in ["tools": [
+            ["name": "app.clearCache", "inputSchema": ["type": "object"]],
+            ["name": "app.restart", "inputSchema": ["type": "object"]],
+        ]] }
+        let r = try await run(ToolboxTools.toolboxesList, ["toolbox": "app"], store, ui, device)
+        #expect(r.next.first?.contains("tools_call(deviceId: \"\(a.id)\", name: \"app.…\", arguments: {…})") == true)
+        #expect(!r.next.joined().contains("clearCache"))
+        #expect(!r.next.joined().contains("restart"))
+        let beaver = try await run(ToolboxTools.toolboxesList, ["deviceId": "beaver", "toolbox": "devices"],
+                                   store, ui, device)
+        #expect(!beaver.next.joined().contains("devices.disconnect"))
+    }
 }

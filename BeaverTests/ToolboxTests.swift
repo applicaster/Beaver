@@ -25,6 +25,14 @@ struct ToolboxTests {
         #expect(tools[2].description == "")
     }
 
+    @Test("B5: a name listed twice keeps its first entry")
+    func duplicateNames() {
+        let tools = Toolboxes.tools(fromListResult: ["tools": [
+            ["name": "storage.get", "description": "first"], ["name": "storage.get", "description": "second"],
+        ]])
+        #expect(tools.map(\.description) == ["first"])
+    }
+
     @Test("Review focus: grouped by prefix, sorted; a dotless name goes to other; nothing gives nothing")
     func group() {
         let boxes = Toolboxes.group(Toolboxes.tools(fromListResult: Self.list))

@@ -9,7 +9,12 @@ import Foundation
 /// example call (design M30).
 public struct ToolError: Error, Sendable, Equatable {
     public let message: String
-    public init(_ message: String) { self.message = message }
+    /// The journal kind when it isn't the tool's own: a destructive app
+    /// tool that timed out may still have run.
+    public let journalKind: AgentActivity.Kind?
+    public init(_ message: String, journalKind: AgentActivity.Kind? = nil) {
+        self.message = message; self.journalKind = journalKind
+    }
 
     /// The message without its example call, for a toast a person reads.
     public var personMessage: String {
@@ -182,13 +187,17 @@ public struct MCPTool: Sendable {
     public let kind: AgentActivity.Kind
     public let idempotent: Bool
     public let inputSchema: JSON
+    /// `destructiveHint` when it isn't the kind's: `tools_call` is a change
+    /// by default but asks the client to confirm (it runs any app tool).
+    public let destructiveHint: Bool?
     public let run: @Sendable (ToolArguments, ToolContext) async throws -> ToolResult
 
     public init(name: String, title: String, description: String, kind: AgentActivity.Kind,
-                idempotent: Bool = false, inputSchema: JSON,
+                idempotent: Bool = false, destructiveHint: Bool? = nil, inputSchema: JSON,
                 run: @escaping @Sendable (ToolArguments, ToolContext) async throws -> ToolResult) {
         self.name = name; self.title = title; self.description = description
-        self.kind = kind; self.idempotent = idempotent; self.inputSchema = inputSchema; self.run = run
+        self.kind = kind; self.idempotent = idempotent; self.destructiveHint = destructiveHint
+        self.inputSchema = inputSchema; self.run = run
     }
 
     /// The `tools/list` entry.
@@ -201,7 +210,7 @@ public struct MCPTool: Sendable {
             "annotations": [
                 "title": .string(title),
                 "readOnlyHint": .bool(kind == .read),
-                "destructiveHint": .bool(kind == .destructive),
+                "destructiveHint": .bool(destructiveHint ?? (kind == .destructive)),
                 "idempotentHint": .bool(kind == .read || idempotent),
                 "openWorldHint": false,
             ],

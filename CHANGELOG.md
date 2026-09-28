@@ -72,6 +72,18 @@ When releasing:
 - A device whose app closes its socket is disconnected at once. Before, if
   the socket closed cleanly (no reset), Beaver never noticed, and the
   device and its session stayed live until you disconnected it by hand.
+- Agents: your MCP client asks you to confirm each `tools_call`, since an
+  app tool can delete data or restart the app. Restart, kill, launch and
+  execute tools are marked destructive in the Agent panel, also when the app
+  drops before answering, and the panel notes the drop.
+- Agents: device tools name the app a call went to (and "default" when the
+  default device picked it), and their suggested `logs_wait` reads that
+  app's session, not the newest one. `devices_disconnect` needs `deviceId`
+  whenever several apps are connected, default or not.
+- Agents: `tools_call` counts images and other non-text items instead of
+  dropping them, and doesn't repeat the app's answer three times;
+  `deviceId: "Beaver"` works in any case; `beaver_status` marks one default
+  device; a toolbox without a read tool no longer suggests a mutating one.
 
 ## [4.0.1] - 2026-09-24
 

@@ -81,10 +81,12 @@ public enum Toolboxes {
             .sorted { $0.name < $1.name }
     }
 
-    /// A `tools/list` result; entries without a name are skipped.
+    /// A `tools/list` result; entries without a name are skipped, and a
+    /// name listed twice keeps its first entry.
     public static func tools(fromListResult result: JSON) -> [DeviceTool] {
-        (result["tools"]?.array ?? []).compactMap { entry in
-            guard let name = entry["name"]?.string, !name.isEmpty else { return nil }
+        var seen = Set<String>()
+        return (result["tools"]?.array ?? []).compactMap { entry in
+            guard let name = entry["name"]?.string, !name.isEmpty, seen.insert(name).inserted else { return nil }
             return DeviceTool(name: name, description: entry["description"]?.string ?? "",
                               inputSchema: entry["inputSchema"] ?? ["type": "object"])
         }
