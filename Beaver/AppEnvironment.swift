@@ -80,6 +80,10 @@ public final class AppEnvironment {
     /// The bound MCP port while Agent Access is on.
     public var agentAccessPort: UInt16?
 
+    /// The store's size on disk for the app menu, as of the last
+    /// retention pass (D83).
+    public var storeSize: Int64?
+
     // MARK: - Window state an agent can set (D54, design §7.1)
     //
     // The view models follow these (`UIStateSync`), and write the

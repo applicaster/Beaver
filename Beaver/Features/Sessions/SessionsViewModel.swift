@@ -66,7 +66,7 @@ final class SessionsViewModel {
                 guard let self else { return }
                 switch change {
                 case .sessionStarted, .sessionEnded,
-                     .sessionDeleted, .sessionsCleared,
+                     .sessionsDeleted, .sessionsCleared,
                      .sessionUpdated:
                     // sessionUpdated covers device-info backfills
                     // (see LogStore.harvestDeviceInfo) — refreshing

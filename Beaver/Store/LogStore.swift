@@ -19,7 +19,7 @@ public actor LogStore {
         case cleared(sessionId: Int64)
         case sessionStarted(Session)
         case sessionEnded(Session)
-        case sessionDeleted(id: Int64)
+        case sessionsDeleted(ids: Set<Int64>)
         /// Emitted when a session's *metadata* changes
         /// (currently just the device-info fields populated from
         /// applicaster.v2). Lets SessionsViewModel rebuild its
@@ -239,7 +239,7 @@ public actor LogStore {
         if let updated {
             // Use sessionEnded(…) broadcast? No — that has different
             // semantics. The sessions list refreshes off
-            // `.sessionStarted` / `.sessionEnded` / `.sessionDeleted`
+            // `.sessionStarted` / `.sessionEnded` / `.sessionsDeleted`
             // / `.appended`. Device info doesn't fit any of those
             // cleanly, so we piggyback on `.sessionUpdated` (added
             // alongside this method).
@@ -294,21 +294,84 @@ public actor LogStore {
 
     /// Delete a single session row. Cascading FKs wipe its events,
     /// storage snapshots, and bookmarks. Broadcasts
-    /// `.sessionDeleted(id:)` so view models can refresh their lists
+    /// `.sessionsDeleted(ids:)` so view models can refresh their lists
     /// and clear viewing-state if it pointed at this row.
     ///
     /// No-op if `id` doesn't exist (idempotent so the UI can fire
     /// repeated deletes safely).
     public func deleteSession(id: Int64) async throws {
-        let deleted: Bool = try await dbQueue.write { db in
-            try db.execute(
-                sql: "DELETE FROM session WHERE id = ?",
-                arguments: [id]
-            )
-            return db.changesCount > 0
+        try await deleteSessions(ids: [id])
+    }
+
+    /// `deleteSession` for many (D83's retention purge). One transaction
+    /// per session, so live appends and reads get in between on a big
+    /// store; one broadcast at the end, so the Sessions list reloads once.
+    /// Returns how many existed.
+    @discardableResult
+    public func deleteSessions(ids: [Int64]) async throws -> Int {
+        var deleted: Set<Int64> = []
+        defer { if !deleted.isEmpty { broadcast(.sessionsDeleted(ids: deleted)) } }
+        for id in ids {
+            let gone: Bool = try await dbQueue.write { db in
+                try db.execute(
+                    sql: "DELETE FROM session WHERE id = ?",
+                    arguments: [id]
+                )
+                return db.changesCount > 0
+            }
+            if gone { deleted.insert(id) }
         }
-        if deleted {
-            broadcast(.sessionDeleted(id: id))
+        return deleted.count
+    }
+
+    /// What the retention purge (D83) decides on, for every session.
+    /// Last activity: the end, else the later of the start and the
+    /// last event (a crash leaves a session unended).
+    public func retentionCandidates() async throws -> [SessionRetention.Candidate] {
+        try await dbQueue.read { db in
+            try Row.fetchAll(db, sql: """
+                SELECT id, source,
+                       COALESCE(ended_at, MAX(started_at, COALESCE(
+                           (SELECT MAX(timestamp_ms) FROM event WHERE session_id = session.id), 0))) AS last_at,
+                       EXISTS (SELECT 1 FROM event_bookmark WHERE session_id = session.id)
+                           OR EXISTS (SELECT 1 FROM network_bookmark WHERE session_id = session.id) AS bookmarked
+                FROM session
+            """).map { row in
+                SessionRetention.Candidate(
+                    id: row["id"],
+                    source: Session.Source(rawValue: row["source"]) ?? .live,
+                    lastActivity: Date(timeIntervalSince1970: TimeInterval(row["last_at"] as Int64) / 1000),
+                    bookmarked: row["bookmarked"]
+                )
+            }
+        }
+    }
+
+    /// Size of the database in bytes (free pages included).
+    public func databaseSize() async throws -> Int64 {
+        try await dbQueue.read { db in
+            try Int64.fetchOne(db, sql: "SELECT page_count * page_size FROM pragma_page_count(), pragma_page_size()") ?? 0
+        }
+    }
+
+    /// Gives the pages freed by deleted sessions back to the disk (D83).
+    /// The first time, converts the store to incremental auto-vacuum with
+    /// one full VACUUM (~12 s on the 2.8 GB reference store; needs free
+    /// disk about the store's size, else it waits for a later purge).
+    /// After that, `incremental_vacuum` (~0.6 s per 100 MB freed).
+    public func reclaimSpace() async throws {
+        let size = try await databaseSize()
+        // nil in memory (tests): nothing to run out of.
+        let freeDisk = try? URL(fileURLWithPath: dbQueue.path)
+            .resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+            .volumeAvailableCapacityForImportantUsage
+        try await dbQueue.writeWithoutTransaction { db in
+            if try Int.fetchOne(db, sql: "PRAGMA auto_vacuum") == 2 {
+                try db.execute(sql: "PRAGMA incremental_vacuum")
+            } else if (freeDisk ?? .max) > size {
+                try db.execute(sql: "PRAGMA auto_vacuum = INCREMENTAL")
+                try db.execute(sql: "VACUUM")
+            }
         }
     }
 

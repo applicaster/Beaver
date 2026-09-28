@@ -54,13 +54,16 @@ public struct HostSnapshot: Sendable, Equatable {
     public var notifications: AgentNotifications.State
     /// The agents' default device (D76), if set.
     public var defaultDevice: DefaultDevice?
+    /// App menu → Delete Sessions Older Than (D83).
+    public var retention: SessionRetention
 
     public init(serverState: String = "listening", liveSessionIds: [Int64] = [],
                 viewingSessionId: Int64? = nil, commandsBySession: [Int64: [CommandHint]] = [:],
                 deviceURL: String? = "ws://192.168.1.5:9080",
                 beaverVersion: String = "dev", mcpPort: UInt16 = 9081,
                 ui: UIState = UIState(), windowOpen: Bool = true, frontmost: Bool = false,
-                notifications: AgentNotifications.State = .allowed, defaultDevice: DefaultDevice? = nil) {
+                notifications: AgentNotifications.State = .allowed, defaultDevice: DefaultDevice? = nil,
+                retention: SessionRetention = .default) {
         self.serverState = serverState
         self.liveSessionIds = liveSessionIds
         self.commandsBySession = commandsBySession
@@ -70,6 +73,7 @@ public struct HostSnapshot: Sendable, Equatable {
         if let viewingSessionId { self.ui.sessionId = viewingSessionId }
         self.notifications = notifications
         self.defaultDevice = defaultDevice
+        self.retention = retention
     }
 }
 
