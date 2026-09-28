@@ -2569,8 +2569,10 @@ won't decode, and the feed starts unfiltered once.
 
 - **Decision:** the WebSocket listener keeps every connection; each gets its
   own live session. The live session id is the device's identity: the
-  toolbar device menu sets `viewingSessionId`, commands go to the viewed
-  session's connection, and MCP's `deviceId` is that id as a string.
+  Connected pill in the middle of the toolbar is a menu of devices that
+  sets `viewingSessionId` (the leading badge names the viewed one);
+  commands go to the viewed session's connection, and MCP's `deviceId`
+  is that id as a string.
 - **Why:** the user debugs several apps side by side, like zapp-support's
   emitter switcher. The session was already the unit of viewing, so no second
   "selected device" state.

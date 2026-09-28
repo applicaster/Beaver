@@ -25,6 +25,9 @@ struct MainWindow: View {
     /// A request's start time waiting for the Log feed to mount, from
     /// Network's "Show in Log feed". See `detail`.
     @State private var pendingLogFeedJump: Date?
+    /// Every session row, newest first: the toolbar's device badge and
+    /// device menu read it.
+    @State private var sessions: [Session] = []
 
     /// Per-session view-models, owned here so their state (filter,
     /// sort, exclude, expanded namespaces, search term, etc.)
@@ -88,6 +91,18 @@ struct MainWindow: View {
             // Initial fetch so toolbar disabled state is correct on
             // first appearance.
             await env.refreshViewingEventCount()
+        }
+        // Session rows for the device badge and the device menu (D73).
+        .task {
+            sessions = (try? await env.store.sessions()) ?? []
+            for await change in await env.store.changes() {
+                switch change {
+                case .sessionStarted, .sessionEnded, .sessionDeleted, .sessionUpdated, .sessionsCleared:
+                    sessions = (try? await env.store.sessions()) ?? []
+                default:
+                    break
+                }
+            }
         }
         // Background bookmark subscription. Listens to
         // .bookmarksChanged broadcasts for the active session and
@@ -269,12 +284,14 @@ struct MainWindow: View {
 
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
-        // Leading edge: the device menu (D73). Hidden until Beaver has
-        // a session. Sits at the same vertical height as the right-side
+        // Leading edge: the viewed device / app. Hidden until there is
+        // one. Sits at the same vertical height as the right-side
         // toolbar buttons so the toolbar reads as one consistent
         // strip rather than left-padded space.
         ToolbarItem(placement: .navigation) {
-            DeviceMenuButton()
+            if let viewed = sessions.first(where: { $0.id == env.viewingSessionId }) {
+                ToolbarDeviceBadge(session: viewed, isLive: env.isLive(viewed.id))
+            }
         }
         ToolbarItem(placement: .primaryAction) {
             Button {
@@ -420,12 +437,13 @@ struct MainWindow: View {
                     }
             }
         }
-        // Centered Connected pill. `.principal` keeps it anchored
-        // in the middle of the title bar so the device badge can
-        // sit on the leading edge and the action buttons on the
-        // trailing edge — three groups, three positions.
+        // Centered Connected pill, a menu of devices (D73).
+        // `.principal` keeps it anchored in the middle of the title
+        // bar so the device badge can sit on the leading edge and the
+        // action buttons on the trailing edge — three groups, three
+        // positions.
         ToolbarItem(placement: .principal) {
-            ConnectionIndicator(state: env.serverState)
+            DeviceSwitcher(sessions: sessions)
         }
     }
 
@@ -549,114 +567,42 @@ struct MainWindow: View {
 
 // MARK: - Subviews
 
-/// The device menu (D73) on the leading edge of the main toolbar
-/// (placement `.navigation`): what the window shows, and a switch to
-/// any connected device or a recent one. Reads the session rows, whose
-/// fingerprint the SDK's applicaster.v2 storage fills (D34), and renders
-/// as two stacked lines, vertically matching the right-side buttons:
+/// Compact "what device + app am I looking at" badge on the leading
+/// edge of the main toolbar (placement `.navigation`). Reads the
+/// viewed session's row, whose fingerprint the SDK's applicaster.v2
+/// storage fills (D34), and renders as two stacked lines, vertically
+/// matching the right-side toolbar buttons:
 ///
-///     [icon] ● Miami Heat                     ⌄
+///     [icon] ● Miami Heat
 ///            11.0.1 · iPhone 15 Pro Max · iOS 26.4.2
 ///
 /// Right-click → "Copy device fingerprint" pastes the same info
 /// as a single line into the clipboard for bug reports.
-private struct DeviceMenuButton: View {
-    @Environment(AppEnvironment.self) private var env
+private struct ToolbarDeviceBadge: View {
+    let session: Session
+    let isLive: Bool
     @Environment(ToastCenter.self) private var toasts
-    @State private var sessions: [Session] = []
-
-    private var viewed: Session? { sessions.first { $0.id == env.viewingSessionId } }
-    private var sections: (connected: [Session], recent: [Session]) {
-        DeviceMenu.sections(sessions: sessions, live: env.live.sessionIds)
-    }
-    private var selection: Binding<Int64?> {
-        Binding(get: { env.viewingSessionId }, set: { env.viewingSessionId = $0 })
-    }
 
     var body: some View {
-        Group {
-            if !sessions.isEmpty {
-                Menu {
-                    Section("Connected") {
-                        if sections.connected.isEmpty {
-                            Text("No device connected")
-                        } else {
-                            Picker("Connected", selection: selection) {
-                                ForEach(sections.connected) { s in
-                                    Text(Self.title(s) + Self.detail(s)).tag(Optional(s.id))
-                                }
-                            }
-                            .pickerStyle(.inline)
-                            .labelsHidden()
-                        }
-                    }
-                    if !sections.recent.isEmpty {
-                        Section("Recent") {
-                            Picker("Recent", selection: selection) {
-                                ForEach(sections.recent) { s in
-                                    Text(Self.title(s) + Self.ended(s)).tag(Optional(s.id))
-                                }
-                            }
-                            .pickerStyle(.inline)
-                            .labelsHidden()
-                        }
-                    }
-                    Divider()
-                    Button("All Sessions…") { env.selectedTab = .sessions }
-                } label: {
-                    label
-                }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .help(viewed.map(Self.fingerprint) ?? "Choose a device")
-                .contextMenu {
-                    if let viewed {
-                        Button("Copy device fingerprint") {
-                            NSPasteboard.general.clearContents()
-                            NSPasteboard.general.setString(Self.fingerprint(viewed), forType: .string)
-                            toasts.success("Copied device fingerprint")
-                        }
-                    }
-                }
-            }
-        }
-        .task {
-            sessions = (try? await env.store.sessions()) ?? []
-            for await change in await env.store.changes() {
-                switch change {
-                case .sessionStarted, .sessionEnded, .sessionDeleted, .sessionUpdated, .sessionsCleared:
-                    sessions = (try? await env.store.sessions()) ?? []
-                default:
-                    break
-                }
-            }
-        }
-    }
-
-    private var label: some View {
         HStack(spacing: 8) {
             Image(systemName: "iphone.gen3")
                 .font(.system(size: 14))
                 .foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 4) {
-                    if env.isLive(env.viewingSessionId) {
+                    if isLive {
                         Circle().fill(.green).frame(width: 6, height: 6)
                     }
-                    Text(viewed.map(Self.title) ?? "No device")
+                    Text(Self.title(session))
                         .font(.system(size: 12, weight: .semibold))
                         .lineLimit(1)
                 }
-                Text(viewed.map(Self.subtitle) ?? "\(env.live.sessionIds.count) connected")
+                Text(Self.subtitle(session))
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.tail)
             }
-            Image(systemName: "chevron.down")
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(.secondary)
         }
         // Matches ConnectionIndicator's chrome — same padding, same
         // solid background — so the two toolbar clouds read as
@@ -665,6 +611,14 @@ private struct DeviceMenuButton: View {
         .padding(.vertical, 5)
         .background(Capsule().fill(Color(.controlBackgroundColor)))
         .contentShape(Capsule())
+        .help(Self.fingerprint(session))
+        .contextMenu {
+            Button("Copy device fingerprint") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(Self.fingerprint(session), forType: .string)
+                toasts.success("Copied device fingerprint")
+            }
+        }
     }
 
     static func title(_ s: Session) -> String {
@@ -680,15 +634,6 @@ private struct DeviceMenuButton: View {
         return parts.joined(separator: " · ")
     }
 
-    static func detail(_ s: Session) -> String {
-        let sub = subtitle(s)
-        return sub.isEmpty ? "" : " — " + sub
-    }
-
-    static func ended(_ s: Session) -> String {
-        s.endedAt.map { " — ended " + $0.formatted(date: .omitted, time: .shortened) } ?? ""
-    }
-
     /// One-line string used by both the help tooltip and the
     /// right-click copy action.
     static func fingerprint(_ s: Session) -> String {
@@ -697,6 +642,79 @@ private struct DeviceMenuButton: View {
         if let d = s.deviceModel { parts.append(d) }
         if let os = s.osVersion { parts.append((s.platform ?? "OS") + " " + os) }
         return parts.joined(separator: " · ")
+    }
+}
+
+/// The Connected pill, and the device switcher behind it (D73): the
+/// connected devices, the recent ones, and a way to all sessions.
+/// Choosing one sets `viewingSessionId`.
+private struct DeviceSwitcher: View {
+    let sessions: [Session]
+    @Environment(AppEnvironment.self) private var env
+
+    private var sections: (connected: [Session], recent: [Session]) {
+        DeviceMenu.sections(sessions: sessions, live: env.live.sessionIds)
+    }
+    /// Plain buttons, not an inline Picker: a Picker bound to the
+    /// selection wrote to it by itself when a device joined the list,
+    /// switching the window away from the viewed device.
+    @ViewBuilder
+    private func choice(_ s: Session, _ text: String) -> some View {
+        Button {
+            env.viewingSessionId = s.id
+        } label: {
+            if s.id == env.viewingSessionId {
+                Label(text, systemImage: "checkmark")
+            } else {
+                Text(text)
+            }
+        }
+    }
+
+    var body: some View {
+        Menu {
+            Section("Connected") {
+                if sections.connected.isEmpty {
+                    Text("No device connected")
+                } else {
+                    ForEach(sections.connected) { s in
+                        choice(s, Self.item(s, suffix: Self.detail(s)))
+                    }
+                }
+            }
+            if !sections.recent.isEmpty {
+                Section("Recent") {
+                    ForEach(sections.recent) { s in
+                        choice(s, Self.item(s, suffix: Self.ended(s)))
+                    }
+                }
+            }
+            Divider()
+            Button("All Sessions…") { env.selectedTab = .sessions }
+        } label: {
+            ConnectionIndicator(state: env.serverState, showsChevron: true)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Switch device")
+    }
+
+    private static func item(_ s: Session, suffix: String) -> String {
+        ToolbarDeviceBadge.title(s) + suffix
+    }
+
+    private static func detail(_ s: Session) -> String {
+        let sub = ToolbarDeviceBadge.subtitle(s)
+        return sub.isEmpty ? "" : " — " + sub
+    }
+
+    /// When it ended, else when it started: a session Beaver never saw
+    /// end (it quit first) has no end time, and a bare repeated name
+    /// wouldn't tell sessions apart.
+    private static func ended(_ s: Session) -> String {
+        s.endedAt.map { " — ended " + $0.formatted(date: .abbreviated, time: .shortened) }
+            ?? " — started " + s.startedAt.formatted(date: .abbreviated, time: .shortened)
     }
 }
 
@@ -783,6 +801,7 @@ private struct ConnectionPlaceholder: View {
 
 private struct ConnectionIndicator: View {
     let state: WSServer.State
+    var showsChevron = false
 
     var body: some View {
         HStack(spacing: 8) {
@@ -790,6 +809,11 @@ private struct ConnectionIndicator: View {
                 .fill(color)
                 .frame(width: 8, height: 8)
             Text(label).font(.caption)
+            if showsChevron {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 5)

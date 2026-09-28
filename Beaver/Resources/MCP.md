@@ -70,7 +70,7 @@ or a release):
 9. Turn **Agent Access (MCP)** off in the app menu: the `curl` above now fails
    to connect.
 10. Connect two apps (two simulators, or a simulator and a phone): both
-   appear in the toolbar device menu, and `beaver_status` lists both.
+   appear in the menu behind the toolbar's Connected pill, and `beaver_status` lists both.
 11. Report problems with the Beaver version (Beaver → About) and the Agent
    panel's **Copy** output.
 

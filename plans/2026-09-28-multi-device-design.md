@@ -103,7 +103,11 @@ viewing).
 
 ## 5. UI
 
-### 5.1 Device menu (toolbar, leading)
+### 5.1 Device menu (toolbar)
+
+> **Changed during implementation (user request):** the menu lives behind
+> the centre Connected pill; the leading badge stays, read-only, naming the
+> viewed device.
 
 Replaces `ToolbarDeviceBadge` in the same capsule chrome, with a chevron.
 
