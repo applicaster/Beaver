@@ -687,7 +687,7 @@ private struct StaleStorageBanner: View {
 
 /// `.*` switch. Turns red rather than empty when the pattern is broken,
 /// so a half-typed expression reads as "not finished" and not "no hits".
-private struct RegexToggle: View {
+struct RegexToggle: View {
     @Binding var isOn: Bool
     let isInvalid: Bool
 
