@@ -56,6 +56,7 @@ When releasing:
   and requests whose status class or median duration changed. Click a
   line to open that event or request. Storage and App Info comparisons
   come later. Agents: new tool `sessions_compare(a, b, sections?)`.
+- **Info tab**: App & Device Info for the viewed session, as in zapp-support — app, SDK and QuickBrick versions, Zapp ids, the layout's screens, cell styles and plugins (from the app's config files on Zapp's bucket), the device, language, country and advertising id. Every value says where it came from; click to copy. **Copy Fingerprint** now also gives the device id, bundle id, session and time. App menu → **Zapp Access Token…** adds the Zapp CMS's build parameters (your own token, kept in the keychain). Agents: `app_info`, `ui_show(tab: "info")`.
 - Drop a session file (`.json`) or HAR anywhere on the window to import
   it, the same as Import. A file Beaver can't open now says so instead of
   doing nothing.

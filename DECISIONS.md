@@ -2896,3 +2896,13 @@ won't decode, and the feed starts unfiltered once.
   path (`env.open`), like a journal link. The Sessions list no longer
   jumps to the Log feed when the viewed session changes while another tab
   is already showing (a Compare link to a request opens the Network tab).
+## D79. App & Device Info, from storage, config files and the person's Zapp token
+
+**Status:** Accepted (2026-09-28).
+
+- **Decision:** an Info tab and `app_info` read one report (`AppInfoReport`): storage selectors ported from zapp-support's `deviceAppInfo.ts` (same alias lists, a source on every value), launch-time JSON (rivers, layout, plugin configurations) from `assets-secure.applicaster.com` only, and screens visited from GA/Navigator logs when no config lists them. Config URLs come from the CMS, then captured requests, then storage values, then Zapp's path `accounts/<account>/apps/<bundle>/<store>/<version>/rivers/rivers.json` (seen in zapptool's build_params).
+- **CMS:** `build_params` with the person's own Zapp token (as `zapptool --set-zapp-token`), set from the app menu and kept in the login keychain. Never a shared token in the app.
+- **Why:** zapp-support has these tabs; Beaver had the data but no view. zapp-support keeps its token on its server, which a desktop app can't.
+- **Alternatives:** no token (no CMS fields, fewer exact URLs); reading zapptool's saved token (a credential Beaver wasn't given).
+- Config downloads are cached for the run; Reload empties the cache. The tab rebuilds itself only until the first storage arrives.
+

@@ -11,7 +11,7 @@ public enum BeaverTools {
         let groups: [[MCPTool]] = [
             StatusTools.all, SessionTools.all, LogTools.all, NetworkTools.all, StorageTools.all,
             StateTools.all, CommandTools.all, ToolboxTools.all, WatchTools.all, JournalTools.all, UITools.all,
-            SchemeTools.all,
+            SchemeTools.all, InfoTools.all,
         ]
         return groups.flatMap { $0 } + [GuideTool.tool]
     }

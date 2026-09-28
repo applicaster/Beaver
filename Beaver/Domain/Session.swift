@@ -68,4 +68,24 @@ public struct Session: Identifiable, Hashable, Sendable {
     }
 
     public var isActive: Bool { endedAt == nil && source == .live }
+
+    /// `River 2.7 · iPhone15,2 · iOS 18.6`, each piece skipped if missing.
+    public var contextLine: String {
+        var parts: [String] = []
+        if let n = appName { parts.append(n + (appVersion.map { " \($0)" } ?? "")) }
+        if let d = deviceModel { parts.append(d) }
+        if let os = osVersion { parts.append((platform ?? "OS") + " " + os) }
+        return parts.joined(separator: " · ")
+    }
+
+    /// What Copy device fingerprint puts on the clipboard for a ticket;
+    /// the same lines as zapp-support's Copy fingerprint (D79).
+    public func fingerprint(capturedAt: Date) -> String {
+        [contextLine.isEmpty ? "Unknown device" : contextLine,
+         deviceUID.map { "Device id: \($0)" },
+         appPackage.map { "Bundle id: \($0)" },
+         "Beaver session: #\(id)",
+         "Captured: \(capturedAt.ISO8601Format())"]
+            .compactMap { $0 }.joined(separator: "\n")
+    }
 }

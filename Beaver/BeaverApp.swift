@@ -128,6 +128,10 @@ struct BeaverApp: App {
                     toasts.success("Copied \(url)")
                 }
                 .keyboardShortcut("c", modifiers: [.command, .shift])
+                // D79: the Info tab asks the Zapp CMS with the person's token.
+                Button("Zapp Access Token…") {
+                    if let changed = ZappTokenPrompt.run() { toasts.success(changed) }
+                }
                 Divider()
                 Picker("Delete Sessions Older Than", selection: $retentionDays) {
                     ForEach(SessionRetention.allCases, id: \.self) { Text($0.title).tag($0.rawValue) }
