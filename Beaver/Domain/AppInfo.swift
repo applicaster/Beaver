@@ -296,14 +296,18 @@ public enum AppInfo {
     public static func cellStyles(fromLayout json: Any, known: [CellStyle]) -> [CellStyle] {
         var order: [String] = []
         var usedIn: [String: [String]] = [:]
-        for screen in list((json as? [String: Any])?["screens"]) {
-            for component in list(screen["ui_components"]) {
-                guard let id = (component["styles"] as? [String: Any])?["cell_plugin_configuration_id"] as? String,
-                      !id.isEmpty else { continue }
-                if usedIn[id] == nil { order.append(id); usedIn[id] = [] }
-                let name = "\(screen["name"] ?? "")"
-                if !usedIn[id]!.contains(name) { usedIn[id]!.append(name) }
+        // Groups hold their own ui_components, so walk them all.
+        func walk(_ components: [[String: Any]], screen: String) {
+            for component in components {
+                if let id = (component["styles"] as? [String: Any])?["cell_plugin_configuration_id"] as? String, !id.isEmpty {
+                    if usedIn[id] == nil { order.append(id); usedIn[id] = [] }
+                    if !usedIn[id]!.contains(screen) { usedIn[id]!.append(screen) }
+                }
+                walk(list(component["ui_components"]), screen: screen)
             }
+        }
+        for screen in list((json as? [String: Any])?["screens"]) {
+            walk(list(screen["ui_components"]), screen: "\(screen["name"] ?? "")")
         }
         return order.map { id in
             CellStyle(id: id, plugin: known.first { $0.id == id }?.plugin
@@ -315,11 +319,15 @@ public enum AppInfo {
         (json as? [String: Any])?["name"] as? String
     }
 
+    /// Zapp's file is `[{plugin: {identifier, manifest_version, …}, configuration_json}]`;
+    /// flat entries are read too.
     public static func plugins(fromConfigurations json: Any) -> [Plugin] {
-        list(json).compactMap { p in
+        list(json).compactMap { entry in
+            let p = entry["plugin"] as? [String: Any] ?? entry
             guard let id = [p["identifier"], p["plugin_identifier"], p["id"]].lazy.compactMap({ $0 as? String }).first
             else { return nil }
-            return Plugin(id: id, version: [p["version"], p["plugin_version"]].lazy.compactMap { $0 as? String }.first)
+            return Plugin(id: id, version: [p["manifest_version"], p["dependency_version"], p["version"], p["plugin_version"]]
+                .lazy.compactMap { $0 as? String }.first)
         }
     }
 

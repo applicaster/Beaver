@@ -78,6 +78,22 @@ struct AppInfoTests {
         #expect(AppInfo.plugins(fromConfigurations: pc) == [AppInfo.Plugin(id: "hero", version: "2.1")])
     }
 
+    @Test("Zapp's real shapes: plugins nested under plugin, cell styles inside groups")
+    func realShapes() throws {
+        let pc = try JSONSerialization.jsonObject(with: Data(#"""
+        [{"plugin":{"identifier":"quick-brick-app-rater","manifest_version":"9.1.2","dependency_version":"9.1.2"},"configuration_json":{}},
+         {"plugin":{"identifier":"di_manager_call","manifest_version":"0.16.0"},"configuration_json":{}}]
+        """#.utf8))
+        #expect(AppInfo.plugins(fromConfigurations: pc) == [AppInfo.Plugin(id: "quick-brick-app-rater", version: "9.1.2"),
+                                                            AppInfo.Plugin(id: "di_manager_call", version: "0.16.0")])
+        let layout = try JSONSerialization.jsonObject(with: Data(#"""
+        {"id":"l1","api_version":"2","screens":[{"id":"s1","name":"Home","type":"general","ui_components":[
+          {"component_type":"group","styles":{},"ui_components":[{"styles":{"cell_plugin_configuration_id":"c9"}}]}]}]}
+        """#.utf8))
+        #expect(AppInfo.cellStyles(fromLayout: layout, known: []) == [AppInfo.CellStyle(id: "c9", plugin: "used in: Home")])
+        #expect(AppInfo.layoutName(layout) == nil)
+    }
+
     @Test("Visited screens from GA and Navigator logs, once each")
     func screensFromLogs() {
         let screens = AppInfo.screens(fromLogs: [
