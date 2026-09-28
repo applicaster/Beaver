@@ -18,6 +18,42 @@ snapshots and network requests from the mobile SDK over WebSocket.
 - Docs: `DECISIONS.md` (numbered decisions, source of truth),
   `ARCHITECTURE.md`, `PROTOCOL.md` (wire protocol with the SDK).
 
+## kb-applicaster — every change updates it
+
+People and agents outside this repo learn Beaver from the **kb-applicaster**
+knowledge base (MCP server `kb-applicaster`), category `beaver`:
+`beaver-overview` (what it is, UI, download link), `beaver-agent-runbook`
+(an agent installs, starts, connects and uses Beaver on its own),
+`beaver-mcp-agent-access` (tools, rules, recipes), `beaver-session-file-format`,
+`beaver-development`. If the KB is stale, agents use Beaver wrong.
+
+**Any change to Beaver updates kb-applicaster in the same piece of work**:
+features, UI, MCP tools, setup and connect steps, ports, protocol, file
+format, release process.
+
+0. Write articles the way the **kb-self** knowledge base (MCP server
+   `kb-self`, WikiKnowledge's own manual) says: read `ai-interaction-guide`
+   and the `markup-conventions` category (frontmatter, `[[wiki-links]]` —
+   no `#anchors`, human/ai blocks, category workflow) before the first edit.
+   Existing `beaver-*` articles show the house style.
+1. Find the affected articles (`search`, `get_category_members("beaver")`)
+   and change them with `update_article` (patches for small edits). Say what
+   and how to use it; link repo docs for detail instead of copying code.
+2. A new topic is a new leaf in category `beaver`; then rewrite the
+   `<!-- ai:start -->` block of `beaver` (and of `quickbrick-debugging-ops`
+   if the entry points change). Never edit `<!-- human:... -->` blocks.
+3. The KB is live, not versioned: name the version that brings a change
+   ("Beaver 4.5.0 or later") so agents on an older build know to update.
+4. No `kb-applicaster` tools in the session? Tell the user and write in the
+   PR what the KB needs; never skip it silently.
+5. Agents install Beaver from the KB's download links:
+   `https://github.com/applicaster/Beaver/releases/latest/download/Beaver.zip`
+   (the `Beaver.zip` asset `.circleci/config.yml` publishes next to
+   `Beaver-X.Y.Z.zip`) and the appcast
+   `https://applicaster.github.io/Beaver/appcast.xml` for the latest version.
+   A change to asset names, the release host or the appcast updates
+   `beaver-agent-runbook`, `beaver-overview` and the `beaver` category.
+
 ## Export / import files — shared with zapp-support
 
 Beaver and zapp-support (the web logger, `applicaster/zapp-support`) write
