@@ -40,7 +40,7 @@ answers without passing the ping payload to the decoder.
 ```jsonc
 // Generic envelope:
 {
-  "type": "<one of: handshake | event | storage | network | command>",
+  "type": "<one of: handshake | event | storage | network | command | mcp>",
   ...                                 // type-specific fields
 }
 ```
@@ -170,6 +170,25 @@ remove the event-feed pollution from the discovery side-channel.
 3. **Command discovery** — what does the SDK actually return in response
    to `cmdlist`? **(inferred to be an event-shaped message, but format
    undocumented.)**
+
+### 3.3 `mcp` (server → client)
+
+Beaver's requests to a connected app's own MCP tools (D75), sent over the
+same socket as `handshake` and `command`, through `DeviceMCPClient`.
+
+```json
+{"type": "mcp", "payload": {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+ "params": {"name": "storage.set", "arguments": {"key": "volume", "value": "3"}}}}
+```
+
+- `payload` — a JSON-RPC 2.0 request. The envelope carries no id of its own;
+  Beaver correlates the reply by the `id` inside `payload`.
+- Before its first request on a connection, Beaver sends `initialize` once,
+  lazily (5 s timeout), then the `notifications/initialized` notification.
+  If the app never replies to `initialize`, Beaver treats it as having no
+  toolboxes until it reconnects.
+- Methods Beaver sends: `initialize`, `tools/list` (5 s timeout), `tools/call`
+  (20 s timeout — the device's own React tools time out at 15 s).
 
 ---
 
@@ -338,6 +357,47 @@ with `", "` and derives `startTime` as the event's end time minus its
 recorded elapsed duration, since `NetworkRequestLogger` only captures
 elapsed time, not a start timestamp.
 
+### 4.4 `handshake` (client → server)
+
+Sent once per connection, right after the socket opens (before any `event` /
+`storage` / `network` frame).
+
+```json
+{"type": "handshake", "deviceId": "<installation uuid, falls back to model>",
+ "deviceName": "Apple iPhone15,2", "model": "iPhone15,2", "platform": "iOS 18.6",
+ "appPackage": "com.example.app", "version": "11.0.1"}
+```
+
+- All six fields are optional; an empty string counts as missing.
+- Beaver stores `deviceId` as `session.device_uid`, `appPackage` as
+  `session.app_package`, `model` as `device_model`, `version` as
+  `app_version`; `platform` (`"iOS 18.6"`) is split on the first space into
+  `platform` / `os_version`. Each is written through `COALESCE`, so the
+  `applicaster.v2` storage harvest, which arrives later, still wins where it
+  has a value.
+- `device_uid` identifies the device across a restart (D77); D73's
+  fingerprint heuristic is the fallback for a connection without one.
+- Sent by iOS and Android's native WebSocket sink (#2848). The JS-only sink
+  (`src/sinks/socket.ts`) doesn't send it, so such apps have no device id
+  and no toolboxes (§4.5) in Beaver.
+
+### 4.5 `mcp` (client → server)
+
+The app's replies to Beaver's requests (§3.3), same envelope, JSON-RPC 2.0
+in `payload`:
+
+```json
+{"type": "mcp", "payload": {"jsonrpc": "2.0", "id": 1, "result": {"content": [...]}}}
+```
+
+- A frame with no `type` but a `jsonrpc` key is read as `mcp` too (the SDK
+  accepts bare JSON-RPC; Beaver never sends one, but this avoids a synthetic
+  "unknown type" event if one ever arrives).
+- `mcp` frames are not stored as log events.
+- `DeviceMCPClient.receive` ignores a JSON-RPC *request* from the app (a
+  message carrying its own `method`) — Beaver doesn't answer it.
+- The device drops frames over 5 MB.
+
 ---
 
 ## 5. Encoding rules
@@ -438,6 +498,9 @@ Tracked for follow-up with the SDK team:
 5. **§4.2** — What's the real shape of storage `data` values?
 6. **§4.2** — Are there namespaces beyond session/local/secure?
 7. **§4.2** — Is storage always a full snapshot?
+8. **§3.3/§4.5** — Toolbox descriptions are not in `tools/list` (toolboxes
+   are named only by prefix). An `_meta.toolbox` description per tool would
+   let Beaver describe them.
 
 Answering these does **not** block scaffolding. The decoder can be
 written to tolerate today's known shapes; the questions sharpen v2.

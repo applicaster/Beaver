@@ -326,6 +326,12 @@ IPv4 otherwise).
   info, subsystem: "loggernext.transport") so the developer sees them in
   context.
 
+**`DeviceMCPClient` (D75).** One per connection, created on connect and
+closed on disconnect by `BeaverApp.bootstrap`, held in
+`AppEnvironment.mcpClients`. Sends JSON-RPC in `mcp` frames through
+`WSServer.send(data:to:)`, matches replies by id, times out, initializes
+lazily. Tools reach it through `DeviceLink.mcp`.
+
 ---
 
 ## 7. Wire protocol (consumer view)

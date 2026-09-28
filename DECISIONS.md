@@ -2583,7 +2583,7 @@ won't decode, and the feed starts unfiltered once.
   can't stop an SDK from reconnecting — that comes back as a new session.
 - **Following a restart (D66)** with several devices: same fingerprint (app,
   model, platform), else the one session that just came up. Two identical
-  builds look alike until the SDK sends a device id.
+  builds look alike until the SDK sends a device id — it does; see D77.
 - **Alternatives:** a separate selected-device state (two states to sync); a
   merged feed (rejected in D2).
 
@@ -2626,3 +2626,48 @@ won't decode, and the feed starts unfiltered once.
   tied to a session, so no view model: the view binds `env` directly.
 - **To change:** `SchemeLink.url` together with zapp-support's generator,
   and the expected URLs in `SchemeToolsTests.urls`.
+
+## D75. Apps' toolboxes through a gateway; Beaver is device "beaver"
+
+**Status:** Accepted (2026-09-28). Spec: plans/2026-09-28-device-toolboxes-design.md.
+
+- **Decision:** `toolboxes_list` / `tools_call` reach any app's MCP tools
+  over its WebSocket; Beaver's `tools/list` stays stable; Beaver's own tools
+  are device `"beaver"` (`logs_query` ↔ `logs.query`). `"beaver"` leaves out
+  Beaver's destructive tools (`sessions_delete`, `storage_delete`,
+  `filters_delete`, …): `toolboxes_list(deviceId: "beaver")` doesn't list
+  them, and `tools_call(deviceId: "beaver", …)` refuses one with the direct
+  call to make instead — `tools_call` has no destructive toast and no
+  `destructiveHint`, so those stay reachable only by calling the tool itself.
+- **Why:** the user wants one set of commands for Beaver and apps; MCP
+  clients cache `tools/list` and ignore `list_changed`; device tools differ
+  per app.
+- **Alternatives:** merge device tools into `tools/list` (dynamic list, name
+  clashes, renaming Beaver's tools breaks agents); only the gateway, Beaver's
+  tools behind it too (breaks agents, schemas unseen).
+
+## D76. One default device for agents, kept by the SDK's device id
+
+**Status:** Accepted (2026-09-28). Spec: plans/2026-09-28-device-toolboxes-design.md.
+
+- **Decision:** `devices_set_default` or the popover toggle sets it; an
+  omitted `deviceId` on a device tool then uses it. Explicit `deviceId` wins,
+  then the default, then the only connected device, else an error. A default
+  that isn't connected is an error, never a silent fallback. Kept in memory
+  only.
+- **Why:** agreed with the user; the id survives `app.restart` because it's
+  kept by device uid, not session id.
+- **Alternatives:** the viewed device (agent and user move each other); one
+  default per MCP connection (needs session ids through `ToolContext`, can't
+  be shown in the UI).
+
+## D77. Beaver reads the client handshake
+
+**Status:** Accepted (2026-09-28). Spec: plans/2026-09-28-device-toolboxes-design.md.
+
+- **Decision:** `device_uid` and `app_package` are stored on the session
+  from the SDK's `handshake` frame (PROTOCOL.md §4.4). Following a restart
+  matches on `device_uid` first; D73's fingerprint heuristic is the fallback
+  for a connection without one.
+- **Why:** the SDK already sent a stable id that Beaver ignored.
+- **Alternatives:** keep the heuristic (two identical builds look alike).

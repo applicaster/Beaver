@@ -201,6 +201,12 @@ public enum Toolboxes { static func group(_ tools: [DeviceTool]) -> [Toolbox] } 
   `ToolContext`. The dispatcher journals the `tools_call`; its summary is the
   inner tool's summary. Gateway tools can't be called through `"beaver"`, so
   there is no recursion.
+- **Destructive tools are left out.** `toolboxes_list(deviceId: "beaver")`
+  doesn't list a tool whose `kind` is `.destructive` (`sessions_delete`,
+  `storage_delete`, `filters_delete`, …), and `tools_call(deviceId: "beaver",
+  name: …)` refuses one, pointing at the direct call instead —
+  `tools_call` has no destructive toast and no `destructiveHint`, so those
+  stay reachable only by calling the tool itself.
 - `"beaver"` is never the default and never needs to be connected.
 
 ### 5.3 Changed
