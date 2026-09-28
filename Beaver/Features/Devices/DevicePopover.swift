@@ -34,9 +34,14 @@ struct DevicePopover: View {
                               ? "Another session of this device is the default"
                               : "Agents' device tools use this app when a call names no device")
                     Spacer()
-                    Button("Disconnect", role: .destructive) {
+                    Button(role: .destructive) {
                         Task { await env.disconnect(session.id) }
+                    } label: {
+                        Label("Disconnect", systemImage: "eject")
                     }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.red)
+                    .help("Disconnect this device")
                 }
                 Divider()
                 toolboxes
@@ -168,10 +173,13 @@ struct DevicePopover: View {
                     get: { openToolbox == box.name },
                     set: { openToolbox = $0 ? box.name : nil }
                 )) {
+                    // Full width, leading: a toolbox with short descriptions
+                    // was centred, so open lists looked different.
                     VStack(alignment: .leading, spacing: 8) {
                         ForEach(box.tools, id: \.name) { ToolRow(tool: $0) }
                     }
                     .padding(.leading, 4)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 } label: {
                     Text("\(box.name) · \(box.tools.count) tool\(box.tools.count == 1 ? "" : "s")")
                 }

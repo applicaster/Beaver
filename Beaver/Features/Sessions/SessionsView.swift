@@ -216,8 +216,7 @@ struct SessionsView: View {
         SessionRow(
             item: item,
             isLive: isLiveSession(item),
-            onRequestDelete: { pendingDelete = item },
-            onDisconnect: { Task { await env.disconnect(item.id) } }
+            onRequestDelete: { pendingDelete = item }
         )
     }
 
@@ -275,7 +274,6 @@ private struct SessionRow: View {
     let item: SessionListItem
     let isLive: Bool
     let onRequestDelete: () -> Void
-    let onDisconnect: () -> Void
 
     @State private var isHovered = false
 
@@ -318,20 +316,8 @@ private struct SessionRow: View {
 
             Spacer(minLength: 8)
 
-            // A live session can't be deleted, but its device can be
-            // disconnected (D73): always shown, so it's easy to find.
-            if isLive {
-                Button(role: .destructive) {
-                    onDisconnect()
-                } label: {
-                    Label("Disconnect", systemImage: "eject")
-                        .font(.caption.weight(.semibold))
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(.red)
-                .controlSize(.small)
-                .help("Disconnect this device")
-            }
+            // Disconnect lives in the details pane (and the right-click
+            // menu); a second one in the row was one too many.
 
             // Reserve space always so hovering doesn't reflow the
             // row. Becomes visible + hit-testable only while hovered,
