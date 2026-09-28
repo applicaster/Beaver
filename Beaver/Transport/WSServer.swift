@@ -284,6 +284,13 @@ public actor WSServer {
         }
     }
 
+    /// Closes one client (the Disconnect button, `devices_disconnect`).
+    /// Its session ends through the usual `.cancelled` path. An SDK that
+    /// reconnects on its own comes back as a new connection.
+    public func disconnect(_ connection: UUID) {
+        connections[connection]?.cancel()
+    }
+
     // MARK: - Outbound
 
     /// Send a command frame to one client. No-op when that connection is gone.

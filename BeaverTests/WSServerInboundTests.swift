@@ -104,4 +104,45 @@ struct WSServerInboundTests {
         b.cancel(with: .normalClosure, reason: nil)
         await server.stop()
     }
+
+    @Test("disconnect(_:) closes one client and leaves the other connected")
+    func disconnectOne() async throws {
+        let server = WSServer(port: 19_085)
+        try await server.start()
+        _ = await race(timeout: .seconds(10)) {
+            for await state in server.state { if case .listening = state { return } }
+        }
+        func connect() async throws -> URLSessionWebSocketTask {
+            let c = URLSession.shared.webSocketTask(with: URL(string: "ws://127.0.0.1:19085")!)
+            c.resume()
+            _ = try await c.receive() // handshake
+            return c
+        }
+        let a = try await connect()
+        let b = try await connect()
+        let ids = await race(timeout: .seconds(10)) { () -> [UUID] in
+            var ids: [UUID] = []
+            for await item in server.inbound {
+                if case .connected(let id) = item { ids.append(id) }
+                if ids.count == 2 { break }
+            }
+            return ids
+        } ?? []
+        guard ids.count == 2 else { Issue.record("expected two connections, got \(ids)"); return }
+
+        await server.disconnect(ids[0])
+        let gone: UUID? = await race(timeout: .seconds(10)) { () -> UUID? in
+            for await item in server.inbound {
+                if case .disconnected(let id) = item { return id }
+            }
+            return nil
+        } ?? nil
+        #expect(gone == ids[0])
+        await #expect(throws: (any Error).self) { _ = try await a.receive() }
+
+        await server.send(command: "cmdlist", to: ids[1])
+        if case .string(let text) = try await b.receive() { #expect(text.contains("cmdlist")) }
+        b.cancel(with: .normalClosure, reason: nil)
+        await server.stop()
+    }
 }
