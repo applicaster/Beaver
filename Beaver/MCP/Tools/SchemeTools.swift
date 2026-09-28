@@ -19,13 +19,20 @@ enum SchemeTools {
         run: run
     )
 
+    /// Each template and what it does (the form shows the same text),
+    /// then how it's picked when omitted.
+    private static let templateHelp: String = {
+        let each = SchemeLink.Template.allCases.map { "\($0.rawValue): \($0.summary)" }
+        return each.joined(separator: " ")
+            + " Default screen-type. Omitted: follows the keys you pass (linkUrl → web-page, layoutId → layout, xray keys → xray, host → custom)."
+    }()
+
     /// Typed on its own: as one expression with the tool the type checker
     /// times out (Xcode 26.2 on CI).
     private static let properties: [String: JSON] = [
             "mode": ToolSchema.string("mobile (myapp://…, default) or web (index.html?…: open's params on Vizio, layout on every web platform).",
                                       oneOf: SchemeLink.Mode.allCases.map(\.rawValue)),
-            "template": ToolSchema.string("screen-type (type + id, default), feed-content (feedUrl + id or position), direct-screen (screenId), present (feedUrl, screenId, id, resumeTime), web-page (linkUrl), layout (layoutId), xray (xrayAction), reset-uuid, external-account, custom (host + params). Omitted: follows the keys you pass (linkUrl → web-page, layoutId → layout, xray keys → xray, host → custom).",
-                                          oneOf: SchemeLink.Template.allCases.map(\.rawValue)),
+            "template": ToolSchema.string(templateHelp, oneOf: SchemeLink.Template.allCases.map(\.rawValue)),
             "scheme": ToolSchema.string("Mobile: the app's URL scheme without ://. Omitted: the app's own, read from the session's storage; myapp when it isn't there."),
             "sessionId": ToolSchema.integer("Session whose storage gives the scheme. Omitted: the live session (with several devices, the viewed one if live, else the newest), else the viewed one, else the most recent."),
             "baseUrl": ToolSchema.string("Web: the web app's index.html URL."),
@@ -332,7 +339,7 @@ enum SchemeTools {
     /// The fields that go into the link, in order.
     static func fields(_ link: SchemeLink) -> [(String, String)] {
         let template = link.effectiveTemplate
-        var f: [(String, String)] = [("mode", link.mode.rawValue), ("template", template.rawValue)]
+        var f: [(String, String)] = [("mode", link.mode.rawValue), ("template", template.rawValue), ("does", template.summary)]
         f.append(link.mode == .mobile ? ("scheme", link.scheme) : ("baseUrl", link.baseURL))
         func bool(_ v: Bool?) -> String { v.map { $0 ? "true" : "false" } ?? "" }
         let used: [(String, String)] = switch template {

@@ -118,6 +118,7 @@ struct SchemeToolsTests {
         #expect(r.summary == "Link: zapp://open?screen_id=HOME")
         #expect(r.structured["url"] == "zapp://open?screen_id=HOME")
         #expect(r.structured["template"] == "direct-screen")
+        #expect(r.structured["does"]?.string == SchemeLink.Template.directScreen.summary)
         #expect(fake.changes.isEmpty)
         #expect(fake.copied.isEmpty)
         #expect(r.structured["copied"] == false)

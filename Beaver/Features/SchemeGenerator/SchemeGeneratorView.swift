@@ -68,6 +68,10 @@ struct SchemeGeneratorView: View {
                         Text($0.title).tag($0)
                     }
                 }
+                Text(link.wrappedValue.effectiveTemplate.summary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
                 if link.wrappedValue.mode == .web {
                     Text("Web links open a screen on Vizio; a layout switch works on every web platform.")
                         .font(.caption)
@@ -75,6 +79,8 @@ struct SchemeGeneratorView: View {
                 }
             }
 
+            // Reset Device ID and External Account take no fields.
+            if ![.resetUUID, .externalAccount].contains(link.wrappedValue.effectiveTemplate) {
             Section(link.wrappedValue.effectiveTemplate.title) {
                 switch link.wrappedValue.effectiveTemplate {
                 case .screenType:
@@ -140,16 +146,13 @@ struct SchemeGeneratorView: View {
                     Text("The app keeps the log level and shortcut only when the floating button is set too.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                case .resetUUID:
-                    Text("The app asks, then makes a new device ID and reloads.")
-                        .foregroundStyle(.secondary)
-                case .externalAccount:
-                    Text("Opens the app's external account link (iOS, where payments are allowed).")
-                        .foregroundStyle(.secondary)
+                case .resetUUID, .externalAccount:
+                    EmptyView()
                 case .custom:
                     TextField("Host", text: link.host, prompt: Text("plugin"))
                         .help("A plugin's host, or plugin with pluginIdentifier=… below")
                 }
+            }
             }
 
             Section("Optional parameters") {

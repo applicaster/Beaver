@@ -56,6 +56,22 @@ public struct SchemeLink: Sendable, Equatable {
             }
         }
 
+        /// What a link of this kind does in the app, for the form and agents.
+        public var summary: String {
+            switch self {
+            case .screenType: "Opens the screen the app's layout maps to a content type, e.g. the movie screen; with an ID, for that item."
+            case .feedContent: "Loads a feed and opens one of its entries — by ID or position, else the first — on that entry's screen."
+            case .directScreen: "Opens a screen of the app's layout by its screen ID."
+            case .present: "Shows a feed on a screen, or one entry of it, optionally resuming playback at a time."
+            case .webPage: "Opens a web page inside the app, optionally on a given screen and with the navigation bar."
+            case .layout: "Reloads the app with another layout (rivers configuration) and goes to its home screen."
+            case .xray: "X-Ray, iOS: opens the logger, connects remote assistance (e.g. to this Beaver), shares or exports logs, or changes logger settings."
+            case .resetUUID: "Asks the user, then gives the device a new ID and reloads the app."
+            case .externalAccount: "Opens the app's external account link (iOS, where in-app payments are allowed)."
+            case .custom: "Any other host: a plugin's own, or the native plugin?pluginIdentifier=… — add its parameters below."
+            }
+        }
+
         /// The URL's host; `custom` uses `SchemeLink.host`.
         public var host: String {
             switch self {
