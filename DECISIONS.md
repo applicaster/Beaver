@@ -2851,3 +2851,48 @@ won't decode, and the feed starts unfiltered once.
   only the last two reports in memory, like the change flash (no past or
   imported sessions, nothing for agents); leave JSON text as one opaque
   value (the changed field is what a person looks for in a user object).
+## D81. Compare two sessions by pattern, in SQL
+
+**Status:** Accepted (2026-09-28).
+
+- **Decision:** Sessions → **Compare with** and `sessions_compare(a, b)`
+  share `SessionCompare` (BeaverCore). A is the session that works, B the
+  one that fails. Sections:
+  - **Logs.** Lines are grouped by subsystem and pattern: the first 300
+    characters with URL query values → `<*>`, UUIDs → `<uuid>`, dates and
+    clock times → `<time>`, `0x…` and hex words of 8+ with a digit and a
+    letter → `<hex>`, any other number (`118`, `1.5`, `4.6.0`, `1,000`) →
+    `<n>`. Patterns only in one side, with their count, worst level and
+    first event. Warnings and errors per subsystem A vs B, the subsystems
+    that differ, increases first.
+  - **Network.** Requests are keyed by method + host + path; the query is
+    dropped and path segments that are ids (all digits, UUID or hex of 8+,
+    or an opaque token of 16+ with a digit) become `:id`; `v2` stays.
+    Keys only in one side; keys whose set of status classes differs (2xx →
+    4xx/5xx/failed, or back); keys whose median duration is ×2 apart and
+    at least 100 ms apart (both ends: 80 → 170 ms isn't news, 120 → 900 ms
+    is; a request that got much faster is reported too, since it may have
+    stopped doing its work).
+  - **Storage** (D80) and **App Info** (D79) are sections in
+    `SessionCompare.Section` that `run` doesn't fill yet: asked for, they
+    come back in `pending`, the sheet shows a placeholder and the tool
+    says "not compared yet". Each lands by filling its field in `run`.
+- **Why:** "works on 4.5, not on 4.6" is the most common support question,
+  and eyeballing two 100k-line sessions finds nothing: every line differs
+  in its numbers.
+- **Speed:** grouping runs in SQLite. Identical lines are grouped first,
+  then `BEAVER_PATTERN()` (a Swift SQL function, a byte scanner) runs once
+  per distinct line: 2 × 100k all-distinct events in ~1.6 s in a debug
+  build, far less when lines repeat. At most 20 000 patterns per session
+  are read, worst level and most frequent first; past that the result says
+  it's capped. Network compares the parsed entries in memory, as
+  `network_query` does. The tool prints 20 rows per list by default
+  (`limit`, max 200) and gives the full counts.
+- **Alternatives:** a regex normaliser (15 µs a line, 3 s for 200k);
+  normalising in Swift over every event (no SQL grouping of duplicates);
+  a timeline diff aligning the two sessions (order differs run to run, so
+  it drowns in noise); diffing message text exactly (every number differs).
+- Links: each line opens its first event or request through `ui_show`'s
+  path (`env.open`), like a journal link. The Sessions list no longer
+  jumps to the Log feed when the viewed session changes while another tab
+  is already showing (a Compare link to a request opens the Network tab).

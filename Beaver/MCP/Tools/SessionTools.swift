@@ -8,7 +8,7 @@
 import Foundation
 
 enum SessionTools {
-    static let all = [importFile, exportFile, delete]
+    static let all = [importFile, exportFile, delete, compare]
 
     static func requiredPath(_ args: ToolArguments, example: String) throws -> URL {
         guard let raw = try args.string("path").flatMap(ToolContext.trimmedNonEmpty) else {
