@@ -22,6 +22,25 @@ struct LogFeedView: View {
 
 // MARK: - Content
 
+/// The feed couldn't be read from the store; what's on screen may be stale.
+private struct LoadErrorBar: View {
+    let message: String
+    let retry: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+            Text("Couldn't load the feed: \(message)")
+                .font(.caption).lineLimit(2).textSelection(.enabled)
+            Spacer()
+            Button("Retry", action: retry)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(Color.orange.opacity(0.12))
+    }
+}
+
 private struct LogFeedContent: View {
     @Bindable var vm: LogFeedViewModel
 
@@ -32,6 +51,10 @@ private struct LogFeedContent: View {
                 || vm.filter.chipCount(for: .category) > 0 {
                 Divider()
                 ActiveChipsBar(vm: vm)
+            }
+            if let error = vm.loadError {
+                Divider()
+                LoadErrorBar(message: error) { vm.retryLoad() }
             }
             Divider()
             HSplitView {

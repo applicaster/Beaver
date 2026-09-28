@@ -149,6 +149,12 @@ extension AppEnvironment: DeviceLink {
         await server.send(command: command, to: connection)
     }
 
+    /// `cmdlist` for the command-help popover; its reply skips the Log feed.
+    func sendQuietCmdlist(to sessionId: Int64) async {
+        live.expectQuietCmdlist(for: sessionId)
+        await send(command: "cmdlist", to: sessionId)
+    }
+
     nonisolated public func disconnect(_ sessionId: Int64) async {
         guard let connection = await MainActor.run(body: { self.live.connection(for: sessionId) }) else { return }
         await server.disconnect(connection)

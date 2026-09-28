@@ -143,6 +143,9 @@ message prefix:
   line followed by one command name per line, no syntax, no
   descriptions.
 
+The reply to a `cmdlist` Beaver sent itself (on connect, the help popover's
+refresh) is not stored in the Log feed (D78); one the person or an agent sent is.
+
 Beaver's parser (`CommandHints.cmdListNames`) drops the header line, trims each remaining line,
 and feeds the names through `CommandHints.merge` to add Beaver's
 known syntax (`CommandRegistry`) where available. See `DECISIONS.md`

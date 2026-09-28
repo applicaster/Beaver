@@ -25,7 +25,9 @@ struct CommandBarView: View {
         }
         .task {
             if vm == nil {
-                vm = CommandBarViewModel(device: env)
+                let fresh = CommandBarViewModel(device: env, store: env.store)
+                vm = fresh
+                await fresh.loadHistory()
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .beaverCommandSent)) { note in
@@ -65,7 +67,7 @@ private struct CommandBarContent: View {
                             showingCommandHelp = false
                         },
                         onRefresh: {
-                            Task { if let sid = env.viewingSessionId { await env.send(command: "cmdlist", to: sid) } }
+                            Task { if let sid = env.viewingSessionId { await env.sendQuietCmdlist(to: sid) } }
                         }
                     )
                 }

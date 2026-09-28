@@ -18,6 +18,9 @@ public struct LiveDevices: Sendable, Equatable {
     /// connection, so a replacement session (the live one was deleted)
     /// gets it from here.
     public private(set) var handshakes: [UUID: ClientHandshake] = [:]
+    /// Sessions whose `cmdlist` Beaver sent itself (on connect, the help
+    /// popover's refresh). Its reply feeds the popover, not the Log feed.
+    private var quietCmdlists: Set<Int64> = []
 
     public init() {}
 
@@ -48,6 +51,7 @@ public struct LiveDevices: Sendable, Equatable {
         waiting.remove(connection)
         guard let sessionId = sessions.removeValue(forKey: connection) else { return nil }
         commands[sessionId] = nil
+        quietCmdlists.remove(sessionId)
         return sessionId
     }
 
@@ -56,7 +60,10 @@ public struct LiveDevices: Sendable, Equatable {
     public mutating func detach(where deleted: (Int64) -> Bool) -> [UUID] {
         let gone = sessions.filter { deleted($0.value) }.map(\.key)
         for connection in gone {
-            if let sessionId = sessions.removeValue(forKey: connection) { commands[sessionId] = nil }
+            if let sessionId = sessions.removeValue(forKey: connection) {
+                commands[sessionId] = nil
+                quietCmdlists.remove(sessionId)
+            }
             waiting.insert(connection)
         }
         return gone
@@ -72,6 +79,17 @@ public struct LiveDevices: Sendable, Equatable {
 
     public mutating func setCommands(_ hints: [CommandHint], for sessionId: Int64) {
         commands[sessionId] = hints
+    }
+
+    public mutating func expectQuietCmdlist(for sessionId: Int64) {
+        quietCmdlists.insert(sessionId)
+    }
+
+    /// Stores a `cmdlist` reply. True when Beaver asked for it itself,
+    /// so the reply stays out of the Log feed.
+    public mutating func receiveCmdlist(_ hints: [CommandHint], for sessionId: Int64) -> Bool {
+        commands[sessionId] = hints
+        return quietCmdlists.remove(sessionId) != nil
     }
 
     public mutating func setHandshake(_ handshake: ClientHandshake, for connection: UUID) {

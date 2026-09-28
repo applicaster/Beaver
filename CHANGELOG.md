@@ -15,6 +15,13 @@ When releasing:
 ## [Unreleased]
 
 ### Added
+- Drop a session file (`.json`) or HAR anywhere on the window to import
+  it, the same as Import. A file Beaver can't open now says so instead of
+  doing nothing.
+- The command bar remembers sent commands across launches (↑/↓, the
+  newest 50).
+- The Log feed shows a banner with Retry when it can't read the session,
+  instead of silently showing stale rows.
 - **Updates install themselves.** Beaver checks for a new version on every
   launch and downloads it in the background. When it's ready, choose
   **Restart Now** or **Later**; Later installs it when you quit Beaver.
@@ -61,6 +68,8 @@ When releasing:
   the default app and each app's toolboxes.
 
 ### Changed
+- The reply to the `cmdlist` Beaver sends on connect no longer shows up in
+  the Log feed; a `cmdlist` you or an agent send still does.
 - An app that restarts is recognised by its device id, so two identical builds
   on two simulators are no longer confused.
 - Agents: `tools_call(deviceId: "beaver")` returns Beaver's result under

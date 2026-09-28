@@ -236,7 +236,8 @@ into a writeable surface so you can poke the device into specific states.
 
 **Status:** Accepted (2026-05-15)
 
-**Decision.** Dragging in a `.json` file creates a new session row rather
+**Decision.** Dragging in a `.json` file (built 2026-09-28: a `.json` or
+`.har` dropped anywhere on the window, same path as Import) creates a new session row rather
 than destroying the current one. Export has two options: "Export filtered
 view" (what's currently visible after filters/search) and "Export full
 session" (every event in the session, regardless of filter).
@@ -313,6 +314,8 @@ returned by the client's `cmdlist` response.
 
 **Implications.**
 - New `command_history` storage (small table, capped at ~200 entries).
+  *Built 2026-09-28:* the newest 50, each command once, shared by every
+  session; `LogStore.recordCommand` / `commandHistory`.
 - Command bar consumes `cmdlist` response from the connected client and
   refreshes the autocomplete source.
 - Up/Down keys navigate history, with the typed prefix preserved as a
@@ -621,6 +624,7 @@ registry. The command-help popover displays:
 - The cmdlist response event still appears in the log feed
   (discovery is a pure side-channel; we don't suppress it). When the
   SDK adopts a typed response message, we can stop polluting the feed.
+  *Superseded by D78:* the reply to Beaver's own `cmdlist` is kept out.
 
 ---
 
@@ -2687,3 +2691,21 @@ won't decode, and the feed starts unfiltered once.
   whichever lands first. `device_uid` / `app_package` go the other way — the
   handshake is their source, so it overwrites. Beaver also handles Android's
   `event`-before-`handshake` ordering (PROTOCOL.md §4.4).
+
+## D78. Beaver's own `cmdlist` stays out of the Log feed
+
+**Status:** Accepted (2026-09-28). Supersedes D17's "we don't suppress it".
+
+- **Decision:** the reply to a `cmdlist` Beaver sends itself (500 ms after
+  connect, the command-help popover's refresh) fills the popover and
+  `commands_list` but isn't stored as an event. A `cmdlist` the person or
+  an agent sends is logged as before, so "send cmdlist and show me what it
+  logged" still works.
+- **Why:** every connect put the same long "Registered commands:" line at
+  the top of every session.
+- **Alternatives:** drop every reply (a person's own `cmdlist` would seem
+  to do nothing); wait for a typed reply frame from the SDK (PROTOCOL.md
+  §3.2.1 — not scheduled).
+- `LiveDevices` remembers which sessions await a quiet reply; the first
+  reply after the request clears it. An SDK that never answers leaves the
+  mark until the device disconnects, so its next `cmdlist` reply is quiet too.
