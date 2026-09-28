@@ -21,7 +21,7 @@ enum UITools {
     static let state = MCPTool(
         name: "ui_state",
         title: "What Beaver shows",
-        description: "Use to see what the user is looking at in Beaver: the tab, the session, the log and network filters, the storage layer and search, the selected event or request, and whether Beaver is in front.",
+        description: "Use to see what the user is looking at in Beaver: the tab, the session, the log and network filters, the storage layer and search, the selected event or request, the Scheme Generator's link, and whether Beaver is in front.",
         kind: .read,
         inputSchema: ToolSchema.object([:])
     ) { _, ctx in
@@ -36,7 +36,7 @@ enum UITools {
         description: "Use to point the user at something in Beaver's window: a tab, a session, a log or network filter, a storage layer, a selected event or request. It works in the background — nothing takes focus. reveal: true brings Beaver forward; use it only when the user asks to see it.",
         kind: .change,
         inputSchema: ToolSchema.object([
-            "tab": ToolSchema.string("logs, network, storages or sessions. Omitted: follows what you set (filter → logs, networkFilter → network, storage → storages).",
+            "tab": ToolSchema.string("logs, network, storages, sessions or schemes (the Scheme Generator). Omitted: follows what you set (filter → logs, networkFilter → network, storage → storages).",
                                      oneOf: UITab.allCases.map(\.rawValue)),
             "sessionId": ToolSchema.integer("Session to show. Omitted: the one on screen, else the live one, else the most recent."),
             "filter": ToolSchema.filter,
@@ -200,7 +200,7 @@ enum UITools {
                     } else {
                         notes.append("nothing matches the network filter, so nothing is selected")
                     }
-                case .storages, .sessions:
+                case .storages, .sessions, .schemes:
                     throw ToolError("select \"first\" / \"last\" works on the logs and network tabs. Example: ui_show(tab: \"network\", networkFilter: {status: \"errors\"}, select: \"first\").")
                 }
             }
@@ -229,8 +229,10 @@ enum UITools {
         case "network", "requests", "request", "net", "http": return .network
         case "storages", "storage": return .storages
         case "sessions", "session": return .sessions
+        case "schemes", "scheme", "scheme generator", "scheme_generator", "schemegenerator", "deeplink", "deep link", "links":
+            return .schemes
         default:
-            throw ToolError("Unknown tab \"\(raw)\". Use logs, network, storages or sessions. Example: ui_show(tab: \"network\").")
+            throw ToolError("Unknown tab \"\(raw)\". Use logs, network, storages, sessions or schemes. Example: ui_show(tab: \"network\").")
         }
     }
 
@@ -365,6 +367,7 @@ enum UITools {
                 "Storage: \(ui.storageLayer.wireKey)" + (ui.storageSearch.isEmpty ? "" : ", search \"\(ui.storageSearch)\""),
                 "Selected event: " + (ui.selectedEventId.map { "#\($0)" } ?? "none"),
                 "Selected request: " + (ui.selectedNetworkId.map { "#\($0)" } ?? "none"),
+                "Scheme Generator: \(ui.scheme.url)",
                 "Window: " + (!host.windowOpen ? "closed" : host.frontmost ? "in front" : "in the background"),
             ].joined(separator: "\n"),
             structured: [
@@ -376,6 +379,7 @@ enum UITools {
                 "storage": ["layer": .string(ui.storageLayer.wireKey), "search": .string(ui.storageSearch)],
                 "selectedEventId": JSON(ui.selectedEventId),
                 "selectedNetworkId": JSON(ui.selectedNetworkId),
+                "scheme": SchemeTools.json(ui.scheme),
                 "windowOpen": .bool(host.windowOpen),
                 "frontmost": .bool(host.frontmost),
             ],
@@ -396,12 +400,14 @@ enum UITools {
             ui.storageLayer.displayName + (ui.storageSearch.isEmpty ? "" : ", search \"\(ui.storageSearch)\"")
         case .sessions:
             nil
+        case .schemes:
+            ui.scheme.url
         }
         if let shown { text += " — " + shown }
         let selected: String? = switch ui.tab {
         case .logs: ui.selectedEventId.map { "event #\($0) selected" }
         case .network: ui.selectedNetworkId.map { "request #\($0) selected" }
-        case .storages, .sessions: nil
+        case .storages, .sessions, .schemes: nil
         }
         if let selected { text += "; " + selected }
         return text

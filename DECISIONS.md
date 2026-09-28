@@ -2586,3 +2586,43 @@ won't decode, and the feed starts unfiltered once.
   builds look alike until the SDK sends a device id.
 - **Alternatives:** a separate selected-device state (two states to sync); a
   merged feed (rejected in D2).
+
+## D74. Scheme Generator: zapp-support's links, one form in the window state
+
+**Status:** Accepted (2026-09-28).
+
+- **What:** A "Tools" section in the sidebar holds the Scheme Generator
+  tab (`UITab.schemes`): it builds deep links into a Zapp app, with a QR
+  code. It covers every host the apps handle, read from their code
+  (2026-09-28): QuickBrick's `open` (type / screen_id / feed_locator + id
+  or 1-based position, state, any other param passed to the screen) and
+  `present` (base64 `data_source`, `screen_id`, `entry_id`, `resumeTime`,
+  `isInternalLink`; `link_url` + `content_type` + `show_nav_bar`;
+  `rivers_configuration_id`); Zapp-Frameworks' native `xray` (logger,
+  `remoteAssistance`, `pin_code`, `shareLog`, `/exportLogs`,
+  `/exportStorages`, `/enableWebSocket`, logger settings),
+  `generateNewUUID` and `externalLinkAccount`; any other host (plugins,
+  native `plugin?pluginIdentifier=…`) as Custom. Web `index.html?…` links
+  take `open`'s params (Vizio only) and `rivers_configuration_id` (every
+  web platform). `open` links are built exactly as zapp-support's
+  `xraySchemeGenerator.ts` does (URLSearchParams encoding); tests pin its
+  output to URLs that code produced. One exception: `entry_id` is sent as
+  is, not base64 — QuickBrick decodes only `data_source`, so zapp-support's
+  base64 of an unsafe id never matches. The form is one `SchemeLink` in
+  `AppEnvironment.schemeLink`, part of `UIState` (D54), kept across
+  session switches. One set of fields serves every template, so switching
+  template keeps what was typed. Agents use `scheme_build`: without
+  `show` it builds a fresh link and the window stays put; `show: true`
+  edits the form on screen. Without `scheme` (mobile) the tool reads the
+  app's own from the session's latest storage, `applicaster.v2.urlScheme`
+  (iOS sends a string holding a JSON array; an array or a plain string
+  work too) — the session resolved as everywhere else, so with several
+  devices it is the viewed live one; the Scheme Generator's **From
+  session** button does the same for the viewed session. `copy: true` puts the URL on the clipboard
+  through `AgentUI.copyToClipboard` (tests use a fake, never the real
+  clipboard); `qrFile` saves the QR code (D72 rules).
+- **Why:** Support builds these links while looking at a device's logs;
+  both tools must give the same URL for the same fields. The form is not
+  tied to a session, so no view model: the view binds `env` directly.
+- **To change:** `SchemeLink.url` together with zapp-support's generator,
+  and the expected URLs in `SchemeToolsTests.urls`.

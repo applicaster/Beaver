@@ -108,6 +108,7 @@ or a release):
 | `journal_note` | Tell the user something in the Agent panel, with clickable links; `attention` also notifies |
 | `ui_state` | What Beaver's window shows: tab, session, filters, selection, whether it is in front |
 | `ui_show` | Point the window at a tab, session, filter or row — in the background unless `reveal: true` |
+| `scheme_build` | Build a deep link into a Zapp app (Scheme Generator): open, present, web page, layout, X-Ray, native and plugin hosts, with the app's scheme from its storage; fill the form on screen, copy it, save its QR code |
 | `beaver_guide` | These recipes, by topic |
 
 Conventions: omitting `sessionId` means the live session (with several
@@ -283,3 +284,47 @@ see it.
 6. An event or request hidden by the user's filter fails with the call that
    shows it. `filter: {}` shows every event, including ones the user cleared
    from view.
+
+### schemes — a deep link into the app
+
+The Scheme Generator tab builds every link the apps handle: QuickBrick's
+`open` and `present`, the native `xray`, `generateNewUUID` and
+`externalLinkAccount`, and any plugin host. Nothing here needs a device,
+but a session tells you the app's scheme.
+
+1. `scheme_build(screenType: "movie", id: "42")` — `aio://open?type=movie&id=42`
+   for a connected app whose scheme is `aio`: without `scheme`, Beaver reads
+   the app's own from the session's storage (`applicaster.v2.urlScheme`;
+   `sessionId` picks another session). The summary says where it came from,
+   or that `myapp` is a placeholder — then ask the user, or pass
+   `scheme: "…"`.
+2. Pick what the link does:
+   - a screen: `screenType` (content type), `screenId`, or `template:
+     "feed-content"` with `feedUrl` and `id` or `position` (from 1).
+     Optional `state` (inline; fullscreen is the default), `title`, and
+     `params` — `open` passes unknown ones to the screen.
+   - `template: "present"` — `feedUrl` (sent base64), `screenId`, `id`,
+     `resumeTime`; `pushScreen: true` pushes instead of replacing.
+   - `linkUrl: "https://…"` — a web page in the app (`contentType`,
+     `showNavBar`).
+   - `layoutId: "…"` — reload the app with another layout (rivers
+     configuration). The one web link that works on every web platform;
+     other `mode: "web"` links open a screen on Vizio only.
+   - `xrayAction: "connect"` — the device connects to this Beaver
+     (remote assistance; debug and TestFlight builds), `pinCode: 1234` for
+     release builds; also `logger`, `share-log`, `export-logs`,
+     `export-storages`, `enable-websocket`, and settings `fileLogLevel`,
+     `showXrayFloatingButton`, `shortcutEnabled`, `mcpServerEnabled`.
+   - `template: "reset-uuid"` (new device id, the app asks first),
+     `template: "external-account"`.
+   - `host: "plugin", params: {pluginIdentifier: "…"}` — a plugin's host.
+3. The user wants to see it or scan it: `scheme_build(show: true, …)` fills
+   the form on screen and switches to the tab, in the background; the keys
+   you pass change the form, the rest stays (`reset: true` starts empty).
+   `reveal: true` also brings Beaver forward. `ui_show(tab: "schemes")` just
+   opens the tab; `ui_state()` returns the form and its URL.
+4. The user asks to copy it: `scheme_build(copy: true, …)` puts the URL on
+   their clipboard, like the Copy button. Only when asked — it replaces
+   what they copied.
+5. `scheme_build(xrayAction: "connect", qrFile: "~/Downloads/connect.png")`
+   — a QR code to scan with the device.

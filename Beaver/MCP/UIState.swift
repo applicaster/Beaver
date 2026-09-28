@@ -11,7 +11,7 @@ import Foundation
 /// The window's sidebar tabs. Raw values are what `ui_state` and
 /// `ui_show` say.
 public enum UITab: String, Sendable, CaseIterable {
-    case logs, network, storages, sessions
+    case logs, network, storages, sessions, schemes
 
     public var title: String {
         switch self {
@@ -19,6 +19,7 @@ public enum UITab: String, Sendable, CaseIterable {
         case .network: "Network"
         case .storages: "Storages"
         case .sessions: "Sessions"
+        case .schemes: "Scheme Generator"
         }
     }
 }
@@ -35,6 +36,8 @@ public struct UIState: Sendable, Equatable {
     public var selectedEventId: Int64?
     /// The Network tab's selected request.
     public var selectedNetworkId: Int64?
+    /// The Scheme Generator's form. Not tied to a session.
+    public var scheme = SchemeLink()
 
     public init() {}
 
@@ -49,6 +52,7 @@ public struct UIState: Sendable, Equatable {
             s.tab = tab
             s.sessionId = id
             s.logFilter = logFilter.carriedOver
+            s.scheme = scheme
         }
         if let v = change.tab { s.tab = v }
         if let v = change.logFilter { s.logFilter = v }
@@ -57,6 +61,7 @@ public struct UIState: Sendable, Equatable {
         if let v = change.storageSearch { s.storageSearch = v }
         if let v = change.selectedEventId { s.selectedEventId = v }
         if let v = change.selectedNetworkId { s.selectedNetworkId = v }
+        if let v = change.scheme { s.scheme = v }
         return s
     }
 }
@@ -71,16 +76,17 @@ public struct UIChange: Sendable, Equatable {
     public var storageSearch: String?
     public var selectedEventId: Int64?
     public var selectedNetworkId: Int64?
+    public var scheme: SchemeLink?
     /// Bring Beaver forward (M12) — the only thing that takes focus.
     public var reveal: Bool
 
     public init(tab: UITab? = nil, sessionId: Int64? = nil, logFilter: Filter? = nil,
                 networkFilter: NetworkFilter? = nil, storageLayer: StorageSnapshot.Namespace? = nil,
                 storageSearch: String? = nil, selectedEventId: Int64? = nil,
-                selectedNetworkId: Int64? = nil, reveal: Bool = false) {
+                selectedNetworkId: Int64? = nil, scheme: SchemeLink? = nil, reveal: Bool = false) {
         self.tab = tab; self.sessionId = sessionId; self.logFilter = logFilter
         self.networkFilter = networkFilter; self.storageLayer = storageLayer
         self.storageSearch = storageSearch; self.selectedEventId = selectedEventId
-        self.selectedNetworkId = selectedNetworkId; self.reveal = reveal
+        self.selectedNetworkId = selectedNetworkId; self.scheme = scheme; self.reveal = reveal
     }
 }
