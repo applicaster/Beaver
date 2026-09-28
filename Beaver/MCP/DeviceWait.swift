@@ -279,10 +279,12 @@ extension ToolContext {
     /// command, one system entry says so — written when it is back (with
     /// its new session) or when it hasn't come back within another `window`.
     /// Replaces any earlier command's watcher, so N commands before a restart
-    /// write one entry, naming the last.
-    func watchForDisconnect(after command: String, sessionId: Int64, window: Duration = .seconds(30)) async {
+    /// write one entry, naming the last. `token` lets the caller stop it
+    /// (`Watches.cancelDisconnectWatcher`).
+    func watchForDisconnect(after command: String, sessionId: Int64, window: Duration = .seconds(30),
+                            token: UUID = UUID()) async {
         let liveNow = await ui.snapshot().liveSessionIds
-        await watches.setDisconnectWatcher(Task { [self] in
+        await watches.setDisconnectWatcher(token: token, Task { [self] in
             var device = DeviceFollower(start: sessionId, live: liveNow)
             let dropDeadline = ContinuousClock.now + window
             while ContinuousClock.now < dropDeadline {

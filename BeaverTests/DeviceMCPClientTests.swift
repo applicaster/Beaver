@@ -79,9 +79,11 @@ struct DeviceMCPClientTests {
         #expect(f["echo"] == "fast")
     }
 
-    @Test("One request at a time: the next is sent after the previous reply, and its timeout counts from then")
+    @Test("One request at a time: the next is sent after the previous reply, and its call timeout counts from then")
     func oneAtATime() async throws {
-        // Like the SDKs, the device handles one MCP message at a time.
+        // Like the SDKs, the device handles one MCP message at a time. The
+        // queue wait (~150 ms) and the call (~150 ms) each fit fast's 250 ms,
+        // together they don't.
         let line = SerialLine()
         let slowStarted = Mutex(false), slowReplied = Mutex(false), fastSawSlowReply = Mutex<Bool?>(nil)
         let (client, device) = connect { method, params in
@@ -93,13 +95,14 @@ struct DeviceMCPClientTests {
                     slowReplied.withLock { $0 = true }
                 } else {
                     fastSawSlowReply.withLock { $0 = slowReplied.withLock { $0 } }
+                    try? await Task.sleep(for: .milliseconds(150))
                 }
                 return ["echo": params["name"] ?? .null]
             }
         }
         async let slow = client.request("tools/call", params: ["name": "slow"], timeout: .seconds(1))
         while !slowStarted.withLock({ $0 }) { try await Task.sleep(for: .milliseconds(5)) }
-        let fast = try await client.request("tools/call", params: ["name": "fast"], timeout: .milliseconds(100))
+        let fast = try await client.request("tools/call", params: ["name": "fast"], timeout: .milliseconds(250))
         #expect(try await slow["echo"] == "slow")
         #expect(fast["echo"] == "fast")
         #expect(fastSawSlowReply.withLock { $0 } == true)
@@ -229,17 +232,70 @@ struct DeviceMCPClientTests {
         #expect(device.methods == ["initialize"])
     }
 
-    @Test("Closing fails the waiting call with .disconnected, and later ones too")
+    @Test("Closing fails the waiting call with .disconnected; later ones are .notSent")
     func closeWhileWaiting() async throws {
-        let (client, _) = connect { method, _ in method == "initialize" ? [:] : nil }
+        let (client, device) = connect { method, _ in method == "initialize" ? [:] : nil }
         _ = try? await client.request("ping", timeout: .milliseconds(50))  // initialized; ping times out
         let waiting = Task { try await client.request("tools/call", timeout: .seconds(5)) }
         try await Task.sleep(for: .milliseconds(50))
         await client.close()
         await #expect(throws: DeviceMCPError.disconnected) { try await waiting.value }
-        await #expect(throws: DeviceMCPError.disconnected) {
-            try await client.request("tools/list", timeout: .seconds(1))
+        let sent = Mutex(false)
+        await #expect(throws: DeviceMCPError.notSent("the app disconnected before Beaver sent it")) {
+            try await client.request("tools/list", timeout: .seconds(1), onSent: { sent.withLock { $0 = true } })
         }
+        #expect(!sent.withLock { $0 })
+        #expect(!device.methods.contains("tools/list"))
+    }
+
+    @Test("A request that doesn't get its turn within its timeout: .notSent naming the busy call, never sent; the line goes on")
+    func queueWaitTimesOut() async throws {
+        let (client, device) = connect { method, params in
+            if params["name"] == "slow" { try? await Task.sleep(for: .milliseconds(300)) }
+            return ["echo": params["name"] ?? .null]
+        }
+        let slow = Task { try await client.request("tools/call", params: ["name": "slow"], timeout: .seconds(2)) }
+        while !device.methods.contains("tools/call") { try await Task.sleep(for: .milliseconds(5)) }
+        // Queued behind it: one gives up, the one after it still gets its turn.
+        let sent = Mutex(false)
+        let impatient = Task {
+            try await client.request("tools/call", params: ["name": "impatient"], timeout: .milliseconds(100),
+                                     onSent: { sent.withLock { $0 = true } })
+        }
+        try await Task.sleep(for: .milliseconds(20))
+        let patient = Task { try await client.request("tools/call", params: ["name": "patient"], timeout: .seconds(2)) }
+        await #expect(throws: DeviceMCPError.notSent("the app is busy with tools/call")) { try await impatient.value }
+        #expect(try await slow.value["echo"] == "slow")
+        #expect(try await patient.value["echo"] == "patient")
+        #expect(!sent.withLock { $0 })
+        let calls = device.frames.withLock { $0.filter { $0["method"] == "tools/call" }.map { $0["params"]?["name"] } }
+        #expect(calls == ["slow", "patient"])
+        // The line is free again.
+        #expect(try await client.request("tools/list", timeout: .seconds(1)) == ["echo": .null])
+    }
+
+    @Test("onSent runs once the request's frame is sent, not while it waits in the queue")
+    func onSentAfterSend() async throws {
+        let release = Mutex(false)
+        let (client, device) = connect { _, params in
+            if params["name"] == "slow" { while !release.withLock({ $0 }) { try? await Task.sleep(for: .milliseconds(5)) } }
+            return [:]
+        }
+        let slow = Task { try await client.request("tools/call", params: ["name": "slow"], timeout: .seconds(5)) }
+        while !device.methods.contains("tools/call") { try await Task.sleep(for: .milliseconds(5)) }
+        let sentAt = Mutex<Int?>(nil)
+        let queued = Task {
+            try await client.request("tools/call", params: ["name": "queued"], timeout: .seconds(5), onSent: {
+                sentAt.withLock { $0 = device.frames.withLock { $0.count } }
+            })
+        }
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(sentAt.withLock { $0 } == nil)
+        release.withLock { $0 = true }
+        _ = try await slow.value
+        _ = try await queued.value
+        // initialize, initialized, slow, queued: called with its frame already out.
+        #expect(sentAt.withLock { $0 } == 4)
     }
 
     @Test("mcp frames decode, as an object, a string, or bare JSON-RPC")

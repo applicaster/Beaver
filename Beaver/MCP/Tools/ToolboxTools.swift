@@ -153,16 +153,18 @@ enum ToolboxTools {
         let label = try await ctx.describeTarget(id, args, host)
         let risky = localName(name, startsWith: destructiveVerbs)
         let before = try await ctx.store.latestEventId(sessionId: id) ?? 0
-        // Started first: the app may drop before it answers.
-        if localName(name, startsWith: endsAppVerbs) { await ctx.watchForDisconnect(after: name, sessionId: id) }
+        // Watched from the send: the app may drop before it answers.
+        let watch = localName(name, startsWith: endsAppVerbs) ? UUID() : nil
         let reply = try await device(ctx, "tools/call", ["name": .string(name), "arguments": .object(arguments)],
                                      sessionId: id, timeout: DeviceMCPClient.callTimeout, what: name, label: label,
                                      retry: "tools_call(deviceId: \"\(id)\", name: \"\(name)\", arguments: \(JSON.object(arguments).text))",
-                                     journalKind: risky ? .destructive : nil)
+                                     journalKind: risky ? .destructive : nil, watch: watch)
         let content = reply["content"]?.array ?? []
         let text = content.compactMap { $0["text"]?.string }.joined(separator: "\n")
         let box = Toolboxes.name(of: name)
         if reply["isError"]?.bool == true {
+            // The app answered: a later drop isn't this call's.
+            if let watch { await ctx.watches.cancelDisconnectWatcher(watch) }
             var hint = " Example: toolboxes_list(deviceId: \"\(id)\", toolbox: \"\(box)\") for its arguments."
             if let listed = try? await device(ctx, "tools/list", [:], sessionId: id, timeout: DeviceMCPClient.listTimeout,
                                               what: "tools/list", label: label, retry: "toolboxes_list(deviceId: \"\(id)\")") {
@@ -245,14 +247,21 @@ enum ToolboxTools {
     /// One MCP request; `DeviceMCPError` becomes a ToolError that says what
     /// to do. `journalKind` goes on a timeout or a drop: the call may have run.
     /// `retry` is the same call again, for when it never reached the app.
+    /// `watch`: watch for the app dropping (`watchForDisconnect`, this token)
+    /// from when the request is sent; stopped when the app answers with an
+    /// error or the request never went out.
     private static func device(_ ctx: ToolContext, _ method: String, _ params: JSON, sessionId: Int64,
                                timeout: Duration, what: String, label: String, retry: String,
-                               journalKind: AgentActivity.Kind? = nil) async throws -> JSON {
+                               journalKind: AgentActivity.Kind? = nil, watch: UUID? = nil) async throws -> JSON {
         let mayHaveRun = method == "tools/call"
             ? " It may still have run it (app.restart and app.killProcess end the app before answering)." : ""
+        var onSent: (@Sendable () async -> Void)?
+        if let watch { onSent = { await ctx.watchForDisconnect(after: what, sessionId: sessionId, token: watch) } }
         do {
-            return try await ctx.device.mcp(method, params: params, to: sessionId, timeout: timeout)
+            return try await ctx.device.mcp(method, params: params, to: sessionId, timeout: timeout, onSent: onSent)
         } catch let error as DeviceMCPError {
+            // Only a timeout or a drop can be the app ending mid-call.
+            if let watch, error != .timeout, error != .disconnected { await ctx.watches.cancelDisconnectWatcher(watch) }
             switch error {
             case .unsupported:
                 throw ToolError("\(label) doesn't answer MCP, so it has no toolboxes: the app needs quick-brick-xray's native WebSocket sink. Its commands still work. Example: commands_list(deviceId: \"\(sessionId)\").")

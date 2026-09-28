@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import Synchronization
 @testable import BeaverCore
 
 @Suite("Toolbox tools (D75, D76)")
@@ -348,6 +349,64 @@ struct ToolboxToolsTests {
         }
         #expect(rows.first?.summary == "Device disconnected after \"app.restart\" → session #\(b.id)")
         #expect(a.id != b.id)
+    }
+
+    @Test("tools_call app.restart queued behind a slow call starts watching for the drop only once it is sent")
+    func watcherStartsWhenSent() async throws {
+        let (store, _, ui, _) = try await alpha()
+        let slowStarted = Mutex(false), release = Mutex(false)
+        let app = ScriptedDevice { method, params in
+            guard method == "tools/call" else { return [:] }
+            if params["name"] == "slow" {
+                slowStarted.withLock { $0 = true }
+                while !release.withLock({ $0 }) { try? await Task.sleep(for: .milliseconds(5)) }
+            }
+            return ["content": [["type": "text", "text": "ok"]]]
+        }
+        let client = DeviceMCPClient { await app.handle($0) }
+        app.client.withLock { $0 = client }
+        let ctx = ToolContext(store: store, ui: ui, device: ClientDevice(client: client))
+        let slow = Task { try await client.request("tools/call", params: ["name": "slow"], timeout: .seconds(5)) }
+        while !slowStarted.withLock({ $0 }) { try await Task.sleep(for: .milliseconds(5)) }
+        let restart = Task { try await ToolboxTools.toolsCall.run(ToolArguments(["name": "app.restart"]), ctx) }
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(await ctx.watches.hasDisconnectWatcher == false)
+        release.withLock { $0 = true }
+        _ = try await slow.value
+        _ = try await restart.value
+        #expect(await ctx.watches.hasDisconnectWatcher == true)
+    }
+
+    @Test("tools_call app.restart: an app error, a JSON-RPC error or a call that never went out stops the watcher; success, a timeout or a drop keep it")
+    func watcherStopsWhenAppAnswers() async throws {
+        let cases: [(String, @Sendable (String, JSON) async throws -> JSON, Bool)] = [
+            ("isError", { method, _ in
+                method == "tools/list" ? ToolboxToolsTests.toolsList
+                    : ["content": [["type": "text", "text": "not now"]], "isError": true] }, false),
+            ("rpc", { _, _ in throw DeviceMCPError.rpc(code: -32603, message: "boom") }, false),
+            ("notSent", { _, _ in throw DeviceMCPError.notSent("the app is busy with tools/call") }, false),
+            ("success", ToolboxToolsTests.ok, true),
+            ("timeout", { _, _ in throw DeviceMCPError.timeout }, true),
+            ("disconnected", { _, _ in throw DeviceMCPError.disconnected }, true),
+        ]
+        for (label, answer, watching) in cases {
+            let (store, _, ui, device) = try await alpha(answer)
+            let ctx = makeContext(store, fakeUI: ui, device: device)
+            _ = try? await ToolboxTools.toolsCall.run(ToolArguments(["name": "app.restart"]), ctx)
+            #expect(await ctx.watches.hasDisconnectWatcher == watching, "\(label)")
+        }
+    }
+
+    @Test("A stopped tools_call watcher leaves an earlier command's watcher alone")
+    func stopKeepsOthersWatcher() async throws {
+        let (store, a, ui, _) = try await alpha()
+        // The app never gets the call: FakeDevice without onSent.
+        let device = FakeDevice(onMCP: { _, _ in throw DeviceMCPError.notSent("the app is busy with tools/call") },
+                                callsOnSent: false)
+        let ctx = makeContext(store, fakeUI: ui, device: device)
+        await ctx.watchForDisconnect(after: "restart", sessionId: a.id)
+        _ = try? await ToolboxTools.toolsCall.run(ToolArguments(["name": "app.restart"]), ctx)
+        #expect(await ctx.watches.hasDisconnectWatcher == true)
     }
 
     @Test("B2/B3: tools_call names the default target and points logs_wait at its session")

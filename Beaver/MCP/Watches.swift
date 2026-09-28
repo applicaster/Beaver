@@ -55,12 +55,22 @@ public actor Watches {
 
     func setTask(_ task: Task<Void, Never>, for name: String) { tasks[name] = task }
 
-    /// commands_send's disconnect watcher: one at a time, the latest command wins.
-    private var disconnectWatcher: Task<Void, Never>?
+    /// The disconnect watcher of commands_send and tools_call: one at a
+    /// time, the latest command wins. `token` says whose it is.
+    private var disconnectWatcher: (token: UUID, task: Task<Void, Never>)?
 
-    func setDisconnectWatcher(_ task: Task<Void, Never>) {
-        disconnectWatcher?.cancel()
-        disconnectWatcher = task
+    var hasDisconnectWatcher: Bool { disconnectWatcher != nil }
+
+    func setDisconnectWatcher(token: UUID, _ task: Task<Void, Never>) {
+        disconnectWatcher?.task.cancel()
+        disconnectWatcher = (token, task)
+    }
+
+    /// Stops the watcher `token` started; a later command's is left alone.
+    func cancelDisconnectWatcher(_ token: UUID) {
+        guard disconnectWatcher?.token == token else { return }
+        disconnectWatcher?.task.cancel()
+        disconnectWatcher = nil
     }
 
     /// `false` when the watch is gone, was replaced (a different

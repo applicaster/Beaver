@@ -7,7 +7,8 @@
 //  is {"type":"mcp","payload":…} and replies are matched by JSON-RPC id.
 //  The SDKs handle one MCP message at a time, so requests queue here (FIFO)
 //  and each is sent only after the previous one finished; its timeout
-//  counts from its own send.
+//  counts from its own send. It waits in the queue for at most that timeout
+//  too, then fails with `.notSent` without ever being sent.
 
 import Foundation
 
@@ -18,7 +19,7 @@ public enum DeviceMCPError: Error, Sendable, Equatable {
     case unsupported
     /// No answer in time. The device may still have run the call.
     case timeout
-    /// The connection closed, or was already gone.
+    /// The connection closed after the request was sent.
     case disconnected
     /// The request's frame was never sent to the app; the string says why.
     case notSent(String)
@@ -40,23 +41,32 @@ public actor DeviceMCPClient {
     private var waiters: [Int: CheckedContinuation<JSON, Error>] = [:]
     private var closed = false
     private var native = false
-    /// A request holds the line from before `initialize` until its reply.
-    private var busy = false
-    private var queue: [CheckedContinuation<Void, Error>] = []
+    /// The method of the request holding the line, from before
+    /// `initialize` until its reply; nil when the line is free.
+    private var holder: String?
+    private struct Waiter {
+        let ticket: Int
+        let method: String
+        let turn: CheckedContinuation<Void, Error>
+    }
+    private var queue: [Waiter] = []
+    private var nextTicket = 0
 
     public init(setupTimeout: Duration = .seconds(5), send: @escaping @Sendable (Data) async -> Void) {
         self.setupTimeout = setupTimeout
         self.sendFrame = send
     }
 
-    /// Waits for the requests before it, then initializes the session
-    /// first, once per connection.
-    public func request(_ method: String, params: JSON = [:], timeout: Duration) async throws -> JSON {
-        guard !closed else { throw DeviceMCPError.disconnected }
-        try await takeTurn()
+    /// Waits for the requests before it (at most `timeout`), then
+    /// initializes the session first, once per connection. `onSent` runs
+    /// once the request's frame is handed to the socket, before this returns.
+    public func request(_ method: String, params: JSON = [:], timeout: Duration,
+                        onSent: (@Sendable () async -> Void)? = nil) async throws -> JSON {
+        guard !closed else { throw DeviceMCPError.notSent(Self.droppedBeforeSend) }
+        try await takeTurn(method, timeout: timeout)
         defer { endTurn() }
         try await ensureInitialized()
-        return try await call(method, params: params, timeout: timeout)
+        return try await call(method, params: params, timeout: timeout, onSent: onSent)
     }
 
     /// A JSON-RPC response from the app. Unknown ids (a reply after its
@@ -89,19 +99,36 @@ public actor DeviceMCPClient {
         for waiter in pending.values { waiter.resume(throwing: DeviceMCPError.disconnected) }
         let queued = queue
         queue = []
-        for turn in queued { turn.resume(throwing: DeviceMCPError.notSent(Self.droppedBeforeSend)) }
+        for waiter in queued { waiter.turn.resume(throwing: DeviceMCPError.notSent(Self.droppedBeforeSend)) }
     }
 
     static let droppedBeforeSend = "the app disconnected before Beaver sent it"
 
-    private func takeTurn() async throws {
-        guard busy else { busy = true; return }
-        // `endTurn` hands the line over: `busy` stays true.
-        try await withCheckedThrowingContinuation { queue.append($0) }
+    private func takeTurn(_ method: String, timeout: Duration) async throws {
+        guard holder != nil else { holder = method; return }
+        let ticket = nextTicket
+        nextTicket += 1
+        let timer = Task { [weak self] in
+            try? await Task.sleep(for: timeout)
+            await self?.giveUp(ticket)
+        }
+        defer { timer.cancel() }
+        // `endTurn` hands the line over: `holder` becomes this method.
+        try await withCheckedThrowingContinuation { queue.append(Waiter(ticket: ticket, method: method, turn: $0)) }
+    }
+
+    /// Every resume removes its waiter first, so each is resumed once:
+    /// a waiter that got its turn (or was closed) is no longer here.
+    private func giveUp(_ ticket: Int) {
+        guard let index = queue.firstIndex(where: { $0.ticket == ticket }) else { return }
+        queue.remove(at: index).turn.resume(throwing: DeviceMCPError.notSent("the app is busy with \(holder ?? "another request")"))
     }
 
     private func endTurn() {
-        if queue.isEmpty { busy = false } else { queue.removeFirst().resume() }
+        guard !queue.isEmpty else { holder = nil; return }
+        let next = queue.removeFirst()
+        holder = next.method
+        next.turn.resume()
     }
 
     private func ensureInitialized() async throws {
@@ -143,7 +170,8 @@ public actor DeviceMCPClient {
         await sendFrame(Self.frame(["jsonrpc": "2.0", "method": "notifications/initialized"]))
     }
 
-    private func call(_ method: String, params: JSON, timeout: Duration) async throws -> JSON {
+    private func call(_ method: String, params: JSON, timeout: Duration,
+                      onSent: (@Sendable () async -> Void)? = nil) async throws -> JSON {
         // Closed while this request waited for its turn.
         guard !closed else { throw DeviceMCPError.notSent(Self.droppedBeforeSend) }
         let id = nextId
@@ -155,9 +183,19 @@ public actor DeviceMCPClient {
         }
         defer { timer.cancel() }
         let send = sendFrame
-        return try await withCheckedThrowingContinuation { continuation in
-            waiters[id] = continuation
-            Task { await send(frame) }
+        var sending: Task<Void, Never>?
+        // `onSent` finishes before the reply is returned or thrown, so the
+        // caller never sees an answer before what it started on send.
+        do {
+            let reply = try await withCheckedThrowingContinuation { continuation in
+                waiters[id] = continuation
+                sending = Task { await send(frame); await onSent?() }
+            }
+            await sending?.value
+            return reply
+        } catch {
+            await sending?.value
+            throw error
         }
     }
 

@@ -54,11 +54,16 @@ final class FakeDevice: DeviceLink {
     private let onSend: @Sendable (String) async -> Void
     private let onMCP: @Sendable (String, JSON) async throws -> JSON
     private let mcpLog = Mutex<[(method: String, params: JSON, sessionId: Int64)]>([])
+    private let callsOnSent: Bool
 
+    /// `callsOnSent`: the request "reaches the app" before `onMCP` answers;
+    /// false plays one that never went out.
     init(onSend: @escaping @Sendable (String) async -> Void = { _ in },
-         onMCP: @escaping @Sendable (String, JSON) async throws -> JSON = { _, _ in throw DeviceMCPError.unsupported }) {
+         onMCP: @escaping @Sendable (String, JSON) async throws -> JSON = { _, _ in throw DeviceMCPError.unsupported },
+         callsOnSent: Bool = true) {
         self.onSend = onSend
         self.onMCP = onMCP
+        self.callsOnSent = callsOnSent
     }
 
     var sent: [String] { log.withLock { $0.map(\.command) } }
@@ -74,9 +79,22 @@ final class FakeDevice: DeviceLink {
         await onSend(command)
     }
 
-    func mcp(_ method: String, params: JSON, to sessionId: Int64, timeout: Duration) async throws -> JSON {
+    func mcp(_ method: String, params: JSON, to sessionId: Int64, timeout: Duration,
+             onSent: (@Sendable () async -> Void)?) async throws -> JSON {
         mcpLog.withLock { $0.append((method, params, sessionId)) }
+        if callsOnSent { await onSent?() }
         return try await onMCP(method, params)
+    }
+}
+
+/// A real DeviceMCPClient behind DeviceLink: requests queue as in the app.
+struct ClientDevice: DeviceLink {
+    let client: DeviceMCPClient
+    func send(command: String, to sessionId: Int64) async {}
+    func disconnect(_ sessionId: Int64) async {}
+    func mcp(_ method: String, params: JSON, to sessionId: Int64, timeout: Duration,
+             onSent: (@Sendable () async -> Void)?) async throws -> JSON {
+        try await client.request(method, params: params, timeout: timeout, onSent: onSent)
     }
 }
 

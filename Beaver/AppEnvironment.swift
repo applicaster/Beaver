@@ -154,10 +154,10 @@ extension AppEnvironment: DeviceLink {
         await server.disconnect(connection)
     }
 
-    nonisolated public func mcp(_ method: String, params: JSON, to sessionId: Int64,
-                                timeout: Duration) async throws -> JSON {
+    nonisolated public func mcp(_ method: String, params: JSON, to sessionId: Int64, timeout: Duration,
+                                onSent: (@Sendable () async -> Void)?) async throws -> JSON {
         let client = await MainActor.run { self.live.connection(for: sessionId).flatMap { self.mcpClients[$0] } }
-        guard let client else { throw DeviceMCPError.disconnected }
-        return try await client.request(method, params: params, timeout: timeout)
+        guard let client else { throw DeviceMCPError.notSent("the app is no longer connected") }
+        return try await client.request(method, params: params, timeout: timeout, onSent: onSent)
     }
 }
