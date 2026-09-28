@@ -447,8 +447,9 @@ in `payload`:
    any time; Beaver closes one when the user (or an agent) disconnects
    that device.
 4. When a connection closes (network failure, client crash, or a
-   Disconnect in Beaver), Beaver sets that connection's session
-   `ended_at`; other connections are unaffected. A half-open connection
+   Disconnect in Beaver), Beaver stores every frame that arrived before
+   the close, then sets that connection's session `ended_at`; other
+   connections are unaffected. A half-open connection
    is noticed by TCP keepalive within ~20 s.
 5. New connections after a close start a new session.
 6. **Reconnect behavior is not symmetric across platforms.** iOS/tvOS's

@@ -109,6 +109,10 @@ When releasing:
   when the app sent one and `text` otherwise.
 
 ### Fixed
+- **Events a device sends just before it disconnects are no longer lost.**
+  When the connection closed, Beaver could stop reading while the last
+  few frames were still waiting, or show them after the session ended.
+  It now reads every frame that arrived, then ends the session.
 - A device that connects is shown at once, even if a past or imported
   session was open — before, you had to pick it in Sessions by hand.
 - Double-clicking empty space in the toolbar zooms the window again —

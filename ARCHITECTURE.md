@@ -320,7 +320,10 @@ IPv4 otherwise).
 **Inbound flow.**
 1. `NWConnection.receiveMessage` → `Data` → published to `inbound` as
    `.frame`, between the connection's `.connected` and `.disconnected`.
-   Reading starts only after `.connected` is yielded.
+   Reading starts only after `.connected` is yielded. When the peer closes
+   or the connection fails, reading goes on until a read brings no data —
+   frames still buffered come first — and only then is `.disconnected`
+   yielded.
 2. One consumer task (in `BeaverApp`) opens the live session on
    `.connected`, decodes each frame via `ProtocolDecoder` into it, and
    ends it on `.disconnected`. One ordered stream is what guarantees the
