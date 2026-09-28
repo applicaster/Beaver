@@ -711,14 +711,8 @@ private struct StorageChangesPopover: View {
 
     private var current: StorageSnapshot? { vm.snapshots[vm.selectedNamespace] }
 
-    /// Roughly how tall the rows are: a key line, then its value or up to
-    /// 20 field lines. An underestimate only means scrolling a bit.
-    private var listHeight: CGFloat {
-        changes.reduce(0) { sum, c in
-            let lines = 1 + (c.fields.isEmpty ? 1 : min(c.fields.count, 20) + (c.fields.count > 20 ? 1 : 0))
-            return sum + CGFloat(lines) * 18 + 8
-        }
-    }
+    /// The rows' measured height.
+    @State private var listHeight: CGFloat = 0
 
     /// Snapshots before the one on screen, newest first.
     private var earlier: [(id: Int64, takenAt: Date)] {
@@ -748,20 +742,23 @@ private struct StorageChangesPopover: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     // A ScrollView has no height of its own, so in a popover
-                    // it collapses to nothing: size it to the rows, up to 380.
+                    // it collapses to nothing: size it to its rows, up to 380.
                     ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 8) {
+                        VStack(alignment: .leading, spacing: 8) {
                             ForEach(changes, id: \.self) { StorageChangeRow(change: $0) }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { listHeight = $0 }
                     }
                     .frame(height: min(380, listHeight))
                 }
             }
         }
         .padding(12)
-        .frame(width: 480, alignment: .leading)
-        .frame(maxHeight: 460)
+        // Top-aligned: the popover doesn't shrink at once when the list
+        // gets shorter, and centred content jumped down.
+        .frame(width: 480, alignment: .topLeading)
+        .frame(maxHeight: 460, alignment: .top)
         .task(id: current?.id) {
             history = (try? await env.store.storageSnapshotHistory(
                 sessionId: vm.sessionId, namespace: vm.selectedNamespace)) ?? []
