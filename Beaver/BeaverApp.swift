@@ -151,6 +151,9 @@ struct BeaverApp: App {
             for await item in env.server.inbound {
                 switch item {
                 case .connected(let connection):
+                    env.mcpClients[connection] = DeviceMCPClient { [server = env.server] data in
+                        await server.send(data: data, to: connection)
+                    }
                     guard let session = try? await env.store.createSession(source: .live) else { continue }
                     env.didConnect(connection, session: session.id)
                     // Ask the SDK for its command list so the command-bar
@@ -168,6 +171,7 @@ struct BeaverApp: App {
                     guard let sessionId = env.live.session(for: connection) else { continue }
                     await Self.handleInbound(frame: frame, connection: connection, sessionId: sessionId, env: env)
                 case .disconnected(let connection):
+                    await env.mcpClients.removeValue(forKey: connection)?.close()
                     if let sessionId = env.didDisconnect(connection) {
                         try? await env.store.endSession(sessionId)
                     }
@@ -273,6 +277,10 @@ struct BeaverApp: App {
         case .success(.clientHandshake(let handshake)):
             await MainActor.run { env.live.setHandshake(handshake, for: connection) }
             try? await env.store.applyHandshake(handshake, to: sessionId)
+        case .success(.mcp(let message)):
+            // D75: an answer to Beaver's request; not a log line.
+            let client = await MainActor.run { env.mcpClients[connection] }
+            await client?.receive(message)
         case .success(.unknown(let typeRaw)):
             // PROTOCOL.md §7: tolerate unknown types, log as a synthetic
             // event so the user sees them.

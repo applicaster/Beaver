@@ -75,6 +75,9 @@ public protocol DeviceLink: Sendable {
     func send(command: String, to sessionId: Int64) async
     /// Closes that device's connection; its session ends. No-op once it's gone.
     func disconnect(_ sessionId: Int64) async
+    /// One MCP request to the app whose live session is `sessionId` (D75).
+    /// Throws `DeviceMCPError`; `.disconnected` once it's gone.
+    func mcp(_ method: String, params: JSON, to sessionId: Int64, timeout: Duration) async throws -> JSON
 }
 
 

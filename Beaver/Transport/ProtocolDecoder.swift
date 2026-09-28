@@ -16,6 +16,8 @@ public enum ProtocolDecoder {
         case network(NetworkCapture)
         /// PROTOCOL.md §4.4 (D77).
         case clientHandshake(ClientHandshake)
+        /// A JSON-RPC message from the app's MCP server (PROTOCOL.md §4.5, D75).
+        case mcp(JSON)
         case unknown(typeRaw: String)
     }
 
@@ -25,6 +27,7 @@ public enum ProtocolDecoder {
         case malformedEvent(String)        // human-readable reason
         case malformedStorage(String)
         case malformedNetwork(String)
+        case malformedMCP(String)
     }
 
     /// Decode a raw WebSocket text frame.
@@ -36,6 +39,9 @@ public enum ProtocolDecoder {
             return .failure(.notJSON)
         }
         guard let typeRaw = envelope["type"] as? String else {
+            // The SDK also accepts bare JSON-RPC; Beaver never sends it,
+            // but a bare reply is still an MCP message, not an unknown frame.
+            if envelope["jsonrpc"] != nil { return decodeMCP(envelope) }
             return .failure(.noTypeField)
         }
 
@@ -48,6 +54,8 @@ public enum ProtocolDecoder {
             return decodeNetwork(envelope: envelope)
         case "handshake":
             return .success(.clientHandshake(decodeHandshake(envelope: envelope)))
+        case "mcp":
+            return decodeMCP(envelope["payload"])
         default:
             return .success(.unknown(typeRaw: typeRaw))
         }
@@ -154,6 +162,23 @@ public enum ProtocolDecoder {
         }
         return ClientHandshake(deviceId: str("deviceId"), deviceName: str("deviceName"), model: str("model"),
                                platform: str("platform"), appPackage: str("appPackage"), version: str("version"))
+    }
+
+    // MARK: - MCP
+
+    /// `payload` is a JSON-RPC object, or that object as a string.
+    private static func decodeMCP(_ payload: Any?) -> Result<InboundPacket, DecodeError> {
+        let data: Data? = if let s = payload as? String {
+            s.data(using: .utf8)
+        } else if let p = payload, JSONSerialization.isValidJSONObject(p) {
+            try? JSONSerialization.data(withJSONObject: p)
+        } else {
+            nil
+        }
+        guard let data, let message = try? JSON.parse(data), message.object != nil else {
+            return .failure(.malformedMCP("payload is not a JSON-RPC object"))
+        }
+        return .success(.mcp(message))
     }
 
     // MARK: - Helpers

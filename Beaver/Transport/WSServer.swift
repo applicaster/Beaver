@@ -303,6 +303,13 @@ public actor WSServer {
         send(payload, on: target)
     }
 
+    /// Send a ready-made frame (an `mcp` request, D75) to one client.
+    /// No-op when that connection is gone.
+    public func send(data: Data, to connection: UUID) {
+        guard let target = connections[connection] else { return }
+        send(data, on: target)
+    }
+
     private nonisolated func send(_ data: Data, on connection: NWConnection) {
         let metadata = NWProtocolWebSocket.Metadata(opcode: .text)
         let context = NWConnection.ContentContext(identifier: "send", metadata: [metadata])

@@ -51,19 +51,31 @@ final class FakeUI: AgentUI {
 final class FakeDevice: DeviceLink {
     private let log = Mutex<[(command: String, sessionId: Int64)]>([])
     private let onSend: @Sendable (String) async -> Void
+    private let onMCP: @Sendable (String, JSON) async throws -> JSON
+    private let mcpLog = Mutex<[(method: String, params: JSON, sessionId: Int64)]>([])
 
-    init(onSend: @escaping @Sendable (String) async -> Void = { _ in }) { self.onSend = onSend }
+    init(onSend: @escaping @Sendable (String) async -> Void = { _ in },
+         onMCP: @escaping @Sendable (String, JSON) async throws -> JSON = { _, _ in throw DeviceMCPError.unsupported }) {
+        self.onSend = onSend
+        self.onMCP = onMCP
+    }
 
     var sent: [String] { log.withLock { $0.map(\.command) } }
     var targets: [Int64] { log.withLock { $0.map(\.sessionId) } }
     private let drops = Mutex<[Int64]>([])
     var disconnected: [Int64] { drops.withLock { $0 } }
+    var mcpCalls: [(method: String, params: JSON, sessionId: Int64)] { mcpLog.withLock { $0 } }
 
     func disconnect(_ sessionId: Int64) async { drops.withLock { $0.append(sessionId) } }
 
     func send(command: String, to sessionId: Int64) async {
         log.withLock { $0.append((command, sessionId)) }
         await onSend(command)
+    }
+
+    func mcp(_ method: String, params: JSON, to sessionId: Int64, timeout: Duration) async throws -> JSON {
+        mcpLog.withLock { $0.append((method, params, sessionId)) }
+        return try await onMCP(method, params)
     }
 }
 
