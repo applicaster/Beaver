@@ -15,6 +15,9 @@ When releasing:
 ## [Unreleased]
 
 ### Added
+- **Updates install themselves.** Beaver checks for a new version on every
+  launch and downloads it in the background. When it's ready, choose
+  **Restart Now** or **Later**; Later installs it when you quit Beaver.
 - Scheme Generator: under the template picker, a line says what a link of
   that template does in the app. Agents get the same text: `scheme_build`
   lists it for every template and returns it as `does`.
@@ -66,6 +69,9 @@ When releasing:
   session was open — before, you had to pick it in Sessions by hand.
 - Double-clicking empty space in the toolbar zooms the window again —
   before, only the strip above the sidebar did.
+- A device whose app closes its socket is disconnected at once. Before, if
+  the socket closed cleanly (no reset), Beaver never noticed, and the
+  device and its session stayed live until you disconnected it by hand.
 
 ## [4.0.1] - 2026-09-24
 
