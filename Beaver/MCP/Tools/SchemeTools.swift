@@ -15,7 +15,13 @@ enum SchemeTools {
         title: "Build a deep link",
         description: "Use to build a deep link (URL scheme) into a Zapp app, like Beaver's Scheme Generator: open a screen or feed entry (myapp://open?type=movie&id=42), present a feed, web page or layout (myapp://present?…), X-Ray actions like connecting remote assistance to this Beaver (myapp://xray?remoteAssistance=ws://…), reset the device id, or any plugin host; web index.html?… links too. Without scheme it uses the app's own, from the session's storage (applicaster.v2.urlScheme). Returns the URL. show: true puts it in the Scheme Generator form on screen (in the background); copy: true puts it on the clipboard; qrFile saves its QR code as PNG.",
         kind: .change,
-        inputSchema: ToolSchema.object([
+        inputSchema: ToolSchema.object(properties),
+        run: run
+    )
+
+    /// Typed on its own: as one expression with the tool the type checker
+    /// times out (Xcode 26.2 on CI).
+    private static let properties: [String: JSON] = [
             "mode": ToolSchema.string("mobile (myapp://…, default) or web (index.html?…: open's params on Vizio, layout on every web platform).",
                                       oneOf: SchemeLink.Mode.allCases.map(\.rawValue)),
             "template": ToolSchema.string("screen-type (type + id, default), feed-content (feedUrl + id or position), direct-screen (screenId), present (feedUrl, screenId, id, resumeTime), web-page (linkUrl), layout (layoutId), xray (xrayAction), reset-uuid, external-account, custom (host + params). Omitted: follows the keys you pass (linkUrl → web-page, layoutId → layout, xray keys → xray, host → custom).",
@@ -43,7 +49,7 @@ enum SchemeTools {
             "showXrayFloatingButton": ToolSchema.boolean("xray: the X-Ray floating button; also saves fileLogLevel and shortcutEnabled."),
             "mcpServerEnabled": ToolSchema.boolean("xray: the app's own MCP server."),
             "host": ToolSchema.string("custom: the host, e.g. a plugin's, or plugin with params {pluginIdentifier: …}."),
-            "params": ["description": "More query parameters, {key: value} or \"key=value&key2=value2\". open passes unknown ones to the screen as entry fields."],
+            "params": .object(["description": .string("More query parameters, {key: value} or \"key=value&key2=value2\". open passes unknown ones to the screen as entry fields.")]),
             "state": ToolSchema.string("Open templates: the player's initial state, fullscreen (the app's default), inline or none.", oneOf: ["fullscreen", "inline", "none"]),
             "title": ToolSchema.string("Open templates: a title, passed to the screen as an entry field."),
             "show": ToolSchema.boolean("Edit the Scheme Generator form on screen and switch to its tab: the keys you pass change the form, the rest stays. Nothing takes focus. Default false: build a fresh link, the window stays as it is."),
@@ -52,8 +58,9 @@ enum SchemeTools {
             "copy": ToolSchema.boolean("Put the URL on the user's clipboard, like the Copy button. Only when the user asks for it: it replaces what they copied."),
             "qrFile": ToolSchema.string("Save the link's QR code as PNG here; absolute or starting with ~."),
             "overwrite": ToolSchema.boolean("Replace qrFile if it exists. Default false."),
-        ])
-    ) { args, ctx in
+    ]
+
+    @Sendable static func run(_ args: ToolArguments, _ ctx: ToolContext) async throws -> ToolResult {
         let reveal = try args.bool("reveal") ?? false
         let show = try (args.bool("show") ?? false) || reveal
         let reset = try args.bool("reset") ?? false
