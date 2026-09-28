@@ -15,6 +15,9 @@ When releasing:
 ## [Unreleased]
 
 ### Added
+- **Updates install themselves.** Beaver checks for a new version on every
+  launch and downloads it in the background. When it's ready, choose
+  **Restart Now** or **Later**; Later installs it when you quit Beaver.
 - Several devices can be connected at once. Click the Connected pill in
   the middle of the toolbar to switch between them or open a recent
   session. A device that connects doesn't take the window while you're

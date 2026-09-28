@@ -59,16 +59,17 @@ struct BeaverApp: App {
         // before the first attention note or an old notification's click.
         _ = AgentNotifier.shared
 
-        // Sparkle: `startingUpdater: true` schedules the first
-        // appcast check shortly after launch. Subsequent checks run
-        // on Sparkle's default 24-hour interval; users can also
-        // trigger one manually via the "Check for Updates…" menu
-        // item below.
+        // Sparkle: `startingUpdater: true` schedules checks on its
+        // 24-hour interval; the background check below adds one on
+        // every launch. Updates download on their own and the
+        // delegate asks to restart. Users can also check via the
+        // "Check for Updates…" menu item below.
         updaterController = SPUStandardUpdaterController(
             startingUpdater: true,
             updaterDelegate: updaterDelegate,
             userDriverDelegate: nil
         )
+        updaterController.updater.checkForUpdatesInBackground()
 
         // Start the server and wire up the inbound pipeline.
         Task { [env = _env.wrappedValue] in
@@ -356,6 +357,25 @@ private func replaceDeletedLiveSessions(env: AppEnvironment, viewed: Int64?,
 private final class BeaverUpdaterDelegate: NSObject, SPUUpdaterDelegate {
     func feedURLString(for updater: SPUUpdater) -> String? {
         "https://applicaster.github.io/Beaver/appcast.xml"
+    }
+
+    /// An update finished downloading in the background. A restart drops
+    /// every connected device and agent, so ask instead of relaunching;
+    /// "Later" leaves it to Sparkle, which installs it when Beaver quits.
+    func updater(_ updater: SPUUpdater, willInstallUpdateOnQuit item: SUAppcastItem,
+                 immediateInstallationBlock immediateInstallHandler: @escaping () -> Void) -> Bool {
+        // After returning: the handler only works once we've returned true.
+        DispatchQueue.main.async {
+            let alert = NSAlert()
+            alert.messageText = "Beaver \(item.displayVersionString) is ready to install"
+            alert.informativeText = "Restarting disconnects every device and agent. If you choose Later, it installs the next time you quit Beaver."
+            alert.addButton(withTitle: "Restart Now")
+            alert.addButton(withTitle: "Later")
+            if alert.runModal() == .alertFirstButtonReturn {
+                immediateInstallHandler()
+            }
+        }
+        return true
     }
 }
 
