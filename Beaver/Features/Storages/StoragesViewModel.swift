@@ -467,7 +467,7 @@ final class StoragesViewModel {
 
     /// Send an edit and read it back through `StorageCommand.sendAndVerify`,
     /// the same path `storage_set` / `storage_delete` take (D58).
-    func apply(_ edit: Edit, via server: WSServer) async -> EditResult {
+    func apply(_ edit: Edit, via device: any DeviceLink) async -> EditResult {
         let previous = StorageCommand.storedValue(
             in: records(in: edit.namespace), parent: edit.parent, key: edit.key
         )
@@ -482,7 +482,7 @@ final class StoragesViewModel {
 
         let outcome = await StorageCommand.sendAndVerify(
             edit.command, layer: edit.namespace, parent: edit.parent, key: edit.key,
-            expected: edit.value, sessionId: sessionId, store: store, device: server)
+            expected: edit.value, sessionId: sessionId, store: store, device: device)
         await reloadFromStore()
         switch outcome {
         case .applied: return .applied(undo: undo)
@@ -494,11 +494,11 @@ final class StoragesViewModel {
     /// Send `storage.list` to the device. The response comes back as a
     /// `storage` message and refreshes `snapshots` via the change
     /// subscription; the delayed reload below covers a broadcast that
-    /// lands before the subscription Task has woken up. No-op if no
-    /// client is connected (WSServer.send silently drops).
-    func requestRefresh(via server: WSServer) {
-        Task { [weak self] in
-            await server.send(command: "storage.list")
+    /// lands before the subscription Task has woken up. No-op if this
+    /// session's device isn't connected (the send silently drops).
+    func requestRefresh(via device: any DeviceLink) {
+        Task { [weak self, sessionId = self.sessionId] in
+            await device.send(command: "storage.list", to: sessionId)
             // 400 ms is a typical SDK round-trip for storage.list;
             // small enough that the user doesn't see staleness, big
             // enough that the SDK has almost certainly answered.

@@ -191,11 +191,11 @@ struct SessionsView: View {
         .background(.bar)
     }
 
-    /// Live = the session created on the active WebSocket connection.
+    /// Live = a session a connected device is writing to (D73).
     /// Deleting it while the device is mid-stream would yank the rug
     /// out from under the inbound writer, so we gate the menu item.
     private func isLiveSession(_ item: SessionListItem) -> Bool {
-        env.currentSessionId == item.id
+        env.isLive(item.id)
     }
 }
 

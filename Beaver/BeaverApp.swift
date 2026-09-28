@@ -54,7 +54,7 @@ struct BeaverApp: App {
         // the one last used, as LogFeedViewModel did on its own before.
         environment.activeFilter = LogFeedViewModel.rememberedFilter()
         _env = State(initialValue: environment)
-        agentAccess = AgentAccess(store: store, ui: environment, device: server)
+        agentAccess = AgentAccess(store: store, ui: environment, device: environment)
         // design M28: permission read and click delegate ready at launch,
         // before the first attention note or an old notification's click.
         _ = AgentNotifier.shared
@@ -140,16 +140,6 @@ struct BeaverApp: App {
         Task { @MainActor in
             for await state in env.server.state {
                 env.serverState = state
-
-                if case .clientConnected = state {
-                    // Ask the SDK for its command list so the command-bar
-                    // help popover has something to show. Brief delay so
-                    // the SDK has finished registering its handlers.
-                    Task {
-                        try? await Task.sleep(for: .milliseconds(500))
-                        await env.server.send(command: "cmdlist")
-                    }
-                }
             }
         }
 
@@ -160,24 +150,29 @@ struct BeaverApp: App {
         Task { @MainActor in
             for await item in env.server.inbound {
                 switch item {
-                case .connected:
-                    if env.currentSessionId == nil,
-                       let session = try? await env.store.createSession(source: .live) {
-                        env.didConnectSession(session.id)
+                case .connected(let connection):
+                    guard let session = try? await env.store.createSession(source: .live) else { continue }
+                    env.didConnect(connection, session: session.id)
+                    // Ask the SDK for its command list so the command-bar
+                    // help popover has something to show. Brief delay so
+                    // the SDK has finished registering its handlers.
+                    Task {
+                        try? await Task.sleep(for: .milliseconds(500))
+                        await env.send(command: "cmdlist", to: session.id)
                     }
-                case .frame(let frame):
-                    await Self.handleInbound(frame: frame, env: env)
-                case .disconnected:
-                    if let sid = env.currentSessionId {
-                        try? await env.store.endSession(sid)
-                        env.didDisconnectSession()
+                case .frame(let connection, let frame):
+                    guard let sessionId = env.live.session(for: connection) else { continue }
+                    await Self.handleInbound(frame: frame, sessionId: sessionId, env: env)
+                case .disconnected(let connection):
+                    if let sessionId = env.didDisconnect(connection) {
+                        try? await env.store.endSession(sessionId)
                     }
                 }
             }
         }
 
         // Keep the toolbar's "are there events to act on?" count fresh,
-        // and react to session deletions so the viewing/current pointers
+        // and react to session deletions so the viewing and live pointers
         // don't dangle on rows that no longer exist.
         Task { @MainActor in
             for await change in await env.store.changes() {
@@ -193,13 +188,11 @@ struct BeaverApp: App {
                     await env.refreshViewingEventCount()
                 case .sessionDeleted(let id):
                     if env.viewingSessionId == id { env.viewingSessionId = nil }
-                    if env.currentSessionId == id { env.currentSessionId = nil }
-                    await ensureLiveSessionIfConnected(env: env)
+                    await replaceDeletedLiveSessions(env: env) { $0 == id }
                     await env.refreshViewingEventCount()
                 case .sessionsCleared:
                     env.viewingSessionId = nil
-                    env.currentSessionId = nil
-                    await ensureLiveSessionIfConnected(env: env)
+                    await replaceDeletedLiveSessions(env: env) { _ in true }
                     await env.refreshViewingEventCount()
                 default:
                     break
@@ -249,10 +242,7 @@ struct BeaverApp: App {
 
     private static let log = Logger(subsystem: "com.applicaster.LoggerNext", category: "AgentAccess")
 
-    private static func handleInbound(frame: Data, env: AppEnvironment) async {
-        let sessionId = await MainActor.run { env.currentSessionId }
-        guard let sessionId else { return }
-
+    private static func handleInbound(frame: Data, sessionId: Int64, env: AppEnvironment) async {
         switch ProtocolDecoder.decode(frame) {
         case .success(.event(let event)):
             await env.store.append(event, to: sessionId)
@@ -261,7 +251,7 @@ struct BeaverApp: App {
             // still appears in the log feed normally.
             if let names = CommandHints.cmdListNames(in: event) {
                 await MainActor.run {
-                    env.availableCommands = CommandHints.merge(sdkNames: names)
+                    env.live.setCommands(CommandHints.merge(sdkNames: names), for: sessionId)
                 }
             }
         case .success(.storage(let namespaces)):
@@ -298,17 +288,17 @@ struct BeaverApp: App {
 
 // MARK: - Helpers
 
-/// If a device is currently connected but `currentSessionId` is nil
-/// (e.g., right after the user deleted every session), create a fresh
-/// live session so the inbound WebSocket pipeline has somewhere to
-/// write. Without this, events from the live device would be silently
-/// dropped until the user reconnected the device.
+/// A deleted live session (e.g., right after the user deleted every
+/// session) leaves its device with nowhere to write: give each such
+/// connection a fresh live session, and show it if nothing is viewed.
+/// Without this, events from the device would be silently dropped until
+/// it reconnected.
 @MainActor
-private func ensureLiveSessionIfConnected(env: AppEnvironment) async {
-    guard case .clientConnected = env.serverState else { return }
-    guard env.currentSessionId == nil else { return }
-    if let session = try? await env.store.createSession(source: .live) {
-        env.didConnectSession(session.id)
+private func replaceDeletedLiveSessions(env: AppEnvironment, deleted: (Int64) -> Bool) async {
+    for sessionId in env.live.sessionIds where deleted(sessionId) {
+        guard let fresh = try? await env.store.createSession(source: .live) else { continue }
+        env.live.replace(session: sessionId, with: fresh.id)
+        if env.viewingSessionId == nil { env.viewingSessionId = fresh.id }
     }
 }
 

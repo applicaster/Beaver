@@ -153,11 +153,11 @@ struct MainWindow: View {
                 fresh.searchTerm = env.storageSearch
                 // Auto-fetch the first storage snapshot so the user
                 // doesn't have to click Reload to see anything.
-                // No-op if no client is connected; safe to call
+                // No-op if its device isn't connected; safe to call
                 // regardless of which tab the user is currently
                 // viewing — the snapshot lands in the store and
                 // both this VM and any future visit pick it up.
-                fresh.requestRefresh(via: env.server)
+                fresh.requestRefresh(via: env)
             }
             if networkVM?.sessionId != sid {
                 let fresh = NetworkViewModel(store: env.store, sessionId: sid, filter: env.networkFilter)
