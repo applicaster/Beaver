@@ -11,9 +11,8 @@ import SwiftUI
 struct DevicePopover: View {
     let session: Session
     let isLive: Bool
-    /// Every session row (C3) — to resolve which live session among
-    /// several sharing a device uid is the one agents' default
-    /// actually targets.
+    /// Every session row — to resolve which live session among several
+    /// sharing a device uid is the one agents' default actually targets.
     let sessions: [Session]
     @Environment(AppEnvironment.self) private var env
     @Environment(ToastCenter.self) private var toasts
@@ -27,7 +26,10 @@ struct DevicePopover: View {
                 HStack {
                     Toggle("Default for agents", isOn: defaultBinding)
                         .toggleStyle(.checkbox)
-                        .help("Agents' device tools use this app when a call names no device")
+                        .disabled(defaultIsAnotherSession)
+                        .help(defaultIsAnotherSession
+                              ? "Another session of this device is the default"
+                              : "Agents' device tools use this app when a call names no device")
                     Spacer()
                     Button("Disconnect", role: .destructive) {
                         Task { await env.disconnect(session.id) }
@@ -87,12 +89,23 @@ struct DevicePopover: View {
         }
     }
 
+    /// Several live sessions can share a device uid: only the one
+    /// `liveSession` resolves to is the actual default, not every session
+    /// `matches()` would accept.
+    private var isDefault: Bool {
+        env.defaultDevice?.liveSession(in: sessions, live: env.live.sessionIds) == session.id
+    }
+
+    /// The default is this device, but another of its live sessions: the
+    /// toggle shows unticked, and ticking it would set the same device again
+    /// and change nothing.
+    private var defaultIsAnotherSession: Bool {
+        env.defaultDevice?.matches(session) == true && !isDefault
+    }
+
     private var defaultBinding: Binding<Bool> {
         Binding(
-            // C3: several live sessions can share a device uid — only
-            // the one `liveSession` resolves to is the actual default,
-            // not every session `matches()` would accept.
-            get: { env.defaultDevice?.liveSession(in: sessions, live: env.live.sessionIds) == session.id },
+            get: { isDefault },
             set: { on in
                 env.setDefaultDeviceByUser(on ? DefaultDevice(session: session) : nil,
                                            name: title, sessionId: session.id)
@@ -119,9 +132,9 @@ struct DevicePopover: View {
                 Text("This app doesn't answer MCP — it needs quick-brick-xray's native WebSocket sink.")
                     .font(.caption).foregroundStyle(.secondary)
                 Spacer()
-                // A native app that was merely slow to answer once
-                // latches .unsupported too (batch A made initialize
-                // retryable) — Retry gives it a second chance.
+                // A native app is never latched as unsupported, but one can
+                // be before its handshake arrives. The handshake clears the
+                // latch, so Retry then loads its toolboxes (as after a failed load).
                 Button("Retry") { Task { await reload() } }
             }
         case .failed(let message):
@@ -134,7 +147,7 @@ struct DevicePopover: View {
             Text("This app has no toolboxes.").font(.caption).foregroundStyle(.secondary)
         case .loaded(let boxes):
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 6) {
                     ForEach(boxes, id: \.name) { box in
                         DisclosureGroup(isExpanded: Binding(
                             get: { openToolbox == box.name },

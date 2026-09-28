@@ -588,7 +588,7 @@ struct MainWindow: View {
 private struct ToolbarDeviceBadge: View {
     let session: Session
     let isLive: Bool
-    /// Every session row — threaded down to `DevicePopover` (C3), which
+    /// Every session row — threaded down to `DevicePopover`, which
     /// needs the full list to resolve the one live session a shared
     /// device uid's default actually targets.
     let sessions: [Session]
@@ -699,7 +699,7 @@ private struct DeviceSwitcher: View {
                 } else {
                     ForEach(sections.connected) { s in
                         choice(s, Self.item(s, suffix: Self.detail(s))
-                            // C3: only the session the default resolves to is
+                            // Only the session the default resolves to is
                             // "the" default — not every session sharing its uid.
                             + (env.defaultDevice?.liveSession(in: sessions, live: env.live.sessionIds) == s.id
                                 ? " — default for agents" : ""))

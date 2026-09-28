@@ -271,7 +271,7 @@ struct ToolboxToolsTests {
         #expect(r.summary.contains("Default device: Alpha"))
     }
 
-    // MARK: Bug hunt fixes (batch B)
+    // MARK: tools_call targets, confirmation and results
 
     /// Alpha (older) and Beta, both live; the default is `defaultDevice`.
     private func alphaBeta(default defaultDevice: DefaultDevice?,

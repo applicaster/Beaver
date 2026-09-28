@@ -105,7 +105,8 @@ When releasing:
   indicator, and long app- or device-supplied text now wraps within a limit
   instead of overflowing the popover.
 - Only the one live session a shared device id resolves to is marked
-  "default for agents" — not every session that happens to share it.
+  "default for agents" — not every session that happens to share it. On
+  that device's other sessions the toggle is disabled and says why.
 - PROTOCOL.md, the design plan and DECISIONS.md corrected against the real
   SDK behavior found in the bug hunt (frame encoding, Android's handshake
   order and lack of reconnect, and more).
