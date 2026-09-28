@@ -22,7 +22,8 @@ public struct MCPServer: Sendable {
         native sink also offer toolboxes (storage, app, debugfeatures, React ones): list them with \
         toolboxes_list and run one with tools_call; deviceId "beaver" reaches Beaver's own tools the same way. \
         If no device is connected you can still read past sessions \
-        (sessions_list) and log files the user has (sessions_import). Omitting sessionId means the \
+        (sessions_list) and log files the user has (sessions_import). When it works in one session and \
+        not in another (app versions, devices), sessions_compare(a: <works>, b: <fails>). Omitting sessionId means the \
         live session (with several, the viewed one if live, else the newest), else the one the user \
         is viewing, else the most recent. Before filtering by \
         subsystem or category call logs_facets: names are namespaced and you will not guess them \

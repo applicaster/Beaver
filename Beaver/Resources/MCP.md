@@ -75,7 +75,10 @@ or a release):
    appear in the menu behind the toolbar's Connected pill, and `beaver_status` lists both.
 11. Report problems with the Beaver version (Beaver → About) and the Agent
    panel's **Copy** output.
-12. Toolboxes: connect an app built with quick-brick-xray's **native** WebSocket
+12. Compare: Sessions tab → right-click a session → **Compare with** → pick
+   another. A sheet lists what differs; click a line to open it. Ask the agent
+   "compare session <a> with <b>" → `sessions_compare`.
+13. Toolboxes: connect an app built with quick-brick-xray's **native** WebSocket
    sink (the JS-only sink has none), click the device badge on the left of the
    toolbar — the popover lists its toolboxes. Nothing to turn on in Beaver.
 13. Session retention: app menu → **Delete Sessions Older Than** shows 30
@@ -96,6 +99,7 @@ or a release):
 | `sessions_import` | Open a Beaver / zapp-support JSON or a HAR file as a new session |
 | `sessions_export` | Write a session (or a filtered part) as JSON, or its requests as HAR |
 | `sessions_delete` | Delete one session, or all |
+| `sessions_compare` | Two sessions side by side: log patterns only in one, warnings/errors per subsystem, requests only in one or whose status or median duration changed |
 | `logs_facets` | Counts per level, subsystem, category under a filter and range |
 | `logs_query` | Log lines by filter, id range or time; cursor paging |
 | `logs_get` | Full events with data and context payloads (256 KB cap) |
@@ -273,6 +277,26 @@ takes focus, unless you pass `reveal: true`.
    `retentionDays` in `beaver_status()` go on their own unless they have a
    bookmark: to keep one, `bookmarks_set(eventId: <id>)` in it, or tell the user
    the setting is in the app menu → Delete Sessions Older Than.
+
+### compare — "why does it fail on 4.6 but not on 4.5?"
+
+1. `sessions_list()` — find a session that works (4.5, or device A) and one
+   that fails (4.6, or device B). No session that works? Ask the user to
+   record one, or import one: `sessions_import(path: …)`.
+2. `sessions_compare(a: <works>, b: <fails>)` — log lines only in one side,
+   compared by pattern (`Loaded <n> items in <n>ms`: numbers, UUIDs, hex
+   ids, times and URL query values don't count), warnings and errors per
+   subsystem (▲ = more in b), requests only in one side (`GET host/users/:id`),
+   and requests whose status class or median duration changed (×2 and
+   100 ms or more). `sections: ["network"]` for one part; `limit` for longer
+   lists.
+3. Each line has an id: `logs_get(ids: [<firstId>])`, `network_get(id: <firstId>)`,
+   or `logs_query(sessionId: <b>, filter: {subsystems: ["<subsystem>"]})`
+   for the context around it.
+4. Storage and App Info (versions, plugins, device) aren't compared yet:
+   `storage_snapshot(sessionId: …, refresh: false)` on each side.
+5. Tell the user what changed first, with ids; the user sees the same in
+   Sessions → right-click a session → **Compare with**.
 
 ### review-errors — go through the errors with the user
 

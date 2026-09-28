@@ -411,7 +411,8 @@ Beaver/
 │   │   │   └── StoragesViewModel.swift
 │   │   ├── Sessions/
 │   │   │   ├── SessionsView.swift
-│   │   │   └── SessionsViewModel.swift
+│   │   │   ├── SessionsViewModel.swift
+│   │   │   └── SessionCompareView.swift   (D81 Compare sheet)
 │   │   ├── CommandBar/
 │   │   │   ├── CommandBarView.swift
 │   │   │   └── CommandBarViewModel.swift
@@ -422,7 +423,8 @@ Beaver/
 │   │       └── Toast.swift            (D33 ToastCenter + ToastPresenter)
 │   └── Support/
 │       ├── Highlighting.swift
-│       └── NetworkInterface.swift
+│       ├── NetworkInterface.swift
+│       └── SessionCompare.swift   (D81; sessions_compare and the Compare sheet)
 ├── BeaverTests/             (Swift Testing)
 │   ├── ProtocolDecoderTests.swift
 │   ├── LogStoreTests.swift

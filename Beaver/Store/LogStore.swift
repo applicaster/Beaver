@@ -66,6 +66,7 @@ public actor LogStore {
             // is NSRegularExpression so patterns follow ICU syntax.
             c.prepareDatabase { db in
                 db.add(function: Self.regexpFunction)
+                db.add(function: Self.patternFunction)
             }
             return c
         }()
@@ -104,6 +105,14 @@ public actor LogStore {
         }
         let range = NSRange(value.startIndex..<value.endIndex, in: value)
         return regex.firstMatch(in: value, range: range) != nil
+    }
+
+    /// `BEAVER_PATTERN(message)`: `SessionCompare.pattern`, for grouping
+    /// log lines in SQL (D81).
+    nonisolated static let patternFunction = DatabaseFunction(
+        "BEAVER_PATTERN", argumentCount: 1, pure: true
+    ) { values -> String in
+        SessionCompare.pattern(String.fromDatabaseValue(values[0]) ?? "")
     }
 
     /// SQLite calls REGEXP once per row and column with the same pattern;
@@ -802,6 +811,57 @@ public actor LogStore {
                 arguments: StatementArguments(idList)
             )
             return rows.map(Self.makeEventRecord)
+        }
+    }
+
+    // MARK: - Session comparison (D81)
+
+    /// Log lines grouped by subsystem and pattern (`SessionCompare.pattern`
+    /// of the first 300 characters), worst level and most frequent first.
+    /// Identical lines are grouped first, so the pattern runs once per
+    /// distinct line, not per event.
+    public func messagePatterns(sessionId: Int64, limit: Int) async throws -> [SessionCompare.PatternCount] {
+        try await dbQueue.read { db in
+            try Row.fetchAll(
+                db,
+                sql: """
+                    SELECT subsystem, BEAVER_PATTERN(m) AS pattern, MAX(sev) AS sev,
+                           SUM(n) AS n, MIN(first) AS first
+                    FROM (SELECT subsystem, substr(message, 1, 300) AS m, COUNT(*) AS n, MIN(id) AS first,
+                                 MAX(CASE level WHEN 'error' THEN 4 WHEN 'warning' THEN 3
+                                     WHEN 'info' THEN 2 WHEN 'debug' THEN 1 ELSE 0 END) AS sev
+                          FROM event WHERE session_id = ? GROUP BY subsystem, m)
+                    GROUP BY subsystem, pattern
+                    ORDER BY sev DESC, n DESC
+                    LIMIT ?
+                """,
+                arguments: [sessionId, limit]
+            ).map {
+                SessionCompare.PatternCount(subsystem: $0["subsystem"], pattern: $0["pattern"],
+                                            level: LogLevel(numericLevel: $0["sev"]) ?? .info,
+                                            count: $0["n"], firstId: $0["first"])
+            }
+        }
+    }
+
+    /// Warnings and errors per subsystem.
+    public func problemCounts(sessionId: Int64) async throws -> [SessionCompare.LevelKey: Int] {
+        try await dbQueue.read { db in
+            var counts: [SessionCompare.LevelKey: Int] = [:]
+            for row in try Row.fetchAll(
+                db,
+                sql: """
+                    SELECT subsystem, level, COUNT(*) AS n FROM event
+                    WHERE session_id = ? AND level IN ('warning', 'error')
+                    GROUP BY subsystem, level
+                """,
+                arguments: [sessionId]
+            ) {
+                if let level = LogLevel(rawValue: row["level"]) {
+                    counts[SessionCompare.LevelKey(subsystem: row["subsystem"], level: level)] = row["n"]
+                }
+            }
+            return counts
         }
     }
 

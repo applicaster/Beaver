@@ -234,9 +234,9 @@ public actor AgentAccess {
         Capability(
             icon: "clock.arrow.circlepath",
             title: "Sessions and files",
-            note: "Read past sessions without a device, import Beaver, zapp-support or HAR files, export a session as JSON or HAR, delete sessions.",
+            note: "Read past sessions without a device, import Beaver, zapp-support or HAR files, export a session as JSON or HAR, delete sessions, and compare two: what one logged or requested that the other didn't.",
             example: "Use beaver: export this session's network requests as HAR to ~/Desktop.",
-            tools: ["sessions_list", "sessions_import", "sessions_export", "sessions_delete"]),
+            tools: ["sessions_list", "sessions_import", "sessions_export", "sessions_delete", "sessions_compare"]),
         Capability(
             icon: "bookmark",
             title: "Bookmarks and saved filters",

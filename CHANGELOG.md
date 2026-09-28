@@ -47,6 +47,15 @@ When releasing:
   new tool `storage_diff` (earliest → latest by default; `since`,
   `beforeEventId`, or `fromId` / `toId`), and a `storage-changes` recipe —
   "what changed in storage after login".
+- **Compare two sessions** — "it works on 4.5, not on 4.6", "works on
+  device A, not on B". Sessions → right-click a session → **Compare with**
+  → pick the other. A sheet lists log lines only in one of them (numbers,
+  ids, times and URL query values don't count, so `Loaded 42 items in
+  118ms` matches `Loaded 7 items in 95ms`), warnings and errors per
+  subsystem A vs B, requests only in one (ids in the path don't count),
+  and requests whose status class or median duration changed. Click a
+  line to open that event or request. Storage and App Info comparisons
+  come later. Agents: new tool `sessions_compare(a, b, sections?)`.
 - Drop a session file (`.json`) or HAR anywhere on the window to import
   it, the same as Import. A file Beaver can't open now says so instead of
   doing nothing.

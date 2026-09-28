@@ -21,6 +21,12 @@ struct SessionsView: View {
 
     @State private var pendingDelete: SessionListItem?
     @State private var pendingDeleteAll = false
+    @State private var comparing: ComparePair?
+
+    private struct ComparePair: Identifiable {
+        let a: Int64, b: Int64
+        var id: String { "\(a)-\(b)" }
+    }
 
     var body: some View {
         Group {
@@ -54,6 +60,16 @@ struct SessionsView: View {
                             Label("Open in Log feed",
                                   systemImage: "arrow.forward.circle")
                         }
+                        Menu {
+                            ForEach(vm.sessions.filter { $0.id != item.id }) { other in
+                                Button("#\(other.id) \(other.title)" + (other.appLabel.map { " · \($0)" } ?? "")) {
+                                    comparing = ComparePair(a: item.id, b: other.id)
+                                }
+                            }
+                        } label: {
+                            Label("Compare with", systemImage: "arrow.left.arrow.right")
+                        }
+                        .disabled(vm.sessions.count < 2)
                         if isLiveSession(item) {
                             Button {
                                 Task { await env.disconnect(item.id) }
@@ -102,8 +118,13 @@ struct SessionsView: View {
         // onChange can only fire from user clicks in the list (or from
         // a brand-new session arriving via the WebSocket — also a
         // reasonable reason to jump to the live feed).
+        // Not when something else already moved the window on (Compare's
+        // links open a request in the Network tab).
         .onChange(of: env.viewingSessionId) { _, new in
-            if let new { onOpenInLogFeed(new) }
+            if let new, env.selectedTab == .sessions { onOpenInLogFeed(new) }
+        }
+        .sheet(item: $comparing) { pair in
+            SessionCompareView(sessions: vm.sessions, a: pair.a, b: pair.b)
         }
         // MARK: Delete-one confirmation
         .confirmationDialog(
