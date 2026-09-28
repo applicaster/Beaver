@@ -95,6 +95,7 @@ or a release):
 | `storage_set` | Set a storage key; Beaver re-reads storage and says whether the app applied it |
 | `storage_delete` | Delete a storage key, with the same check |
 | `commands_list` | Commands a connected app accepts (`deviceId` when several are connected) |
+| `devices_disconnect` | Close a connected app's connection (the Disconnect button); its session ends |
 | `commands_send` | Send a command to the app; optionally collect the logs it causes, following a restart |
 | `bookmarks_list` | Events and requests the user bookmarked |
 | `bookmarks_set` | Bookmark an event or request, or remove the bookmark |
@@ -197,6 +198,7 @@ takes focus, unless you pass `reveal: true`.
 2. `commands_list(deviceId: "14")` — Beta's commands.
 3. `commands_send(deviceId: "14", command: "<command>", collectLogsMs: 5000)`.
 4. `logs_query(sessionId: 12, since: "5m")` — reads take a sessionId; a device's live session id is its deviceId.
+5. `devices_disconnect(deviceId: "12")` — only when the user asks to drop Alpha; an app that reconnects on its own comes back in a new session.
 
 ### organise — bookmarks, saved filters, a clean screen
 

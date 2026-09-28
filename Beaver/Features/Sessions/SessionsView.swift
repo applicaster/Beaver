@@ -54,6 +54,13 @@ struct SessionsView: View {
                             Label("Open in Log feed",
                                   systemImage: "arrow.forward.circle")
                         }
+                        if isLiveSession(item) {
+                            Button {
+                                Task { await env.disconnect(item.id) }
+                            } label: {
+                                Label("Disconnect", systemImage: "eject")
+                            }
+                        }
                         Divider()
                         Button(role: .destructive) {
                             pendingDelete = item
@@ -150,7 +157,8 @@ struct SessionsView: View {
         SessionRow(
             item: item,
             isLive: isLiveSession(item),
-            onRequestDelete: { pendingDelete = item }
+            onRequestDelete: { pendingDelete = item },
+            onDisconnect: { Task { await env.disconnect(item.id) } }
         )
     }
 
@@ -208,6 +216,7 @@ private struct SessionRow: View {
     let item: SessionListItem
     let isLive: Bool
     let onRequestDelete: () -> Void
+    let onDisconnect: () -> Void
 
     @State private var isHovered = false
 
@@ -249,6 +258,19 @@ private struct SessionRow: View {
             }
 
             Spacer(minLength: 8)
+
+            // A live session can't be deleted, but its device can be
+            // disconnected (D73): always shown, so it's easy to find.
+            if isLive {
+                Button {
+                    onDisconnect()
+                } label: {
+                    Image(systemName: "eject")
+                        .font(.caption)
+                }
+                .buttonStyle(.plain)
+                .help("Disconnect this device")
+            }
 
             // Reserve space always so hovering doesn't reflow the
             // row. Becomes visible + hit-testable only while hovered,

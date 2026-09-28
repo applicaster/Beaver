@@ -6,7 +6,7 @@
 import Foundation
 
 enum CommandTools {
-    static let all = [send]
+    static let all = [send, disconnect]
 
     static let maxCollectMillis = 30_000
 
@@ -67,6 +67,24 @@ enum CommandTools {
             structured: .object(structured),
             next: next,
             sessionId: w.sessionId
+        )
+    }
+
+    static let disconnect = MCPTool(
+        name: "devices_disconnect",
+        title: "Disconnect a device",
+        description: "Use when the user asks to drop a connected app, or a stale one is in the way: Beaver closes that app's connection and its session ends, like the Disconnect button. An app that reconnects on its own comes back in a new session. With several apps connected, pass deviceId from beaver_status.",
+        kind: .change,
+        inputSchema: ToolSchema.object(["deviceId": ToolSchema.deviceId])
+    ) { args, ctx in
+        let (_, live) = try await ctx.requireDevice(args, doing: "disconnect it")
+        let session = try await ctx.liveSession(live)
+        await ctx.device.disconnect(live)
+        return ToolResult(
+            summary: "Disconnected \(StatusTools.describeDevice(session.session)) (session #\(live)).",
+            structured: ["disconnected": .string(String(live)), "sessionId": JSON(live)],
+            next: ["beaver_status() — an app that reconnects on its own shows up in a new session"],
+            sessionId: live
         )
     }
 }

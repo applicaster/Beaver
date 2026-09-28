@@ -690,6 +690,11 @@ private struct DeviceSwitcher: View {
                 }
             }
             Divider()
+            if let viewed = sections.connected.first(where: { $0.id == env.viewingSessionId }) {
+                Button("Disconnect \(ToolbarDeviceBadge.title(viewed))") {
+                    Task { await env.disconnect(viewed.id) }
+                }
+            }
             Button("All Sessions…") { env.selectedTab = .sessions }
         } label: {
             ConnectionIndicator(state: env.serverState, showsChevron: true)

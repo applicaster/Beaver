@@ -19,8 +19,12 @@ When releasing:
   the middle of the toolbar to switch between them or open a recent
   session. A device that connects doesn't take the window while you're
   looking at another live one.
+- **Disconnect** a device: the ⏏ button on a live session in Sessions,
+  or Disconnect in the Connected pill's menu. An app that reconnects on
+  its own comes back in a new session.
 - Agents: `beaver_status` lists every connected device; with more than one,
   `commands_send`, `commands_list` and storage changes take `deviceId`.
+  New tool `devices_disconnect`.
 
 ### Fixed
 - A device that connects is shown at once, even if a past or imported

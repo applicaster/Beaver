@@ -2577,6 +2577,9 @@ won't decode, and the feed starts unfiltered once.
   emitter switcher. The session was already the unit of viewing, so no second
   "selected device" state.
 - **A new device** takes the window only when the viewed session isn't live.
+- **Disconnect** (Sessions ⏏, the pill's menu, `devices_disconnect`)
+  closes that one connection; the session ends as on any drop. Beaver
+  can't stop an SDK from reconnecting — that comes back as a new session.
 - **Following a restart (D66)** with several devices: same fingerprint (app,
   model, platform), else the one session that just came up. Two identical
   builds look alike until the SDK sends a device id.

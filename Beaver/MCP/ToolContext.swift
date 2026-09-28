@@ -71,6 +71,8 @@ public struct HostSnapshot: Sendable, Equatable {
 public protocol DeviceLink: Sendable {
     /// Sends to the device whose live session is `sessionId`; no-op once it's gone.
     func send(command: String, to sessionId: Int64) async
+    /// Closes that device's connection; its session ends. No-op once it's gone.
+    func disconnect(_ sessionId: Int64) async
 }
 
 

@@ -53,6 +53,10 @@ final class FakeDevice: DeviceLink {
 
     var sent: [String] { log.withLock { $0.map(\.command) } }
     var targets: [Int64] { log.withLock { $0.map(\.sessionId) } }
+    private let drops = Mutex<[Int64]>([])
+    var disconnected: [Int64] { drops.withLock { $0 } }
+
+    func disconnect(_ sessionId: Int64) async { drops.withLock { $0.append(sessionId) } }
 
     func send(command: String, to sessionId: Int64) async {
         log.withLock { $0.append((command, sessionId)) }

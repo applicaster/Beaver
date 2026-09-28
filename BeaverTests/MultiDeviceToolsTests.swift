@@ -81,4 +81,25 @@ struct MultiDeviceToolsTests {
         ui.update { $0.viewingSessionId = a.id }
         #expect(try await ctx.resolveSession(ToolArguments()).id == a.id)
     }
+
+    @Test("devices_disconnect closes the chosen device")
+    func disconnect() async throws {
+        let (store, _, b, ui) = try await twoDevices()
+        let device = FakeDevice()
+        let r = try await CommandTools.disconnect.run(ToolArguments(["deviceId": JSON(b.id)]),
+                                                      makeContext(store, fakeUI: ui, device: device))
+        #expect(device.disconnected == [b.id])
+        #expect(r.summary.contains("Beta"))
+        #expect(r.next.contains { $0.hasPrefix("beaver_status") })
+    }
+
+    @Test("devices_disconnect with two devices and no deviceId disconnects nothing")
+    func disconnectNeedsDeviceId() async throws {
+        let (store, _, _, ui) = try await twoDevices()
+        let device = FakeDevice()
+        await #expect(throws: ToolError.self) {
+            try await CommandTools.disconnect.run(ToolArguments(), makeContext(store, fakeUI: ui, device: device))
+        }
+        #expect(device.disconnected.isEmpty)
+    }
 }

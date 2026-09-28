@@ -360,7 +360,8 @@ elapsed time, not a start timestamp.
    `storage` / `network` frames. Several clients can be connected at
    once, each in its own session.
 3. The connection remains open indefinitely. Either side may close at
-   any time.
+   any time; Beaver closes one when the user (or an agent) disconnects
+   that device.
 4. On unexpected close (network failure, client crash), Beaver marks
    the current session's `ended_at` and writes a synthetic event with
    subsystem `loggernext.transport`, level `info`, message
