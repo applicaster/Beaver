@@ -182,7 +182,8 @@ struct ToolboxToolsTests {
             _ = try await run(ToolboxTools.toolsCall, ["deviceId": "beaver", "name": "sessions.delete"], store, ui, device)
         }
         #expect(m.contains("sessions.delete is destructive"))
-        #expect(m.contains("sessions_delete("))
+        #expect(!m.contains("sessions_delete()"))
+        #expect(m.contains("sessions_delete(…)"))
     }
 
     @Test("tools_call on beaver, an unknown name: lists the tools in its toolbox")

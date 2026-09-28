@@ -131,9 +131,13 @@ enum ToolboxTools {
                 throw ToolError("Beaver has no tool \"\(name)\" here.\(hint) Example: toolboxes_list(deviceId: \"beaver\") for its tools.")
             }
             guard tool.kind != .destructive else {
-                let params = DeviceTool(name: local, description: "", inputSchema: tool.inputSchema).parameters
+                let required = DeviceTool(name: local, description: "", inputSchema: tool.inputSchema).parameters
                     .filter(\.required).map { "\($0.name): …" }.joined(separator: ", ")
-                throw ToolError("\(name) is destructive, so Beaver doesn't run it through tools_call. Example: \(local)(\(params)).")
+                let message = required.isEmpty
+                    ? "\(name) is destructive, so Beaver doesn't run it through tools_call. Call \(local) directly; "
+                        + "its description says which arguments it takes. Example: \(local)(…)."
+                    : "\(name) is destructive, so Beaver doesn't run it through tools_call. Example: \(local)(\(required))."
+                throw ToolError(message)
             }
             return try await tool.run(ToolArguments(arguments), ctx)
         }
