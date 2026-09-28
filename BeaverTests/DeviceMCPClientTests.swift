@@ -82,7 +82,7 @@ struct DeviceMCPClientTests {
     @Test("One request at a time: the next is sent after the previous reply, and its call timeout counts from then")
     func oneAtATime() async throws {
         // Like the SDKs, the device handles one MCP message at a time. The
-        // queue wait (~150 ms) and the call (~150 ms) each fit fast's 250 ms,
+        // queue wait (~300 ms) and the call (~300 ms) each fit fast's 450 ms,
         // together they don't.
         let line = SerialLine()
         let slowStarted = Mutex(false), slowReplied = Mutex(false), fastSawSlowReply = Mutex<Bool?>(nil)
@@ -91,18 +91,18 @@ struct DeviceMCPClientTests {
                 guard method == "tools/call" else { return [:] }
                 if params["name"] == "slow" {
                     slowStarted.withLock { $0 = true }
-                    try? await Task.sleep(for: .milliseconds(150))
+                    try? await Task.sleep(for: .milliseconds(300))
                     slowReplied.withLock { $0 = true }
                 } else {
                     fastSawSlowReply.withLock { $0 = slowReplied.withLock { $0 } }
-                    try? await Task.sleep(for: .milliseconds(150))
+                    try? await Task.sleep(for: .milliseconds(300))
                 }
                 return ["echo": params["name"] ?? .null]
             }
         }
         async let slow = client.request("tools/call", params: ["name": "slow"], timeout: .seconds(1))
         while !slowStarted.withLock({ $0 }) { try await Task.sleep(for: .milliseconds(5)) }
-        let fast = try await client.request("tools/call", params: ["name": "fast"], timeout: .milliseconds(250))
+        let fast = try await client.request("tools/call", params: ["name": "fast"], timeout: .milliseconds(450))
         #expect(try await slow["echo"] == "slow")
         #expect(fast["echo"] == "fast")
         #expect(fastSawSlowReply.withLock { $0 } == true)

@@ -283,7 +283,9 @@ extension ToolContext {
     /// (`Watches.cancelDisconnectWatcher`).
     func watchForDisconnect(after command: String, sessionId: Int64, window: Duration = .seconds(30),
                             token: UUID = UUID()) async {
-        let liveNow = await ui.snapshot().liveSessionIds
+        // The command's session counts as live even if the app already
+        // dropped before this snapshot (a restart that answers and exits).
+        let liveNow = Array(Set(await ui.snapshot().liveSessionIds).union([sessionId]))
         await watches.setDisconnectWatcher(token: token, Task { [self] in
             var device = DeviceFollower(start: sessionId, live: liveNow)
             let dropDeadline = ContinuousClock.now + window
