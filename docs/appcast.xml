@@ -28,6 +28,18 @@
     <language>en</language>
 
     <item>
+      <title>Version 4.10.0</title>
+      <pubDate>Mon, 28 Sep 2026 23:09:40 +0000</pubDate>
+      <sparkle:version>61</sparkle:version>
+      <sparkle:shortVersionString>4.10.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>15.5</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/applicaster/Beaver/releases/download/4.10.0/Beaver-4.10.0.zip"
+        sparkle:edSignature="x71ZkVQisirCthLLP0enk54E/HTiHn2R82YIbPdBJu9HCM2nwMbe7NRZXQ0MJHX1gjqLQZQIq63eo1BlLt2nDg==" length="10821294"
+        type="application/octet-stream" />
+    </item>
+
+    <item>
       <title>Version 4.9.0</title>
       <pubDate>Mon, 28 Sep 2026 22:59:58 +0000</pubDate>
       <sparkle:version>60</sparkle:version>
