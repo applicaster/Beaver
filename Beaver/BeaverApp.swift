@@ -151,6 +151,9 @@ struct BeaverApp: App {
             for await item in env.server.inbound {
                 switch item {
                 case .connected(let connection):
+                    env.mcpClients[connection] = DeviceMCPClient { [server = env.server] data in
+                        await server.send(data: data, to: connection)
+                    }
                     guard let session = try? await env.store.createSession(source: .live) else { continue }
                     env.didConnect(connection, session: session.id)
                     // Ask the SDK for its command list so the command-bar
@@ -165,9 +168,17 @@ struct BeaverApp: App {
                         await env.send(command: "storage.list", to: session.id)
                     }
                 case .frame(let connection, let frame):
-                    guard let sessionId = env.live.session(for: connection) else { continue }
-                    await Self.handleInbound(frame: frame, sessionId: sessionId, env: env)
+                    guard let sessionId = env.live.session(for: connection) else {
+                        // D75: an MCP reply still reaches its request while a
+                        // deleted live session is being replaced.
+                        if case .success(.mcp(let message)) = ProtocolDecoder.decode(frame) {
+                            await env.mcpClients[connection]?.receive(message)
+                        }
+                        continue
+                    }
+                    await Self.handleInbound(frame: frame, connection: connection, sessionId: sessionId, env: env)
                 case .disconnected(let connection):
+                    await env.mcpClients.removeValue(forKey: connection)?.close()
                     if let sessionId = env.didDisconnect(connection) {
                         try? await env.store.endSession(sessionId)
                     }
@@ -248,7 +259,7 @@ struct BeaverApp: App {
 
     private static let log = Logger(subsystem: "com.applicaster.LoggerNext", category: "AgentAccess")
 
-    private static func handleInbound(frame: Data, sessionId: Int64, env: AppEnvironment) async {
+    private static func handleInbound(frame: Data, connection: UUID, sessionId: Int64, env: AppEnvironment) async {
         switch ProtocolDecoder.decode(frame) {
         case .success(.event(let event)):
             await env.store.append(event, to: sessionId)
@@ -270,6 +281,13 @@ struct BeaverApp: App {
             }
         case .success(.network(let capture)):
             try? await env.store.recordNetworkEntry(capture, sessionId: sessionId)
+        case .success(.clientHandshake(let handshake)):
+            await MainActor.run { env.live.setHandshake(handshake, for: connection) }
+            try? await env.store.applyHandshake(handshake, to: sessionId)
+        case .success(.mcp(let message)):
+            // D75: an answer to Beaver's request; not a log line.
+            let client = await MainActor.run { env.mcpClients[connection] }
+            await client?.receive(message)
         case .success(.unknown(let typeRaw)):
             // PROTOCOL.md §7: tolerate unknown types, log as a synthetic
             // event so the user sees them.
@@ -312,6 +330,9 @@ private func replaceDeletedLiveSessions(env: AppEnvironment, viewed: Int64?,
         guard env.live.attach(connection, session: fresh.id) else {
             try? await env.store.endSession(fresh.id)
             continue
+        }
+        if let handshake = env.live.handshake(for: connection) {
+            try? await env.store.applyHandshake(handshake, to: fresh.id)
         }
         if connection == viewedConnection || (viewedConnection == nil && env.viewingSessionId == nil) {
             env.viewingSessionId = fresh.id

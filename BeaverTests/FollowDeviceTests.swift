@@ -222,4 +222,26 @@ struct FollowDeviceTests {
         let back = await follower.step(live: [fresh.id], store: store)
         #expect(back == .moved(fresh.id))
     }
+
+    private func twin(_ id: Int64, uid: String?) -> Session {
+        Session(id: id, startedAt: .distantPast, source: .live, appName: "Alpha",
+                deviceModel: "iPhone 15", platform: "iOS", deviceUID: uid)
+    }
+
+    @Test("successor: identical builds are told apart by device id")
+    func successorByUID() {
+        let ended = twin(1, uid: "A")
+        #expect(DeviceFollower.successor(of: ended, live: [twin(5, uid: "B"), twin(4, uid: "A")],
+                                         appeared: [4, 5]) == 4)
+    }
+
+    @Test("successor: a known different device id is never followed, even with the same fingerprint")
+    func successorRejectsOtherUID() {
+        #expect(DeviceFollower.successor(of: twin(1, uid: "A"), live: [twin(4, uid: "B")], appeared: [4]) == nil)
+    }
+
+    @Test("successor: without device ids the fingerprint rule still applies")
+    func successorFallsBack() {
+        #expect(DeviceFollower.successor(of: twin(1, uid: nil), live: [twin(4, uid: nil)], appeared: [4]) == 4)
+    }
 }

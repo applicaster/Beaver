@@ -14,6 +14,10 @@ public struct LiveDevices: Sendable, Equatable {
     public private(set) var commands: [Int64: [CommandHint]] = [:]
     /// Connections whose live session was deleted, waiting for a fresh one.
     public private(set) var waiting: Set<UUID> = []
+    /// Each connection's client handshake (D77). The SDK sends it once per
+    /// connection, so a replacement session (the live one was deleted)
+    /// gets it from here.
+    public private(set) var handshakes: [UUID: ClientHandshake] = [:]
 
     public init() {}
 
@@ -40,6 +44,7 @@ public struct LiveDevices: Sendable, Equatable {
 
     @discardableResult
     public mutating func disconnect(_ connection: UUID) -> Int64? {
+        handshakes[connection] = nil
         waiting.remove(connection)
         guard let sessionId = sessions.removeValue(forKey: connection) else { return nil }
         commands[sessionId] = nil
@@ -68,6 +73,12 @@ public struct LiveDevices: Sendable, Equatable {
     public mutating func setCommands(_ hints: [CommandHint], for sessionId: Int64) {
         commands[sessionId] = hints
     }
+
+    public mutating func setHandshake(_ handshake: ClientHandshake, for connection: UUID) {
+        handshakes[connection] = handshake
+    }
+
+    public func handshake(for connection: UUID) -> ClientHandshake? { handshakes[connection] }
 }
 
 /// The toolbar device menu (D73).

@@ -54,11 +54,13 @@ struct WaitSegment: Sendable {
 }
 
 /// Follows one device across reconnects (D66). With several devices (D73)
-/// a new live session continues the device when its fingerprint matches;
-/// when either fingerprint is still unknown, only if it is the one session
-/// that came up since the last look.
-// ponytail: fingerprint heuristic — two identical builds on two simulators
-// look alike. A stable device id from the SDK would replace it.
+/// a new live session continues the device when its device id matches
+/// (D77); a different known device id is another device. Without device
+/// ids, the fingerprint decides as a fallback; when either fingerprint is
+/// still unknown, only the one session that came up since the last look.
+// ponytail: the fingerprint heuristic is now the fallback for SDKs without a
+// client handshake (D77). A session whose handshake lands after the 250 ms
+// poll that sees it appear is judged by fingerprint on that poll.
 struct DeviceFollower: Sendable {
     enum Step: Equatable { case same, moved(Int64), gone }
 
@@ -97,7 +99,13 @@ struct DeviceFollower: Sendable {
     }
 
     static func successor(of ended: Session, live: [Session], appeared: Set<Int64>) -> Int64? {
-        let newer = live.filter { $0.id > ended.id }
+        // D77: a known device id decides; a different known one is another device.
+        let newer = live.filter {
+            $0.id > ended.id && (ended.deviceUID == nil || $0.deviceUID == nil || $0.deviceUID == ended.deviceUID)
+        }
+        if let uid = ended.deviceUID, let same = newer.filter({ $0.deviceUID == uid }).map(\.id).max() {
+            return same
+        }
         if let print = ended.fingerprint,
            let same = newer.filter({ $0.fingerprint == print }).map(\.id).max() {
             return same
@@ -186,6 +194,7 @@ extension ToolContext {
     /// Design M25 / D73: tools that talk to a device take an optional
     /// deviceId — the device's live session id, as beaver_status lists it.
     /// With one device it may be omitted (or be "current", as before D73);
+    /// with a default set (D76) an omitted one means the default; otherwise
     /// with several it may not. `call` is the tool's own example call; the
     /// error shows it with a deviceId filled in.
     public func requireDevice(_ args: ToolArguments, doing what: String, call: String) async throws
@@ -200,7 +209,18 @@ extension ToolContext {
         // args.string turns a number into text; accept "12", 12 and 12.0.
         if let wanted, let id = Int64(wanted) ?? Double(wanted).flatMap({ Int64(exactly: $0) }),
            live.contains(id) { return (host, id) }
-        if wanted == nil || wanted == "current", live.count == 1 { return (host, live[0]) }
+        if wanted == nil || wanted == "current" {
+            // D76: the default, when set, is the only fallback — never another device.
+            if let preferred = host.defaultDevice {
+                if let id = preferred.liveSession(in: try await store.sessions(), live: live) { return (host, id) }
+                let list = try await describeDevices(live)
+                let name = try await describeDefault(preferred)
+                throw ToolError("The default device \(name) isn't connected. "
+                    + "Connected: \(list). Example: \(Self.withDeviceId(call, live[0])), "
+                    + "or devices_set_default(deviceId: null) to clear the default.")
+            }
+            if live.count == 1 { return (host, live[0]) }
+        }
         let list = try await describeDevices(live)
         let lead = wanted.map { "No connected device \"\($0)\"." }
             ?? "\(live.count) devices are connected; say which one with deviceId."
@@ -220,6 +240,17 @@ extension ToolContext {
         return ids.map { id in
             "\"\(id)\"" + (sessions.first { $0.id == id }.map { " (\(StatusTools.describeDevice($0)))" } ?? "")
         }.joined(separator: ", ")
+    }
+
+    /// `Alpha 1.0 · iPhone 15, iOS 18.0`, or `"12" (…)` for a session default.
+    public func describeDefault(_ device: DefaultDevice) async throws -> String {
+        let sessions = try await store.sessions()
+        switch device {
+        case .session(let id):
+            return "\"\(id)\"" + (sessions.first { $0.id == id }.map { " (\(StatusTools.describeDevice($0)))" } ?? "")
+        case .uid(let uid):
+            return sessions.first { $0.deviceUID == uid }.map(StatusTools.describeDevice) ?? "with device id \(uid)"
+        }
     }
 
     /// Design §7.2: when the device drops within `window` after an agent's

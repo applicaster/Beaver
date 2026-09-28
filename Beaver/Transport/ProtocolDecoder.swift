@@ -14,6 +14,10 @@ public enum ProtocolDecoder {
         case event(DecodedEvent)
         case storage(namespaces: [StorageSnapshot.Namespace: String])
         case network(NetworkCapture)
+        /// PROTOCOL.md §4.4 (D77).
+        case clientHandshake(ClientHandshake)
+        /// A JSON-RPC message from the app's MCP server (PROTOCOL.md §4.5, D75).
+        case mcp(JSON)
         case unknown(typeRaw: String)
     }
 
@@ -23,6 +27,7 @@ public enum ProtocolDecoder {
         case malformedEvent(String)        // human-readable reason
         case malformedStorage(String)
         case malformedNetwork(String)
+        case malformedMCP(String)
     }
 
     /// Decode a raw WebSocket text frame.
@@ -34,6 +39,9 @@ public enum ProtocolDecoder {
             return .failure(.notJSON)
         }
         guard let typeRaw = envelope["type"] as? String else {
+            // The SDK also accepts bare JSON-RPC; Beaver never sends it,
+            // but a bare reply is still an MCP message, not an unknown frame.
+            if envelope["jsonrpc"] != nil { return decodeMCP(envelope) }
             return .failure(.noTypeField)
         }
 
@@ -44,6 +52,10 @@ public enum ProtocolDecoder {
             return decodeStorage(envelope: envelope)
         case "network":
             return decodeNetwork(envelope: envelope)
+        case "handshake":
+            return .success(.clientHandshake(decodeHandshake(envelope: envelope)))
+        case "mcp":
+            return decodeMCP(envelope["payload"])
         default:
             return .success(.unknown(typeRaw: typeRaw))
         }
@@ -139,6 +151,39 @@ public enum ProtocolDecoder {
             return .failure(.malformedNetwork("payload is not a JSON object with a string 'url'"))
         }
         return .success(.network(capture))
+    }
+
+    // MARK: - Client handshake
+
+    /// Every field is optional; an empty string counts as missing. A
+    /// `deviceId` equal to `model` is the SDK's fallback when it has no
+    /// installation id — identical simulators would share it (D77), so
+    /// it counts as missing too.
+    private static func decodeHandshake(envelope: [String: Any]) -> ClientHandshake {
+        func str(_ key: String) -> String? {
+            (envelope[key] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        }
+        let model = str("model")
+        let deviceId = str("deviceId").flatMap { $0 == model ? nil : $0 }
+        return ClientHandshake(deviceId: deviceId, deviceName: str("deviceName"), model: model,
+                               platform: str("platform"), appPackage: str("appPackage"), version: str("version"))
+    }
+
+    // MARK: - MCP
+
+    /// `payload` is a JSON-RPC object, or that object as a string.
+    private static func decodeMCP(_ payload: Any?) -> Result<InboundPacket, DecodeError> {
+        let data: Data? = if let s = payload as? String {
+            s.data(using: .utf8)
+        } else if let p = payload, JSONSerialization.isValidJSONObject(p) {
+            try? JSONSerialization.data(withJSONObject: p)
+        } else {
+            nil
+        }
+        guard let data, let message = try? JSON.parse(data), message.object != nil else {
+            return .failure(.malformedMCP("payload is not a JSON-RPC object"))
+        }
+        return .success(.mcp(message))
     }
 
     // MARK: - Helpers

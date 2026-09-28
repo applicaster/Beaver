@@ -32,6 +32,13 @@ public struct Session: Identifiable, Hashable, Sendable {
     public var platform: String?
     public var osVersion: String?
 
+    /// From the SDK's client handshake (D77): stable per installation,
+    /// so it tells a device apart across reconnects. Nil for SDKs without
+    /// a client handshake and for imported sessions.
+    public var deviceUID: String?
+    /// The app's bundle id / package name, from the same handshake.
+    public var appPackage: String?
+
     public init(
         id: Int64,
         startedAt: Date,
@@ -42,7 +49,9 @@ public struct Session: Identifiable, Hashable, Sendable {
         appVersion: String? = nil,
         deviceModel: String? = nil,
         platform: String? = nil,
-        osVersion: String? = nil
+        osVersion: String? = nil,
+        deviceUID: String? = nil,
+        appPackage: String? = nil
     ) {
         self.id = id
         self.startedAt = startedAt
@@ -54,6 +63,8 @@ public struct Session: Identifiable, Hashable, Sendable {
         self.deviceModel = deviceModel
         self.platform = platform
         self.osVersion = osVersion
+        self.deviceUID = deviceUID
+        self.appPackage = appPackage
     }
 
     public var isActive: Bool { endedAt == nil && source == .live }

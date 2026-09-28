@@ -40,6 +40,23 @@ When releasing:
   the clipboard (`copy: true`) and saves a QR code (`qrFile`).
   `ui_show(tab: "schemes")` opens the tab and `ui_state` returns the form
   and its URL.
+- Click the device badge on the left of the toolbar: the app's name, bundle id,
+  device and device id, a Disconnect button, "Default for agents", and the
+  app's toolboxes with each tool's arguments (apps built with quick-brick-xray's
+  native WebSocket sink).
+- Agents: `toolboxes_list` and `tools_call` reach a connected app's toolboxes
+  (and Beaver's own tools as `deviceId: "beaver"`, its destructive tools left
+  out — call those directly instead); `devices_set_default` picks the app
+  device tools use when `deviceId` is omitted — it follows the app across
+  restarts. `beaver_status.devices` gains `default`, `uid`, `appPackage`.
+  An app tool that deletes, removes, clears, kills or resets shows the
+  destructive toast in the Agent panel.
+- The Agent panel's "What an agent can do" covers several connected apps,
+  the default app and each app's toolboxes.
+
+### Changed
+- An app that restarts is recognised by its device id, so two identical builds
+  on two simulators are no longer confused.
 
 ### Fixed
 - A device that connects is shown at once, even if a past or imported

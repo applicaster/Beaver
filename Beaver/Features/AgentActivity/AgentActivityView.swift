@@ -157,7 +157,7 @@ struct AgentActivityView: View {
         Divider()
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Through Beaver's MCP server an agent reads everything Beaver collected from the app and acts on it. Ask in plain words — every call shows up in this panel, and deletions and notes that need you also show a toast.")
+                Text("Through Beaver's MCP server an agent reads everything Beaver collected from the connected apps — one or several at once — and acts on them, including each app's own toolboxes. Ask in plain words — every call shows up in this panel, and deletions and notes that need you also show a toast.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

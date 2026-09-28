@@ -20,6 +20,14 @@ public final class AppEnvironment {
     /// Drives where inbound events get appended.
     public var live = LiveDevices()
 
+    /// Each connection's MCP client (D75). Keyed by connection, not session:
+    /// a deleted live session's replacement keeps talking to the same app.
+    @ObservationIgnored public var mcpClients: [UUID: DeviceMCPClient] = [:]
+
+    /// The device agents' device tools use without a deviceId (D76).
+    /// In memory until Beaver quits.
+    public var defaultDevice: DefaultDevice?
+
     public func isLive(_ sessionId: Int64?) -> Bool { live.isLive(sessionId) }
 
     /// Session id the user is *viewing*: a device from the toolbar device
@@ -144,5 +152,12 @@ extension AppEnvironment: DeviceLink {
     nonisolated public func disconnect(_ sessionId: Int64) async {
         guard let connection = await MainActor.run(body: { self.live.connection(for: sessionId) }) else { return }
         await server.disconnect(connection)
+    }
+
+    nonisolated public func mcp(_ method: String, params: JSON, to sessionId: Int64,
+                                timeout: Duration) async throws -> JSON {
+        let client = await MainActor.run { self.live.connection(for: sessionId).flatMap { self.mcpClients[$0] } }
+        guard let client else { throw DeviceMCPError.disconnected }
+        return try await client.request(method, params: params, timeout: timeout)
     }
 }

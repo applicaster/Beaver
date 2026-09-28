@@ -23,16 +23,20 @@ enum StatusTools {
         for live in host.liveSessionIds {
             guard let session = sessions.first(where: { $0.id == live }) else { continue }
             let latest = try await ctx.store.latestEventId(sessionId: live)
+            let isDefault = host.defaultDevice?.matches(session) ?? false
             devices.append([
                 "id": .string(String(live)),
                 "app": JSON(session.appName), "appVersion": JSON(session.appVersion),
                 "model": JSON(session.deviceModel), "platform": JSON(session.platform),
                 "osVersion": JSON(session.osVersion),
                 "liveSessionId": JSON(live), "latestEventId": JSON(latest),
+                "default": .bool(isDefault),
+                "uid": JSON(session.deviceUID), "appPackage": JSON(session.appPackage),
             ])
             described.append("\(describeDevice(session)) (deviceId \"\(live)\")")
             lines.append("Device \"\(live)\": \(describeDevice(session)) — live session #\(live)"
-                + (latest.map { ", latest event #\($0)" } ?? ", no events yet"))
+                + (latest.map { ", latest event #\($0)" } ?? ", no events yet")
+                + (isDefault ? " (default)" : ""))
         }
         lines.append("Beaver \(host.beaverVersion) · WebSocket \(host.serverState)"
             + (host.deviceURL.map { " · the device connects to \($0)" } ?? ""))
@@ -59,11 +63,19 @@ enum StatusTools {
             : devices.count == 1
                 ? ["logs_facets(since: \"10m\")", "logs_query(filter: {minLevel: \"warning\"}, since: \"10m\")"]
                 : ["commands_list(deviceId: \"\(first ?? 0)\")", "logs_facets(sessionId: \(first ?? 0), since: \"10m\")"]
+        let defaultNote: String
+        if let preferred = host.defaultDevice {
+            let described = try await ctx.describeDefault(preferred)
+            let connected = preferred.liveSession(in: sessions, live: host.liveSessionIds) != nil
+            defaultNote = " Default device: " + described + (connected ? "." : " (not connected).")
+        } else {
+            defaultNote = ""
+        }
         return ToolResult(
-            summary: summary,
+            summary: summary + defaultNote,
             body: lines.joined(separator: "\n"),
             structured: [
-                "beaver": ["version": .string(host.beaverVersion), "mcpPort": JSON(host.mcpPort)],
+                "beaver": ["version": .string(host.beaverVersion), "mcpPort": JSON(host.mcpPort), "deviceId": "beaver"],
                 "webSocket": ["state": .string(host.serverState), "deviceURL": JSON(host.deviceURL)],
                 "devices": .array(devices),
                 "viewingSessionId": JSON(host.viewingSessionId),

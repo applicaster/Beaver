@@ -32,13 +32,18 @@ public struct ToolResult: Sendable {
     public var level: String?
     public var links: [JournalLink]
     public var notice: String?
+    /// The journal kind when it isn't the tool's own: `tools_call` runs
+    /// tools of any kind (a destructive app tool gets the destructive toast).
+    public var journalKind: AgentActivity.Kind?
 
     public init(summary: String, body: String = "", structured: JSON = .object([:]),
                 next: [String] = [], sessionId: Int64? = nil,
-                level: String? = nil, links: [JournalLink] = [], notice: String? = nil) {
+                level: String? = nil, links: [JournalLink] = [], notice: String? = nil,
+                journalKind: AgentActivity.Kind? = nil) {
         self.summary = summary; self.body = body; self.structured = structured
         self.next = next; self.sessionId = sessionId
         self.level = level; self.links = links; self.notice = notice
+        self.journalKind = journalKind
     }
 
     public var text: String {
@@ -146,7 +151,7 @@ public enum ToolSchema {
         "Session id. Omit it for the live session (with several devices, the viewed one if live, else the newest), else the one the user is viewing, else the most recent.")
 
     public static let deviceId = string(
-        "Which connected device: its id from beaver_status (e.g. \"12\"). Omit it when only one device is connected.")
+        "Which connected app: its deviceId from beaver_status. Omit it for the default device (devices_set_default), or the only connected one.")
 
     public static let range: [String: JSON] = [
         "afterId": integer("Only events with a larger id (a cursor from an earlier result)."),
