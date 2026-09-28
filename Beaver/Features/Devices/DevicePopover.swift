@@ -14,6 +14,9 @@ struct DevicePopover: View {
     /// Every session row — to resolve which live session among several
     /// sharing a device uid is the one agents' default actually targets.
     let sessions: [Session]
+    /// The popover's width; nil inside the Sessions tab's details, which
+    /// set their own width and padding.
+    var width: CGFloat? = 360
     @Environment(AppEnvironment.self) private var env
     @Environment(ToastCenter.self) private var toasts
     @State private var load: ToolboxLoad = .loading
@@ -39,8 +42,9 @@ struct DevicePopover: View {
                 toolboxes
             }
         }
-        .padding(16)
-        .frame(width: 360, alignment: .leading)
+        .padding(width == nil ? 0 : 16)
+        .frame(width: width, alignment: .leading)
+        .frame(maxWidth: width == nil ? .infinity : nil, alignment: .leading)
         .task(id: session.id) { if isLive { await reload() } }
     }
 
@@ -146,24 +150,32 @@ struct DevicePopover: View {
         case .loaded(let boxes) where boxes.isEmpty:
             Text("This app has no toolboxes.").font(.caption).foregroundStyle(.secondary)
         case .loaded(let boxes):
-            ScrollView {
-                VStack(alignment: .leading, spacing: 6) {
-                    ForEach(boxes, id: \.name) { box in
-                        DisclosureGroup(isExpanded: Binding(
-                            get: { openToolbox == box.name },
-                            set: { openToolbox = $0 ? box.name : nil }
-                        )) {
-                            VStack(alignment: .leading, spacing: 8) {
-                                ForEach(box.tools, id: \.name) { ToolRow(tool: $0) }
-                            }
-                            .padding(.leading, 4)
-                        } label: {
-                            Text("\(box.name) · \(box.tools.count) tool\(box.tools.count == 1 ? "" : "s")")
-                        }
+            // The Sessions details scroll as a whole; a ScrollView inside
+            // theirs would collapse to nothing.
+            if width == nil {
+                toolboxList(boxes)
+            } else {
+                ScrollView { toolboxList(boxes) }
+                    .frame(maxHeight: 420)
+            }
+        }
+    }
+
+    private func toolboxList(_ boxes: [Toolbox]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(boxes, id: \.name) { box in
+                DisclosureGroup(isExpanded: Binding(
+                    get: { openToolbox == box.name },
+                    set: { openToolbox = $0 ? box.name : nil }
+                )) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(box.tools, id: \.name) { ToolRow(tool: $0) }
                     }
+                    .padding(.leading, 4)
+                } label: {
+                    Text("\(box.name) · \(box.tools.count) tool\(box.tools.count == 1 ? "" : "s")")
                 }
             }
-            .frame(maxHeight: 420)
         }
     }
 

@@ -6,8 +6,10 @@
 import SwiftUI
 
 /// Sessions tab — history of every recorded session. Selecting a
-/// session opens it in the Log feed; right-clicking offers Delete with
-/// a confirmation prompt; a footer button wipes the whole history.
+/// session shows its details on the right (device, toolboxes,
+/// Disconnect); Open, a double-click or Return opens it in the Log
+/// feed. Right-clicking offers the same and Delete; a footer button
+/// wipes the whole history.
 struct SessionsView: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(ToastCenter.self) private var toasts
@@ -22,6 +24,9 @@ struct SessionsView: View {
     @State private var pendingDelete: SessionListItem?
     @State private var pendingDeleteAll = false
     @State private var comparing: ComparePair?
+    /// The row whose details show. Not `env.viewingSessionId`: picking a
+    /// row no longer takes the window to that session — Open does.
+    @State private var selectedId: Int64?
 
     private struct ComparePair: Identifiable {
         let a: Int64, b: Int64
@@ -47,82 +52,38 @@ struct SessionsView: View {
     @ViewBuilder
     private func content(vm: SessionsViewModel) -> some View {
         @Bindable var env = env
-        VStack(spacing: 0) {
-            List(vm.sessions, selection: $env.viewingSessionId) { item in
-                row(for: item)
-                    .tag(Optional(item.id))
-                    .contentShape(Rectangle())
-                    .contextMenu {
-                        Button {
-                            env.viewingSessionId = item.id
-                            onOpenInLogFeed(item.id)
-                        } label: {
-                            Label("Open in Log feed",
-                                  systemImage: "arrow.forward.circle")
-                        }
-                        Menu {
-                            ForEach(vm.sessions.filter { $0.id != item.id }) { other in
-                                Button("#\(other.id) \(other.title)" + (other.appLabel.map { " · \($0)" } ?? "")) {
-                                    comparing = ComparePair(a: item.id, b: other.id)
-                                }
-                            }
-                        } label: {
-                            Label("Compare with", systemImage: "arrow.left.arrow.right")
-                        }
-                        .disabled(vm.sessions.count < 2)
-                        if isLiveSession(item) {
-                            Button {
-                                Task { await env.disconnect(item.id) }
-                            } label: {
-                                Label("Disconnect", systemImage: "eject")
-                            }
-                        }
-                        Divider()
-                        Button(role: .destructive) {
-                            pendingDelete = item
-                        } label: {
-                            // SwiftUI's macOS menu styling doesn't
-                            // automatically tint destructive items in
-                            // this version, so apply the colour
-                            // directly to each piece of the label.
-                            // (`.foregroundStyle` on the Label itself
-                            // gets stripped by the menu renderer; the
-                            // per-element form below sticks.)
-                            Label {
-                                Text("Delete session…")
-                                    .foregroundColor(.red)
-                            } icon: {
-                                Image(systemName: "trash")
-                                    .foregroundColor(.red)
-                            }
-                        }
-                        .tint(.red)
-                        .disabled(isLiveSession(item))
-                    }
-            }
-            .overlay {
-                if vm.sessions.isEmpty {
-                    ContentUnavailableView(
-                        "No sessions yet",
-                        systemImage: "tray",
-                        description: Text("Connect a mobile client to record one.")
-                    )
+        HSplitView {
+            VStack(spacing: 0) {
+                List(vm.sessions, selection: $selectedId) { item in
+                    row(for: item)
+                        .tag(item.id)
+                        .contentShape(Rectangle())
                 }
-            }
+                // Double-click or Return opens the session, as Open does.
+                .contextMenu(forSelectionType: Int64.self) { ids in
+                    if let id = ids.first, let item = vm.sessions.first(where: { $0.id == id }) {
+                        rowMenu(item, vm: vm)
+                    }
+                } primaryAction: { ids in
+                    if let id = ids.first { open(id) }
+                }
+                .overlay {
+                    if vm.sessions.isEmpty {
+                        ContentUnavailableView(
+                            "No sessions yet",
+                            systemImage: "tray",
+                            description: Text("Connect a mobile client to record one.")
+                        )
+                    }
+                }
 
-            footer(vm: vm)
+                footer(vm: vm)
+            }
+            .frame(minWidth: 380, maxWidth: .infinity)
+            detail(vm: vm)
+                .frame(minWidth: 400, idealWidth: 420, maxWidth: 520, maxHeight: .infinity)
         }
-        // Selecting a row by single-click jumps the user into the Log
-        // feed — saves the extra trip through the sidebar. SessionsView
-        // is only mounted while the Sessions tab is showing, so this
-        // onChange can only fire from user clicks in the list (or from
-        // a brand-new session arriving via the WebSocket — also a
-        // reasonable reason to jump to the live feed).
-        // Not when something else already moved the window on (Compare's
-        // links open a request in the Network tab).
-        .onChange(of: env.viewingSessionId) { _, new in
-            if let new, env.selectedTab == .sessions { onOpenInLogFeed(new) }
-        }
+        .onAppear { if selectedId == nil { selectedId = env.viewingSessionId } }
         .sheet(item: $comparing) { pair in
             SessionCompareView(sessions: vm.sessions, a: pair.a, b: pair.b)
         }
@@ -168,6 +129,83 @@ struct SessionsView: View {
             }
         } message: {
             Text("Every recorded session, plus its events and storage snapshots, will be removed. This can't be undone.")
+        }
+    }
+
+    /// Right-click menu of a row.
+    @ViewBuilder
+    private func rowMenu(_ item: SessionListItem, vm: SessionsViewModel) -> some View {
+        Button {
+            open(item.id)
+        } label: {
+            Label("Open in Log feed",
+                  systemImage: "arrow.forward.circle")
+        }
+        Menu {
+            ForEach(vm.sessions.filter { $0.id != item.id }) { other in
+                Button("#\(other.id) \(other.title)" + (other.appLabel.map { " · \($0)" } ?? "")) {
+                    comparing = ComparePair(a: item.id, b: other.id)
+                }
+            }
+        } label: {
+            Label("Compare with", systemImage: "arrow.left.arrow.right")
+        }
+        .disabled(vm.sessions.count < 2)
+        if isLiveSession(item) {
+            Button {
+                Task { await env.disconnect(item.id) }
+            } label: {
+                Label("Disconnect", systemImage: "eject")
+            }
+        }
+        Divider()
+        Button(role: .destructive) {
+            pendingDelete = item
+        } label: {
+            // SwiftUI's macOS menu styling doesn't
+            // automatically tint destructive items in
+            // this version, so apply the colour
+            // directly to each piece of the label.
+            // (`.foregroundStyle` on the Label itself
+            // gets stripped by the menu renderer; the
+            // per-element form below sticks.)
+            Label {
+                Text("Delete session…")
+                    .foregroundColor(.red)
+            } icon: {
+                Image(systemName: "trash")
+                    .foregroundColor(.red)
+            }
+        }
+        .tint(.red)
+        .disabled(isLiveSession(item))
+        
+    }
+
+    private func open(_ id: Int64) {
+        env.viewingSessionId = id
+        onOpenInLogFeed(id)
+    }
+
+    // MARK: - Details
+
+    @ViewBuilder
+    private func detail(vm: SessionsViewModel) -> some View {
+        if let item = vm.sessions.first(where: { $0.id == selectedId }) {
+            SessionDetailPane(
+                item: item,
+                isLive: isLiveSession(item),
+                isViewed: env.viewingSessionId == item.id,
+                sessions: vm.sessions.map(\.session),
+                others: vm.sessions.filter { $0.id != item.id },
+                onOpen: { open(item.id) },
+                onCompare: { comparing = ComparePair(a: item.id, b: $0) },
+                onRequestDelete: { pendingDelete = item }
+            )
+            .id(item.id)
+        } else {
+            ContentUnavailableView("Select a session", systemImage: "sidebar.right",
+                                   description: Text("Its device, the app's toolboxes and Open show here."))
         }
     }
 
@@ -319,5 +357,72 @@ private struct SessionRow: View {
         // this, List lined it up with the Disconnect button's text.
         .alignmentGuide(.listRowSeparatorLeading) { _ in 36 }
         .onHover { isHovered = $0 }
+    }
+}
+
+// MARK: - Session details
+
+/// The selected session: Open, what it is, and — through the device
+/// popover's content — the device, Disconnect, the agents' default and
+/// the app's toolboxes (D75/D76).
+private struct SessionDetailPane: View {
+    let item: SessionListItem
+    let isLive: Bool
+    let isViewed: Bool
+    let sessions: [Session]
+    let others: [SessionListItem]
+    let onOpen: () -> Void
+    let onCompare: (Int64) -> Void
+    let onRequestDelete: () -> Void
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack {
+                    Button(action: onOpen) {
+                        Label(isViewed ? "Show in Log feed" : "Open", systemImage: "arrow.forward.circle")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .help("Open this session in the Log feed (or double-click it, or press Return)")
+                    Menu {
+                        ForEach(others) { other in
+                            Button("#\(other.id) \(other.title)" + (other.appLabel.map { " · \($0)" } ?? "")) {
+                                onCompare(other.id)
+                            }
+                        }
+                    } label: {
+                        Label("Compare with", systemImage: "arrow.left.arrow.right")
+                    }
+                    .fixedSize()
+                    .disabled(others.isEmpty)
+                    Spacer()
+                    if !isLive {
+                        Button(role: .destructive, action: onRequestDelete) {
+                            Image(systemName: "trash")
+                        }
+                        .help("Delete this session")
+                    }
+                }
+                Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 4) {
+                    fact("Session", "#\(item.id)")
+                    fact("Started", item.session.startedAt.formatted(date: .abbreviated, time: .standard))
+                    if let ended = item.session.endedAt {
+                        fact("Ended", ended.formatted(date: .abbreviated, time: .standard))
+                    }
+                    fact("Status", item.subtitle)
+                }
+                .font(.callout)
+                Divider()
+                DevicePopover(session: item.session, isLive: isLive, sessions: sessions, width: nil)
+            }
+            .padding(16)
+        }
+    }
+
+    private func fact(_ label: String, _ value: String) -> some View {
+        GridRow {
+            Text(label).foregroundStyle(.secondary)
+            Text(value).textSelection(.enabled)
+        }
     }
 }
