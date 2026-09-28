@@ -269,15 +269,12 @@ struct MainWindow: View {
 
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
-        // Leading edge: device / app context. Hidden entirely
-        // until the SDK has reported its applicaster.v2 metadata.
-        // Sits at the same vertical height as the right-side
+        // Leading edge: the device menu (D73). Hidden until Beaver has
+        // a session. Sits at the same vertical height as the right-side
         // toolbar buttons so the toolbar reads as one consistent
         // strip rather than left-padded space.
         ToolbarItem(placement: .navigation) {
-            if let ctx = storagesVM?.appContext, ctx.isNonEmpty {
-                ToolbarDeviceBadge(context: ctx)
-            }
+            DeviceMenuButton()
         }
         ToolbarItem(placement: .primaryAction) {
             Button {
@@ -552,91 +549,161 @@ struct MainWindow: View {
 
 // MARK: - Subviews
 
-/// Icon + small caption rendered as a toolbar item. Matches the layout
-/// of the old Logger app where each toolbar button shows its purpose
-/// underneath the symbol. Optional `tint` lets destructive actions
-/// (e.g., Clear) render in red so the danger is visible at a glance.
-/// Compact "what device + app am I looking at" badge that lives
-/// on the leading edge of the main toolbar (placement
-/// `.navigation`). Reads from `StoragesViewModel.AppContext`
-/// (populated as soon as the first `storage.list` response comes
-/// back from the SDK) and renders as two stacked lines, vertically
-/// matching the right-side toolbar buttons:
+/// The device menu (D73) on the leading edge of the main toolbar
+/// (placement `.navigation`): what the window shows, and a switch to
+/// any connected device or a recent one. Reads the session rows, whose
+/// fingerprint the SDK's applicaster.v2 storage fills (D34), and renders
+/// as two stacked lines, vertically matching the right-side buttons:
 ///
-///     [icon] Miami Heat
+///     [icon] ● Miami Heat                     ⌄
 ///            11.0.1 · iPhone 15 Pro Max · iOS 26.4.2
 ///
 /// Right-click → "Copy device fingerprint" pastes the same info
 /// as a single line into the clipboard for bug reports.
-private struct ToolbarDeviceBadge: View {
-    let context: StoragesViewModel.AppContext
+private struct DeviceMenuButton: View {
+    @Environment(AppEnvironment.self) private var env
     @Environment(ToastCenter.self) private var toasts
+    @State private var sessions: [Session] = []
 
-    /// Single muted subtitle line: `<version> · <device> · <OS> <ver>`.
-    /// Each piece is skipped if missing, so e.g. an SDK that doesn't
-    /// report a device model still produces a clean subtitle.
-    private var subtitle: String {
-        var parts: [String] = []
-        if let v = context.appVersion { parts.append(v) }
-        if let d = context.deviceModel { parts.append(d) }
-        if let os = context.osVersion {
-            parts.append((context.platform ?? "OS") + " " + os)
-        }
-        return parts.joined(separator: " · ")
+    private var viewed: Session? { sessions.first { $0.id == env.viewingSessionId } }
+    private var sections: (connected: [Session], recent: [Session]) {
+        DeviceMenu.sections(sessions: sessions, live: env.live.sessionIds)
+    }
+    private var selection: Binding<Int64?> {
+        Binding(get: { env.viewingSessionId }, set: { env.viewingSessionId = $0 })
     }
 
     var body: some View {
+        Group {
+            if !sessions.isEmpty {
+                Menu {
+                    Section("Connected") {
+                        if sections.connected.isEmpty {
+                            Text("No device connected")
+                        } else {
+                            Picker("Connected", selection: selection) {
+                                ForEach(sections.connected) { s in
+                                    Text(Self.title(s) + Self.detail(s)).tag(Optional(s.id))
+                                }
+                            }
+                            .pickerStyle(.inline)
+                            .labelsHidden()
+                        }
+                    }
+                    if !sections.recent.isEmpty {
+                        Section("Recent") {
+                            Picker("Recent", selection: selection) {
+                                ForEach(sections.recent) { s in
+                                    Text(Self.title(s) + Self.ended(s)).tag(Optional(s.id))
+                                }
+                            }
+                            .pickerStyle(.inline)
+                            .labelsHidden()
+                        }
+                    }
+                    Divider()
+                    Button("All Sessions…") { env.selectedTab = .sessions }
+                } label: {
+                    label
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help(viewed.map(Self.fingerprint) ?? "Choose a device")
+                .contextMenu {
+                    if let viewed {
+                        Button("Copy device fingerprint") {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(Self.fingerprint(viewed), forType: .string)
+                            toasts.success("Copied device fingerprint")
+                        }
+                    }
+                }
+            }
+        }
+        .task {
+            sessions = (try? await env.store.sessions()) ?? []
+            for await change in await env.store.changes() {
+                switch change {
+                case .sessionStarted, .sessionEnded, .sessionDeleted, .sessionUpdated, .sessionsCleared:
+                    sessions = (try? await env.store.sessions()) ?? []
+                default:
+                    break
+                }
+            }
+        }
+    }
+
+    private var label: some View {
         HStack(spacing: 8) {
             Image(systemName: "iphone.gen3")
                 .font(.system(size: 14))
                 .foregroundStyle(.secondary)
-
             VStack(alignment: .leading, spacing: 1) {
-                Text(context.appName ?? "—")
-                    .font(.system(size: 12, weight: .semibold))
-                    .lineLimit(1)
-                Text(subtitle)
+                HStack(spacing: 4) {
+                    if env.isLive(env.viewingSessionId) {
+                        Circle().fill(.green).frame(width: 6, height: 6)
+                    }
+                    Text(viewed.map(Self.title) ?? "No device")
+                        .font(.system(size: 12, weight: .semibold))
+                        .lineLimit(1)
+                }
+                Text(viewed.map(Self.subtitle) ?? "\(env.live.sessionIds.count) connected")
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.tail)
             }
+            Image(systemName: "chevron.down")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.secondary)
         }
-        // Matches ConnectionIndicator's chrome — same padding,
-        // same solid background, same border weight — so the
-        // two toolbar clouds read as siblings at different ends
-        // of the bar.
+        // Matches ConnectionIndicator's chrome — same padding, same
+        // solid background — so the two toolbar clouds read as
+        // siblings at different ends of the bar.
         .padding(.horizontal, 14)
         .padding(.vertical, 5)
-        .background(
-            Capsule().fill(Color(.controlBackgroundColor))
-        )
+        .background(Capsule().fill(Color(.controlBackgroundColor)))
         .contentShape(Capsule())
-        .help(fingerprint)
-        .contextMenu {
-            Button("Copy device fingerprint") {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(fingerprint, forType: .string)
-                toasts.success("Copied device fingerprint")
-            }
-        }
+    }
+
+    static func title(_ s: Session) -> String {
+        s.appName ?? s.clientLabel ?? (s.source == .imported ? "Imported #\(s.id)" : "Device #\(s.id)")
+    }
+
+    /// `<version> · <device> · <OS> <ver>`, each piece skipped if missing.
+    static func subtitle(_ s: Session) -> String {
+        var parts: [String] = []
+        if let v = s.appVersion { parts.append(v) }
+        if let d = s.deviceModel { parts.append(d) }
+        if let os = s.osVersion { parts.append((s.platform ?? "OS") + " " + os) }
+        return parts.joined(separator: " · ")
+    }
+
+    static func detail(_ s: Session) -> String {
+        let sub = subtitle(s)
+        return sub.isEmpty ? "" : " — " + sub
+    }
+
+    static func ended(_ s: Session) -> String {
+        s.endedAt.map { " — ended " + $0.formatted(date: .omitted, time: .shortened) } ?? ""
     }
 
     /// One-line string used by both the help tooltip and the
     /// right-click copy action.
-    private var fingerprint: String {
+    static func fingerprint(_ s: Session) -> String {
         var parts: [String] = []
-        if let n = context.appName {
-            parts.append(n + (context.appVersion.map { " \($0)" } ?? ""))
-        }
-        if let d = context.deviceModel { parts.append(d) }
-        if let os = context.osVersion {
-            parts.append((context.platform ?? "OS") + " " + os)
-        }
+        if let n = s.appName { parts.append(n + (s.appVersion.map { " \($0)" } ?? "")) }
+        if let d = s.deviceModel { parts.append(d) }
+        if let os = s.osVersion { parts.append((s.platform ?? "OS") + " " + os) }
         return parts.joined(separator: " · ")
     }
 }
 
+/// Icon + small caption rendered as a toolbar item. Matches the layout
+/// of the old Logger app where each toolbar button shows its purpose
+/// underneath the symbol. Optional `tint` lets destructive actions
+/// (e.g., Clear) render in red so the danger is visible at a glance.
 struct ToolbarButtonLabel: View {
     let systemImage: String
     let title: String
@@ -748,7 +815,7 @@ private struct ConnectionIndicator: View {
 
     private var label: String {
         switch state {
-        case .clientConnected:       "Connected"
+        case .clientConnected(let count): count > 1 ? "Connected · \(count)" : "Connected"
         case .listening:             "Listening"
         case .clientDisconnected:    "Disconnected"
         case .failed:                "Error"
