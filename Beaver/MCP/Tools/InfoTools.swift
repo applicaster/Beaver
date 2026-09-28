@@ -30,8 +30,9 @@ enum InfoTools {
         }
         let app = r.identity.first { $0.label == "App name" }?.value ?? s.session.appName ?? "app"
         let version = r.identity.first { $0.label == "App version" }?.value
-        let device = [r.device.hardware.first { $0.label == "Model" }?.value,
-                      r.device.hardware.first { $0.label == "OS version" }?.value].compactMap { $0 }
+        func hw(_ label: String) -> String? { r.device.hardware.first { $0.label == label }?.value }
+        let os = hw("OS version").map { v in hw("Platform").map { "\($0) \(v)" } ?? v }
+        let device = [hw("Model"), os].compactMap { $0 }
         let cms: String = switch r.cms {
         case .noToken: "Zapp CMS not asked: no Zapp token (the user can set one in the app menu → Zapp Access Token…)."
         case .noVersionId: "Zapp CMS not asked: the app's storage has no version_id."
