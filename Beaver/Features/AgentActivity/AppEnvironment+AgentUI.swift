@@ -26,7 +26,8 @@ extension AppEnvironment: AgentUI {
                 ui: uiState,
                 windowOpen: mainWindow != nil,
                 frontmost: NSApp.isActive,
-                notifications: AgentNotifier.shared.state
+                notifications: AgentNotifier.shared.state,
+                defaultDevice: defaultDevice
             )
         }
     }
@@ -118,5 +119,9 @@ extension AppEnvironment: AgentUI {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(text, forType: .string)
         }
+    }
+
+    nonisolated public func setDefaultDevice(_ device: DefaultDevice?) async {
+        await MainActor.run { defaultDevice = device }
     }
 }

@@ -44,6 +44,7 @@ final class FakeUI: AgentUI {
         calls.withLock { $0.notes.append(note); return $0.outcome }
     }
     func copyToClipboard(_ text: String) async { calls.withLock { $0.copied.append(text) } }
+    func setDefaultDevice(_ device: DefaultDevice?) async { state.withLock { $0.defaultDevice = device } }
 }
 
 /// The app on the other end of the WebSocket. `onSend` plays its part:

@@ -23,6 +23,8 @@ public protocol AgentUI: Sendable {
     func notify(_ note: AgentNote) async -> NotifyOutcome
     /// Puts `text` on the clipboard, like a Copy button. Takes no focus.
     func copyToClipboard(_ text: String) async
+    /// Sets or clears the default device (D76). Doesn't change the window.
+    func setDefaultDevice(_ device: DefaultDevice?) async
 }
 
 public struct HostSnapshot: Sendable, Equatable {
@@ -50,13 +52,15 @@ public struct HostSnapshot: Sendable, Equatable {
         set { ui.sessionId = newValue }
     }
     public var notifications: AgentNotifications.State
+    /// The agents' default device (D76), if set.
+    public var defaultDevice: DefaultDevice?
 
     public init(serverState: String = "listening", liveSessionIds: [Int64] = [],
                 viewingSessionId: Int64? = nil, commandsBySession: [Int64: [CommandHint]] = [:],
                 deviceURL: String? = "ws://192.168.1.5:9080",
                 beaverVersion: String = "dev", mcpPort: UInt16 = 9081,
                 ui: UIState = UIState(), windowOpen: Bool = true, frontmost: Bool = false,
-                notifications: AgentNotifications.State = .allowed) {
+                notifications: AgentNotifications.State = .allowed, defaultDevice: DefaultDevice? = nil) {
         self.serverState = serverState
         self.liveSessionIds = liveSessionIds
         self.commandsBySession = commandsBySession
@@ -65,6 +69,7 @@ public struct HostSnapshot: Sendable, Equatable {
         self.ui = ui; self.windowOpen = windowOpen; self.frontmost = frontmost
         if let viewingSessionId { self.ui.sessionId = viewingSessionId }
         self.notifications = notifications
+        self.defaultDevice = defaultDevice
     }
 }
 

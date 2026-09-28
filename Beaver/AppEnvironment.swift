@@ -24,6 +24,18 @@ public final class AppEnvironment {
     /// a deleted live session's replacement keeps talking to the same app.
     @ObservationIgnored public var mcpClients: [UUID: DeviceMCPClient] = [:]
 
+    /// The device agents' device tools use without a deviceId (D76).
+    /// In memory until Beaver quits.
+    public var defaultDevice: DefaultDevice?
+
+    /// The device popover's toggle: set it, and say so in the Agent panel.
+    public func setDefaultDeviceByUser(_ device: DefaultDevice?, name: String, sessionId: Int64) {
+        defaultDevice = device
+        let text = device == nil ? "You cleared the default device for agents"
+                                 : "You made \(name) the default device for agents"
+        Task { await AgentJournal(store: store).post(.system, text, sessionId: sessionId) }
+    }
+
     public func isLive(_ sessionId: Int64?) -> Bool { live.isLive(sessionId) }
 
     /// Session id the user is *viewing*: a device from the toolbar device
