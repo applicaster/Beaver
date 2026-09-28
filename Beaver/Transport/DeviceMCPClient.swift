@@ -47,9 +47,11 @@ public actor DeviceMCPClient {
     }
 
     /// A JSON-RPC response from the app. Unknown ids (a reply after its
-    /// timeout) are ignored.
+    /// timeout) are ignored, as are requests from the app itself (they carry
+    /// their own `method`, possibly reusing one of our ids).
     public func receive(_ message: JSON) {
-        guard let id = message["id"]?.int, let waiter = waiters.removeValue(forKey: id) else { return }
+        guard message["method"] == nil,
+              let id = message["id"]?.int, let waiter = waiters.removeValue(forKey: id) else { return }
         if let error = message["error"] {
             waiter.resume(throwing: DeviceMCPError.rpc(code: error["code"]?.int ?? 0,
                                                        message: error["message"]?.string ?? "error"))

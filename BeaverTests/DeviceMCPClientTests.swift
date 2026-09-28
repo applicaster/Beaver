@@ -77,6 +77,23 @@ struct DeviceMCPClientTests {
         }
     }
 
+    @Test("A request from the app, even reusing a pending call's id, is ignored")
+    func ignoresRequestsFromDevice() async throws {
+        let (client, device) = connect { method, _ in
+            if method == "tools/call" { try? await Task.sleep(for: .milliseconds(100)); return ["real": true] }
+            return [:]
+        }
+        async let result = client.request("tools/call", timeout: .seconds(1))
+        // Wait for the call to be on the wire so we know the id it used.
+        while device.frames.withLock({ $0.last?["method"]?.string }) != "tools/call" {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        let pendingId = device.frames.withLock { $0.last?["id"] } ?? .null
+        await client.receive(["jsonrpc": "2.0", "id": pendingId, "method": "ping"])
+        let value = try await result
+        #expect(value["real"] == true)
+    }
+
     @Test("Review focus: a reply after the timeout is ignored")
     func lateReply() async throws {
         let (client, _) = connect { method, _ in
