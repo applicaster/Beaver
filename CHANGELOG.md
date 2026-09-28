@@ -93,6 +93,11 @@ When releasing:
   reconnects.
 - Requests to a connected app's toolboxes go one at a time, so a slow tool
   call no longer makes an unrelated request to the same app time out.
+- A toolbox request stuck behind a slow one gives up after its own timeout
+  and says the app is busy (nothing ran), instead of waiting indefinitely.
+- Agents: `tools_call` on a restart, kill or launch tool watches for the app
+  dropping only once the call is sent, and stops watching when the app
+  answers with an error, so a later unrelated drop isn't pinned on it.
 - Agents: a `tools_call` that never reached the app — it didn't answer
   `initialize`, or disconnected while the call waited its turn — says
   nothing ran and gives the same call to try again, instead of "it may

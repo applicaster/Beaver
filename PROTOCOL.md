@@ -197,6 +197,8 @@ same socket as `handshake` and `command`, through `DeviceMCPClient`.
 - Methods Beaver sends: `initialize`, `tools/list` (5 s timeout), `tools/call`
   (20 s timeout — the device's own React tools time out at 15 s).
 - Beaver sends one request at a time per app; each timeout counts from sending.
+  A request waits for its turn for at most its own timeout; one that doesn't
+  get it is never sent.
 
 ---
 
