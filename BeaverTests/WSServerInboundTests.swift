@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import Network
 @testable import BeaverCore
 
 @Suite("WSServer inbound order")
@@ -47,6 +48,44 @@ struct WSServerInboundTests {
                 .disconnected(id),
             ], "round \(round)")
         }
+        await server.stop()
+    }
+
+    /// NWConnection stays `.ready` when the peer's stream ends; only the
+    /// receive sees it. A device whose socket closes with a FIN and no
+    /// close frame must still end its session.
+    @Test("A client that ends its stream without a close frame is disconnected")
+    func endOfStreamDisconnects() async throws {
+        let server = WSServer(port: 19_087)
+        try await server.start()
+        _ = await race(timeout: .seconds(10)) {
+            for await state in server.state { if case .listening = state { return } }
+        }
+
+        let client = NWConnection(host: "127.0.0.1", port: 19_087, using: .tcp)
+        client.start(queue: .global())
+        let upgrade = "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+            + "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"
+        client.send(content: Data(upgrade.utf8), completion: .idempotent)
+
+        let items = await race(timeout: .seconds(10)) {
+            var items: [WSServer.Inbound] = []
+            for await item in server.inbound {
+                items.append(item)
+                // FIN only: a full close with the 101 unread would send RST.
+                if case .connected = item {
+                    client.send(content: nil, contentContext: .finalMessage, isComplete: true, completion: .idempotent)
+                }
+                if case .disconnected = item { break }
+            }
+            return items
+        }
+        if case .connected(let id)? = items?.first {
+            #expect(items == [.connected(id), .disconnected(id)])
+        } else {
+            Issue.record("expected connect then disconnect, got \(String(describing: items))")
+        }
+        client.cancel()
         await server.stop()
     }
 

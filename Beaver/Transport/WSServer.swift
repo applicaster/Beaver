@@ -273,6 +273,10 @@ public actor WSServer {
     /// Control frames (ping, pong, close) are delivered here too, even
     /// with `autoReplyPing` answering the ping. They carry no protocol
     /// frame, so only data messages go on to the decoder (PROTOCOL.md §1).
+    ///
+    /// The end of the peer's stream (a FIN, with or without a close frame)
+    /// reaches only this callback: the connection stays `.ready`. Cancel it
+    /// so `.cancelled` ends the session, or the device stays live forever.
     private nonisolated func receive(on connection: NWConnection, id: UUID) {
         connection.receiveMessage { [weak self] data, context, _, error in
             guard let self else { return }
@@ -281,8 +285,10 @@ public actor WSServer {
             if let data, !data.isEmpty, opcode == .text || opcode == .binary {
                 self.inboundContinuation.yield(.frame(id, data))
             }
-            if error == nil {
+            if error == nil, context?.isFinal != true {
                 self.receive(on: connection, id: id)
+            } else {
+                connection.cancel()
             }
         }
     }
