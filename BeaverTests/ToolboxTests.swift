@@ -50,4 +50,24 @@ struct ToolboxTests {
         #expect(Toolboxes.beaverToolName("devices.set_default") == "devices_set_default")
         #expect(Toolboxes.beaverToolName("status") == "status")
     }
+
+    @Test("ToolboxLoad: loaded, empty, unsupported")
+    func loadStates() async {
+        let listing = FakeDevice(onMCP: { _, _ in ToolboxTests.list })
+        guard case .loaded(let boxes) = await ToolboxLoad.fetch(from: listing, sessionId: 1) else {
+            Issue.record("expected .loaded"); return
+        }
+        #expect(boxes.map(\.name) == ["app", "other", "storage"])
+        #expect(listing.mcpCalls.map(\.method) == ["tools/list"])
+        #expect(await ToolboxLoad.fetch(from: FakeDevice(onMCP: { _, _ in ["tools": []] }), sessionId: 1) == .loaded([]))
+        #expect(await ToolboxLoad.fetch(from: FakeDevice(), sessionId: 1) == .unsupported)
+    }
+
+    @Test("Review focus: ToolboxLoad ends on a timeout or a disconnect instead of spinning")
+    func loadFailures() async {
+        let slow = FakeDevice(onMCP: { _, _ in throw DeviceMCPError.timeout })
+        let gone = FakeDevice(onMCP: { _, _ in throw DeviceMCPError.disconnected })
+        #expect(await ToolboxLoad.fetch(from: slow, sessionId: 1) == .failed("The app didn't answer in time."))
+        #expect(await ToolboxLoad.fetch(from: gone, sessionId: 1) == .failed("The app disconnected."))
+    }
 }

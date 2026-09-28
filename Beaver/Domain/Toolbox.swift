@@ -103,3 +103,31 @@ public enum Toolboxes {
         return out
     }
 }
+
+/// What the device popover shows under Toolboxes (D75).
+public enum ToolboxLoad: Sendable, Equatable {
+    case loading
+    case loaded([Toolbox])
+    /// The app doesn't answer MCP (JS-only sink, older SDK).
+    case unsupported
+    case failed(String)
+
+    /// Asks the app for its tools now; React toolboxes come and go, so nothing is cached.
+    public static func fetch(from device: any DeviceLink, sessionId: Int64) async -> ToolboxLoad {
+        do {
+            let result = try await device.mcp("tools/list", params: [:], to: sessionId,
+                                              timeout: DeviceMCPClient.listTimeout)
+            return .loaded(Toolboxes.group(Toolboxes.tools(fromListResult: result)))
+        } catch DeviceMCPError.unsupported {
+            return .unsupported
+        } catch DeviceMCPError.timeout {
+            return .failed("The app didn't answer in time.")
+        } catch DeviceMCPError.disconnected {
+            return .failed("The app disconnected.")
+        } catch DeviceMCPError.rpc(_, let message) {
+            return .failed(message)
+        } catch {
+            return .failed(error.localizedDescription)
+        }
+    }
+}
