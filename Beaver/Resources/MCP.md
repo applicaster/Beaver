@@ -214,7 +214,7 @@ takes focus, unless you pass `reveal: true`.
 2. `toolboxes_list()` — its toolboxes, e.g. `storage (7)`, `app (3)`, `debugfeatures (2)`.
 3. `toolboxes_list(toolbox: "storage")` — each tool's arguments.
 4. `tools_call(name: "storage.get", arguments: {key: "volume"})` — the app's answer. The summary names the app (`(default)` when the default picked it); Next's `logs_wait(sessionId: …)` reads that app's logs. Your client asks the user to confirm each `tools_call`: app tools can delete data or restart the app.
-5. `tools_call(name: "app.restart")` may time out or report a disconnect: the app drops the connection first, so it may still have run. `beaver_status()` shows it back in a new session; the default follows it. The Agent panel notes the drop.
+5. `tools_call(name: "app.restart")` may time out or report a disconnect: the app drops the connection first, so it may still have run. `beaver_status()` shows it back in a new session; the default follows it. The Agent panel notes the drop. An error that says the call didn't reach the app is different: nothing ran, so the same call can be sent again.
 6. `toolboxes_list(deviceId: "beaver")` and `tools_call(deviceId: "beaver", name: "logs.query", arguments: {since: "5m"})` — Beaver's own tools the same way (`"beaver"` in any case). Beaver's destructive tools aren't listed there: call them directly.
 
 ### organise — bookmarks, saved filters, a clean screen

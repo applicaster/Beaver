@@ -102,7 +102,9 @@ on `.disconnected(c)`. An actor in `Beaver/Transport/DeviceMCPClient.swift`.
     `send(command:to:)`), and suspends until the reply with that `id`, the
     timeout, or the disconnect.
   - A JSON-RPC `error` → `DeviceMCPError.rpc(code, message)`; timeout →
-    `.timeout`; disconnect while waiting → `.disconnected`.
+    `.timeout`; disconnect while waiting → `.disconnected`. A request whose
+    frame was never sent — `initialize` failed first, or the app
+    disconnected while it waited its turn — → `.notSent(reason)`.
 - `receive(_ payload: JSON)`: resumes the matching waiter; an unknown `id` is
   ignored.
 - **Initialize once, lazily** — before the first request on the connection:
@@ -184,7 +186,8 @@ public enum Toolboxes { static func group(_ tools: [DeviceTool]) -> [Toolbox] } 
 - Errors from `DeviceMCPClient`: `.unsupported` → "This app doesn't answer
   MCP (it needs quick-brick-xray's native WebSocket sink)…";
   `.timeout` → says the call may still have run on the device;
-  `.disconnected` → points at `beaver_status()`.
+  `.disconnected` → points at `beaver_status()`; `.notSent` → says nothing
+  ran on the app and gives the same call to try again.
 - `Next:` for `toolboxes_list` suggests `tools_call` with the first tool's
   name and an arguments skeleton from its schema; for `tools_call`, the
   `logs_wait` cursor as `commands_send` does.

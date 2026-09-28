@@ -165,6 +165,24 @@ struct ToolboxToolsTests {
         #expect(m.contains("may still have run"))
     }
 
+    @Test("A call that never reached the app says nothing ran, retries the same call, and isn't journaled destructive")
+    func notSent() async throws {
+        let (store, a, ui, device) = try await alpha { _, _ in
+            throw DeviceMCPError.notSent("the app didn't answer initialize in time")
+        }
+        do {
+            _ = try await run(ToolboxTools.toolsCall, ["name": "app.killProcess", "arguments": ["force": true]],
+                              store, ui, device)
+            Issue.record("expected a ToolError")
+        } catch let e as ToolError {
+            #expect(e.message == "app.killProcess didn't reach Alpha 1.0 (iPhone 15, iOS 18.0): the app didn't answer "
+                + "initialize in time. Nothing ran on the app. Example: tools_call(deviceId: \"\(a.id)\", "
+                + "name: \"app.killProcess\", arguments: {\"force\":true}) to try again, or beaver_status().")
+            #expect(!e.message.contains("may still have run"))
+            #expect(e.journalKind == nil)
+        }
+    }
+
     // MARK: "beaver"
 
     @Test("Beaver as a device: its tools as toolboxes, without the gateway")

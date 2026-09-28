@@ -20,6 +20,8 @@ public enum DeviceMCPError: Error, Sendable, Equatable {
     case timeout
     /// The connection closed, or was already gone.
     case disconnected
+    /// The request's frame was never sent to the app; the string says why.
+    case notSent(String)
     /// The app's JSON-RPC error reply.
     case rpc(code: Int, message: String)
 }
@@ -78,7 +80,8 @@ public actor DeviceMCPClient {
         if case .unsupported = setup { setup = .idle }
     }
 
-    /// The connection closed: every waiting and queued call fails with `.disconnected`.
+    /// The connection closed: a call already sent fails with `.disconnected`,
+    /// one still queued with `.notSent`.
     public func close() {
         closed = true
         let pending = waiters
@@ -86,8 +89,10 @@ public actor DeviceMCPClient {
         for waiter in pending.values { waiter.resume(throwing: DeviceMCPError.disconnected) }
         let queued = queue
         queue = []
-        for turn in queued { turn.resume(throwing: DeviceMCPError.disconnected) }
+        for turn in queued { turn.resume(throwing: DeviceMCPError.notSent(Self.droppedBeforeSend)) }
     }
+
+    static let droppedBeforeSend = "the app disconnected before Beaver sent it"
 
     private func takeTurn() async throws {
         guard busy else { busy = true; return }
@@ -114,8 +119,18 @@ public actor DeviceMCPClient {
             setup = .unsupported
             throw DeviceMCPError.unsupported
         } catch {
+            // The request itself was never sent. Back to idle: the next one retries.
             setup = .idle
-            throw error
+            switch error {
+            case DeviceMCPError.timeout:
+                throw DeviceMCPError.notSent("the app didn't answer initialize in time")
+            case DeviceMCPError.rpc(_, let message):
+                throw DeviceMCPError.notSent("the app refused initialize: \(message)")
+            case DeviceMCPError.disconnected:
+                throw DeviceMCPError.notSent(Self.droppedBeforeSend)
+            default:
+                throw error
+            }
         }
     }
 
@@ -129,7 +144,8 @@ public actor DeviceMCPClient {
     }
 
     private func call(_ method: String, params: JSON, timeout: Duration) async throws -> JSON {
-        guard !closed else { throw DeviceMCPError.disconnected }
+        // Closed while this request waited for its turn.
+        guard !closed else { throw DeviceMCPError.notSent(Self.droppedBeforeSend) }
         let id = nextId
         nextId += 1
         let frame = Self.frame(["jsonrpc": "2.0", "id": .number(Double(id)), "method": .string(method), "params": params])

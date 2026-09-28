@@ -128,6 +128,8 @@ public enum ToolboxLoad: Sendable, Equatable {
             return .failed("The app disconnected.")
         } catch DeviceMCPError.rpc(_, let message) {
             return .failed(message)
+        } catch DeviceMCPError.notSent(let reason) {
+            return .failed(reason.prefix(1).uppercased() + reason.dropFirst() + ".")
         } catch {
             return .failed(error.localizedDescription)
         }

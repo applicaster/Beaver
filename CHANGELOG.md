@@ -89,6 +89,10 @@ When releasing:
   reconnects.
 - Requests to a connected app's toolboxes go one at a time, so a slow tool
   call no longer makes an unrelated request to the same app time out.
+- Agents: a `tools_call` that never reached the app — it didn't answer
+  `initialize`, or disconnected while the call waited its turn — says
+  nothing ran and gives the same call to try again, instead of "it may
+  still have run". The device popover says why too.
 - The toolbar badge and device popover show the app's real device model,
   platform and OS once quick-brick-xray's own storage harvest arrives,
   instead of sticking with whatever the handshake alone reported.

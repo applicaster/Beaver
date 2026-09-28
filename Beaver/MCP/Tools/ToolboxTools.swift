@@ -157,6 +157,7 @@ enum ToolboxTools {
         if localName(name, startsWith: endsAppVerbs) { await ctx.watchForDisconnect(after: name, sessionId: id) }
         let reply = try await device(ctx, "tools/call", ["name": .string(name), "arguments": .object(arguments)],
                                      sessionId: id, timeout: DeviceMCPClient.callTimeout, what: name, label: label,
+                                     retry: "tools_call(deviceId: \"\(id)\", name: \"\(name)\", arguments: \(JSON.object(arguments).text))",
                                      journalKind: risky ? .destructive : nil)
         let content = reply["content"]?.array ?? []
         let text = content.compactMap { $0["text"]?.string }.joined(separator: "\n")
@@ -164,7 +165,7 @@ enum ToolboxTools {
         if reply["isError"]?.bool == true {
             var hint = " Example: toolboxes_list(deviceId: \"\(id)\", toolbox: \"\(box)\") for its arguments."
             if let listed = try? await device(ctx, "tools/list", [:], sessionId: id, timeout: DeviceMCPClient.listTimeout,
-                                              what: "tools/list", label: label) {
+                                              what: "tools/list", label: label, retry: "toolboxes_list(deviceId: \"\(id)\")") {
                 let tools = Toolboxes.tools(fromListResult: listed)
                 if !tools.contains(where: { $0.name == name }) {
                     let same = tools.filter { Toolboxes.name(of: $0.name) == box }.map(\.name).sorted()
@@ -221,7 +222,7 @@ enum ToolboxTools {
         let (host, id) = try await ctx.requireDevice(args, doing: "list its toolboxes", call: "toolboxes_list()")
         let label = try await ctx.describeTarget(id, args, host)
         let result = try await device(ctx, "tools/list", [:], sessionId: id, timeout: DeviceMCPClient.listTimeout,
-                                      what: "tools/list", label: label)
+                                      what: "tools/list", label: label, retry: "toolboxes_list(deviceId: \"\(id)\")")
         return (String(id), label, Toolboxes.tools(fromListResult: result))
     }
 
@@ -243,8 +244,9 @@ enum ToolboxTools {
 
     /// One MCP request; `DeviceMCPError` becomes a ToolError that says what
     /// to do. `journalKind` goes on a timeout or a drop: the call may have run.
+    /// `retry` is the same call again, for when it never reached the app.
     private static func device(_ ctx: ToolContext, _ method: String, _ params: JSON, sessionId: Int64,
-                               timeout: Duration, what: String, label: String,
+                               timeout: Duration, what: String, label: String, retry: String,
                                journalKind: AgentActivity.Kind? = nil) async throws -> JSON {
         let mayHaveRun = method == "tools/call"
             ? " It may still have run it (app.restart and app.killProcess end the app before answering)." : ""
@@ -262,6 +264,8 @@ enum ToolboxTools {
                                 journalKind: journalKind)
             case .rpc(_, let message):
                 throw ToolError("\(label) refused \(what): \(message). Example: toolboxes_list(deviceId: \"\(sessionId)\").")
+            case .notSent(let reason):
+                throw ToolError("\(what) didn't reach \(label): \(reason). Nothing ran on the app. Example: \(retry) to try again, or beaver_status().")
             }
         }
     }

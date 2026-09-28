@@ -107,7 +107,7 @@ struct DeviceMCPClientTests {
         #expect(calls == ["slow", "fast"])
     }
 
-    @Test("Closing fails the request in flight and the queued one with .disconnected; the queued one is never sent")
+    @Test("Closing fails the request in flight with .disconnected and the queued one with .notSent; the queued one is never sent")
     func closeFailsQueue() async throws {
         let (client, device) = connect { method, _ in method == "initialize" ? [:] : nil }
         let first = Task { try await client.request("tools/call", params: ["name": "a"], timeout: .seconds(5)) }
@@ -116,7 +116,7 @@ struct DeviceMCPClientTests {
         try await Task.sleep(for: .milliseconds(50))
         await client.close()
         await #expect(throws: DeviceMCPError.disconnected) { try await first.value }
-        await #expect(throws: DeviceMCPError.disconnected) { try await second.value }
+        await #expect(throws: DeviceMCPError.notSent("the app disconnected before Beaver sent it")) { try await second.value }
         #expect(device.methods == ["initialize", "notifications/initialized", "tools/call"])
     }
 
@@ -175,19 +175,19 @@ struct DeviceMCPClientTests {
         #expect(device.methods == ["initialize"])
     }
 
-    @Test("A native app that misses initialize times out, and the next request tries initialize again")
+    @Test("A native app that misses initialize: .notSent, and the next request tries initialize again")
     func nativeTimeoutRetries() async {
         let (client, device) = connect { _, _ in nil }
         await client.markNative()
         for _ in 0..<2 {
-            await #expect(throws: DeviceMCPError.timeout) {
+            await #expect(throws: DeviceMCPError.notSent("the app didn't answer initialize in time")) {
                 try await client.request("tools/list", timeout: .seconds(1))
             }
         }
         #expect(device.methods == ["initialize", "initialize"])
     }
 
-    @Test("A JSON-RPC error to initialize is .rpc, not .unsupported, and the next request retries")
+    @Test("A JSON-RPC error to initialize is .notSent, not .unsupported, and the next request retries")
     func initializeRPCErrorRetries() async throws {
         let attempts = Mutex(0)
         let (client, device) = connect { method, _ in
@@ -195,7 +195,7 @@ struct DeviceMCPClientTests {
             let n = attempts.withLock { $0 += 1; return $0 }
             return n == 1 ? ["error": ["code": -32603, "message": "not ready"]] : [:]
         }
-        await #expect(throws: DeviceMCPError.rpc(code: -32603, message: "not ready")) {
+        await #expect(throws: DeviceMCPError.notSent("the app refused initialize: not ready")) {
             try await client.request("tools/list", timeout: .seconds(1))
         }
         let tools = try await client.request("tools/list", timeout: .seconds(1))
@@ -210,10 +210,23 @@ struct DeviceMCPClientTests {
             try await client.request("tools/list", timeout: .seconds(1))
         }
         await client.markNative()
-        await #expect(throws: DeviceMCPError.timeout) {
+        await #expect(throws: DeviceMCPError.notSent("the app didn't answer initialize in time")) {
             try await client.request("tools/list", timeout: .seconds(1))
         }
         #expect(device.methods == ["initialize", "initialize"])
+    }
+
+    @Test("Closing while initialize waits: .notSent, and the request is never sent")
+    func closeDuringInitialize() async throws {
+        let (client, device) = connect { _, _ in nil }
+        await client.markNative()
+        let request = Task { try await client.request("tools/call", timeout: .seconds(5)) }
+        while !device.methods.contains("initialize") { try await Task.sleep(for: .milliseconds(5)) }
+        await client.close()
+        await #expect(throws: DeviceMCPError.notSent("the app disconnected before Beaver sent it")) {
+            try await request.value
+        }
+        #expect(device.methods == ["initialize"])
     }
 
     @Test("Closing fails the waiting call with .disconnected, and later ones too")

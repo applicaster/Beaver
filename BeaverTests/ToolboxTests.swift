@@ -77,5 +77,7 @@ struct ToolboxTests {
         let gone = FakeDevice(onMCP: { _, _ in throw DeviceMCPError.disconnected })
         #expect(await ToolboxLoad.fetch(from: slow, sessionId: 1) == .failed("The app didn't answer in time."))
         #expect(await ToolboxLoad.fetch(from: gone, sessionId: 1) == .failed("The app disconnected."))
+        let refused = FakeDevice(onMCP: { _, _ in throw DeviceMCPError.notSent("the app refused initialize: not ready") })
+        #expect(await ToolboxLoad.fetch(from: refused, sessionId: 1) == .failed("The app refused initialize: not ready."))
     }
 }
