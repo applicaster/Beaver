@@ -5,17 +5,23 @@
 //  D75: JSON-RPC to one connected app's MCP server over the same WebSocket
 //  as its logs (PROTOCOL.md §3.3, §4.5). One per connection; the envelope
 //  is {"type":"mcp","payload":…} and replies are matched by JSON-RPC id.
+//  The SDKs handle one MCP message at a time, so requests queue here (FIFO)
+//  and each is sent only after the previous one finished; its timeout
+//  counts from its own send.
 
 import Foundation
 
 public enum DeviceMCPError: Error, Sendable, Equatable {
-    /// The app never answered `initialize`: it has no toolboxes (the
-    /// JS-only socket sink, an older SDK). Stays so until it reconnects.
+    /// The app never answered `initialize` and never sent a handshake: it
+    /// has no toolboxes (the JS-only socket sink, an older SDK). Stays so
+    /// until it reconnects or sends a handshake.
     case unsupported
     /// No answer in time. The device may still have run the call.
     case timeout
     /// The connection closed, or was already gone.
     case disconnected
+    /// The request's frame was never sent to the app; the string says why.
+    case notSent(String)
     /// The app's JSON-RPC error reply.
     case rpc(code: Int, message: String)
 }
@@ -25,7 +31,7 @@ public actor DeviceMCPClient {
     /// The device gives up on a React tool after 15 s; this leaves it room to say so.
     public static let callTimeout: Duration = .seconds(20)
 
-    private enum Setup { case idle, running(Task<Void, Error>), ready, unsupported }
+    private enum Setup { case idle, ready, unsupported }
 
     private let sendFrame: @Sendable (Data) async -> Void
     private let setupTimeout: Duration
@@ -33,15 +39,22 @@ public actor DeviceMCPClient {
     private var nextId = 1
     private var waiters: [Int: CheckedContinuation<JSON, Error>] = [:]
     private var closed = false
+    private var native = false
+    /// A request holds the line from before `initialize` until its reply.
+    private var busy = false
+    private var queue: [CheckedContinuation<Void, Error>] = []
 
     public init(setupTimeout: Duration = .seconds(5), send: @escaping @Sendable (Data) async -> Void) {
         self.setupTimeout = setupTimeout
         self.sendFrame = send
     }
 
-    /// Initializes the session first, once per connection.
+    /// Waits for the requests before it, then initializes the session
+    /// first, once per connection.
     public func request(_ method: String, params: JSON = [:], timeout: Duration) async throws -> JSON {
         guard !closed else { throw DeviceMCPError.disconnected }
+        try await takeTurn()
+        defer { endTurn() }
         try await ensureInitialized()
         return try await call(method, params: params, timeout: timeout)
     }
@@ -60,32 +73,64 @@ public actor DeviceMCPClient {
         }
     }
 
-    /// The connection closed: every waiting call fails with `.disconnected`.
+    /// The app sent a client `handshake`: a native sink, which has an MCP
+    /// server. A missed `initialize` is then retried, never latched.
+    public func markNative() {
+        native = true
+        if case .unsupported = setup { setup = .idle }
+    }
+
+    /// The connection closed: a call already sent fails with `.disconnected`,
+    /// one still queued with `.notSent`.
     public func close() {
         closed = true
         let pending = waiters
         waiters = [:]
         for waiter in pending.values { waiter.resume(throwing: DeviceMCPError.disconnected) }
+        let queued = queue
+        queue = []
+        for turn in queued { turn.resume(throwing: DeviceMCPError.notSent(Self.droppedBeforeSend)) }
+    }
+
+    static let droppedBeforeSend = "the app disconnected before Beaver sent it"
+
+    private func takeTurn() async throws {
+        guard busy else { busy = true; return }
+        // `endTurn` hands the line over: `busy` stays true.
+        try await withCheckedThrowingContinuation { queue.append($0) }
+    }
+
+    private func endTurn() {
+        if queue.isEmpty { busy = false } else { queue.removeFirst().resume() }
     }
 
     private func ensureInitialized() async throws {
-        let task: Task<Void, Error>
         switch setup {
         case .ready: return
         case .unsupported: throw DeviceMCPError.unsupported
-        case .running(let running): task = running
-        case .idle:
-            task = Task { try await self.initialize() }
-            setup = .running(task)
+        case .idle: break
         }
         do {
-            try await task.value
+            try await initialize()
             setup = .ready
-        } catch DeviceMCPError.disconnected {
-            throw DeviceMCPError.disconnected
-        } catch {
+        } catch DeviceMCPError.timeout where !native {
+            // Silence from a sink that never sent a handshake: the JS-only
+            // sink has no MCP server, so don't ask again.
             setup = .unsupported
             throw DeviceMCPError.unsupported
+        } catch {
+            // The request itself was never sent. Back to idle: the next one retries.
+            setup = .idle
+            switch error {
+            case DeviceMCPError.timeout:
+                throw DeviceMCPError.notSent("the app didn't answer initialize in time")
+            case DeviceMCPError.rpc(_, let message):
+                throw DeviceMCPError.notSent("the app refused initialize: \(message)")
+            case DeviceMCPError.disconnected:
+                throw DeviceMCPError.notSent(Self.droppedBeforeSend)
+            default:
+                throw error
+            }
         }
     }
 
@@ -99,7 +144,8 @@ public actor DeviceMCPClient {
     }
 
     private func call(_ method: String, params: JSON, timeout: Duration) async throws -> JSON {
-        guard !closed else { throw DeviceMCPError.disconnected }
+        // Closed while this request waited for its turn.
+        guard !closed else { throw DeviceMCPError.notSent(Self.droppedBeforeSend) }
         let id = nextId
         nextId += 1
         let frame = Self.frame(["jsonrpc": "2.0", "id": .number(Double(id)), "method": .string(method), "params": params])

@@ -26,9 +26,10 @@ enum CommandTools {
         guard let command = try args.string("command").flatMap(ToolContext.trimmedNonEmpty) else {
             throw ToolError("command is required. Example: commands_send(command: \"storage.list\") — commands_list() shows what the app accepts.")
         }
-        let (_, live) = try await ctx.requireDevice(args, doing: "send a command",
-                                                call: "commands_send(command: \"\(command)\")")
+        let (host, live) = try await ctx.requireDevice(args, doing: "send a command",
+                                                   call: "commands_send(command: \"\(command)\")")
         let session = try await ctx.liveSession(live)
+        let target = try await ctx.describeTarget(live, args, host)
         let collect = min(maxCollectMillis, max(0, try args.int("collectLogsMs") ?? 0))
         let limit = try args.limit(default: 100, max: 500)
         let filter = collect > 0 ? try await ctx.resolveFilter(args, sessionId: session.id)
@@ -41,10 +42,11 @@ enum CommandTools {
 
         guard collect > 0 else {
             return ToolResult(
-                summary: "Sent \"\(command)\" to the app (session \(session.label)).",
+                summary: "Sent \"\(command)\" to \(target) (session \(session.label)).",
                 structured: ["sent": .string(command), "sessionId": JSON(session.id), "afterId": JSON(before)],
-                next: ["logs_wait(afterId: \(before), timeoutMs: 15000) for what it logs",
-                       "commands_send(command: \"\(command)\", collectLogsMs: 5000) to send and collect in one call"],
+                next: ["logs_wait(sessionId: \(session.id), afterId: \(before), timeoutMs: 15000) for what it logs "
+                       + "(after a restart, beaver_status() shows its new session)",
+                       "commands_send(deviceId: \"\(live)\", command: \"\(command)\", collectLogsMs: 5000) to send and collect in one call"],
                 sessionId: session.id
             )
         }
@@ -60,10 +62,10 @@ enum CommandTools {
         ]
         structured.merge(w.followFields) { current, _ in current }
         var next: [String] = w.events.first.map { ["logs_get(ids: [\($0.id)]) for the full event"] } ?? []
-        next.append(w.events.last.map { "logs_wait(afterId: \($0.id), …) for what comes next" }
-            ?? "logs_wait(afterId: \(before), timeoutMs: 15000) in case the app is slow")
+        next.append(w.events.last.map { "logs_wait(sessionId: \(w.sessionId), afterId: \($0.id), …) for what comes next" }
+            ?? "logs_wait(sessionId: \(w.sessionId), afterId: \(before), timeoutMs: 15000) in case the app is slow")
         return ToolResult(
-            summary: "Sent \"\(command)\"; \(w.total) event(s) logged in \(collect) ms (\(ToolText.describe(filter.filter))).\(resolved)\(follow)",
+            summary: "Sent \"\(command)\" to \(target); \(w.total) event(s) logged in \(collect) ms (\(ToolText.describe(filter.filter))).\(resolved)\(follow)",
             body: w.events.map(ToolText.eventLine).joined(separator: "\n"),
             structured: .object(structured),
             next: next,
@@ -74,11 +76,12 @@ enum CommandTools {
     static let disconnect = MCPTool(
         name: "devices_disconnect",
         title: "Disconnect a device",
-        description: "Use when the user asks to drop a connected app, or a stale one is in the way: Beaver closes that app's connection and its session ends, like the Disconnect button. An app that reconnects on its own comes back in a new session. With several apps connected, pass deviceId from beaver_status.",
+        description: "Use when the user asks to drop a connected app, or a stale one is in the way: Beaver closes that app's connection and its session ends, like the Disconnect button. An app that reconnects on its own comes back in a new session. With several apps connected, pass deviceId from beaver_status: the default device doesn't count here.",
         kind: .change,
         inputSchema: ToolSchema.object(["deviceId": ToolSchema.deviceId])
     ) { args, ctx in
-        let (_, live) = try await ctx.requireDevice(args, doing: "disconnect it", call: "devices_disconnect()")
+        let (_, live) = try await ctx.requireDevice(args, doing: "disconnect it", call: "devices_disconnect()",
+                                                    useDefault: false)
         let session = try await ctx.liveSession(live)
         await ctx.device.disconnect(live)
         return ToolResult(

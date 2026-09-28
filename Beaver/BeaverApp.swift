@@ -170,10 +170,18 @@ struct BeaverApp: App {
                     }
                 case .frame(let connection, let frame):
                     guard let sessionId = env.live.session(for: connection) else {
-                        // D75: an MCP reply still reaches its request while a
-                        // deleted live session is being replaced.
-                        if case .success(.mcp(let message)) = ProtocolDecoder.decode(frame) {
+                        // D75: while a deleted live session is being replaced,
+                        // an MCP reply still reaches its request, and a
+                        // handshake is kept: the replacement reads it from
+                        // `live` (replaceDeletedLiveSessions).
+                        switch ProtocolDecoder.decode(frame) {
+                        case .success(.mcp(let message)):
                             await env.mcpClients[connection]?.receive(message)
+                        case .success(.clientHandshake(let handshake)):
+                            env.live.setHandshake(handshake, for: connection)
+                            await env.mcpClients[connection]?.markNative()
+                        default:
+                            break
                         }
                         continue
                     }
@@ -283,7 +291,12 @@ struct BeaverApp: App {
         case .success(.network(let capture)):
             try? await env.store.recordNetworkEntry(capture, sessionId: sessionId)
         case .success(.clientHandshake(let handshake)):
-            await MainActor.run { env.live.setHandshake(handshake, for: connection) }
+            let client = await MainActor.run {
+                env.live.setHandshake(handshake, for: connection)
+                return env.mcpClients[connection]
+            }
+            // Only native sinks send a handshake, and they serve MCP (D75).
+            await client?.markNative()
             try? await env.store.applyHandshake(handshake, to: sessionId)
         case .success(.mcp(let message)):
             // D75: an answer to Beaver's request; not a log line.

@@ -63,6 +63,9 @@ When releasing:
 ### Changed
 - An app that restarts is recognised by its device id, so two identical builds
   on two simulators are no longer confused.
+- Agents: `tools_call(deviceId: "beaver")` returns Beaver's result under
+  `structuredContent`; on an app, `tools_call` returns `structuredContent`
+  when the app sent one and `text` otherwise.
 
 ### Fixed
 - A device that connects is shown at once, even if a past or imported
@@ -72,6 +75,41 @@ When releasing:
 - A device whose app closes its socket is disconnected at once. Before, if
   the socket closed cleanly (no reset), Beaver never noticed, and the
   device and its session stayed live until you disconnected it by hand.
+- Agents: `tools_call` is marked destructive, so clients that honor
+  destructiveHint ask you to confirm, since an app tool can delete data or
+  restart the app. Restart, kill, launch and
+  execute tools are marked destructive in the Agent panel, also when the app
+  drops before answering, and the panel notes the drop.
+- Agents: device tools name the app a call went to (and "default" when the
+  default device picked it), and their suggested `logs_wait` reads that
+  app's session, not the newest one. `devices_disconnect` needs `deviceId`
+  whenever several apps are connected, default or not.
+- Agents: `tools_call` counts images and other non-text items instead of
+  dropping them, and doesn't repeat the app's answer three times;
+  `deviceId: "Beaver"` works in any case; `beaver_status` marks one default
+  device; a toolbox without a read tool no longer suggests a mutating one.
+- Toolbox loading retries after a native app that was merely slow to answer
+  once — it no longer gets stuck saying the app doesn't support MCP until it
+  reconnects.
+- Requests to a connected app's toolboxes go one at a time, so a slow tool
+  call no longer makes an unrelated request to the same app time out.
+- Agents: a `tools_call` that never reached the app — it didn't answer
+  `initialize`, or disconnected while the call waited its turn — says
+  nothing ran and gives the same call to try again, instead of "it may
+  still have run". The device popover says why too.
+- The toolbar badge and device popover show the app's real device model,
+  platform and OS once quick-brick-xray's own storage harvest arrives,
+  instead of sticking with whatever the handshake alone reported.
+- Device popover: a Retry button when an app doesn't answer MCP,
+  accessibility labels on the icon-only buttons and the live/connected
+  indicator, and long app- or device-supplied text now wraps within a limit
+  instead of overflowing the popover.
+- Only the one live session a shared device id resolves to is marked
+  "default for agents" — not every session that happens to share it. On
+  that device's other sessions the toggle is disabled and says why.
+- PROTOCOL.md, the design plan and DECISIONS.md corrected against the real
+  SDK behavior found in the bug hunt (frame encoding, Android's handshake
+  order and lack of reconnect, and more).
 
 ## [4.0.1] - 2026-09-24
 

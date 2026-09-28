@@ -31,6 +31,18 @@ final class ScriptedDevice: Sendable {
     }
 }
 
+/// Runs work one piece at a time, in call order.
+actor SerialLine {
+    private var tail: Task<Void, Never>?
+
+    func run<T: Sendable>(_ work: @escaping @Sendable () async -> T) async -> T {
+        let previous = tail
+        let task = Task { await previous?.value; return await work() }
+        tail = Task { _ = await task.value }
+        return await task.value
+    }
+}
+
 @Suite("DeviceMCPClient (D75)")
 struct DeviceMCPClientTests {
 
@@ -65,6 +77,47 @@ struct DeviceMCPClientTests {
         let (s, f) = try await (slow, fast)
         #expect(s["echo"] == "slow")
         #expect(f["echo"] == "fast")
+    }
+
+    @Test("One request at a time: the next is sent after the previous reply, and its timeout counts from then")
+    func oneAtATime() async throws {
+        // Like the SDKs, the device handles one MCP message at a time.
+        let line = SerialLine()
+        let slowStarted = Mutex(false), slowReplied = Mutex(false), fastSawSlowReply = Mutex<Bool?>(nil)
+        let (client, device) = connect { method, params in
+            await line.run {
+                guard method == "tools/call" else { return [:] }
+                if params["name"] == "slow" {
+                    slowStarted.withLock { $0 = true }
+                    try? await Task.sleep(for: .milliseconds(150))
+                    slowReplied.withLock { $0 = true }
+                } else {
+                    fastSawSlowReply.withLock { $0 = slowReplied.withLock { $0 } }
+                }
+                return ["echo": params["name"] ?? .null]
+            }
+        }
+        async let slow = client.request("tools/call", params: ["name": "slow"], timeout: .seconds(1))
+        while !slowStarted.withLock({ $0 }) { try await Task.sleep(for: .milliseconds(5)) }
+        let fast = try await client.request("tools/call", params: ["name": "fast"], timeout: .milliseconds(100))
+        #expect(try await slow["echo"] == "slow")
+        #expect(fast["echo"] == "fast")
+        #expect(fastSawSlowReply.withLock { $0 } == true)
+        let calls = device.frames.withLock { $0.filter { $0["method"] == "tools/call" }.map { $0["params"]?["name"] } }
+        #expect(calls == ["slow", "fast"])
+    }
+
+    @Test("Closing fails the request in flight with .disconnected and the queued one with .notSent; the queued one is never sent")
+    func closeFailsQueue() async throws {
+        let (client, device) = connect { method, _ in method == "initialize" ? [:] : nil }
+        let first = Task { try await client.request("tools/call", params: ["name": "a"], timeout: .seconds(5)) }
+        while !device.methods.contains("tools/call") { try await Task.sleep(for: .milliseconds(5)) }
+        let second = Task { try await client.request("tools/call", params: ["name": "b"], timeout: .seconds(5)) }
+        try await Task.sleep(for: .milliseconds(50))
+        await client.close()
+        await #expect(throws: DeviceMCPError.disconnected) { try await first.value }
+        await #expect(throws: DeviceMCPError.notSent("the app disconnected before Beaver sent it")) { try await second.value }
+        #expect(device.methods == ["initialize", "notifications/initialized", "tools/call"])
     }
 
     @Test("A JSON-RPC error becomes .rpc")
@@ -119,6 +172,60 @@ struct DeviceMCPClientTests {
             try await client.request("tools/list", timeout: .seconds(1))
         }
         #expect(ContinuousClock.now - start < .milliseconds(100))
+        #expect(device.methods == ["initialize"])
+    }
+
+    @Test("A native app that misses initialize: .notSent, and the next request tries initialize again")
+    func nativeTimeoutRetries() async {
+        let (client, device) = connect { _, _ in nil }
+        await client.markNative()
+        for _ in 0..<2 {
+            await #expect(throws: DeviceMCPError.notSent("the app didn't answer initialize in time")) {
+                try await client.request("tools/list", timeout: .seconds(1))
+            }
+        }
+        #expect(device.methods == ["initialize", "initialize"])
+    }
+
+    @Test("A JSON-RPC error to initialize is .notSent, not .unsupported, and the next request retries")
+    func initializeRPCErrorRetries() async throws {
+        let attempts = Mutex(0)
+        let (client, device) = connect { method, _ in
+            guard method == "initialize" else { return Self.tools }
+            let n = attempts.withLock { $0 += 1; return $0 }
+            return n == 1 ? ["error": ["code": -32603, "message": "not ready"]] : [:]
+        }
+        await #expect(throws: DeviceMCPError.notSent("the app refused initialize: not ready")) {
+            try await client.request("tools/list", timeout: .seconds(1))
+        }
+        let tools = try await client.request("tools/list", timeout: .seconds(1))
+        #expect(tools == Self.tools)
+        #expect(device.methods == ["initialize", "initialize", "notifications/initialized", "tools/list"])
+    }
+
+    @Test("A handshake after the unsupported latch clears it")
+    func markNativeClearsLatch() async {
+        let (client, device) = connect { _, _ in nil }
+        await #expect(throws: DeviceMCPError.unsupported) {
+            try await client.request("tools/list", timeout: .seconds(1))
+        }
+        await client.markNative()
+        await #expect(throws: DeviceMCPError.notSent("the app didn't answer initialize in time")) {
+            try await client.request("tools/list", timeout: .seconds(1))
+        }
+        #expect(device.methods == ["initialize", "initialize"])
+    }
+
+    @Test("Closing while initialize waits: .notSent, and the request is never sent")
+    func closeDuringInitialize() async throws {
+        let (client, device) = connect { _, _ in nil }
+        await client.markNative()
+        let request = Task { try await client.request("tools/call", timeout: .seconds(5)) }
+        while !device.methods.contains("initialize") { try await Task.sleep(for: .milliseconds(5)) }
+        await client.close()
+        await #expect(throws: DeviceMCPError.notSent("the app disconnected before Beaver sent it")) {
+            try await request.value
+        }
         #expect(device.methods == ["initialize"])
     }
 

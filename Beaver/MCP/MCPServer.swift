@@ -113,7 +113,8 @@ public struct MCPServer: Sendable {
             let structuredValue: JSON? = if structured { result.structured } else { nil }
             return Self.content(result.text, structured: structuredValue, isError: false)
         } catch let error as ToolError {
-            await journal.record(toolName: tool.name, kind: tool.kind, client: client, result: nil, error: error.message)
+            await journal.record(toolName: tool.name, kind: error.journalKind ?? tool.kind, client: client,
+                                 result: nil, error: error.message)
             return Self.content(error.message, structured: nil, isError: true)
         } catch {
             let message = "Beaver failed to run \(name): \(error.localizedDescription)"

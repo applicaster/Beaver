@@ -35,7 +35,7 @@ enum ToolboxTools {
             return ToolResult(summary: "No default device: with several apps connected, device tools need deviceId.",
                               structured: ["default": .null], next: ["beaver_status()"])
         }
-        if try args.string("deviceId") == beaverId {
+        if try ToolContext.isBeaver(args) {
             throw ToolError("The default is for apps; Beaver is always deviceId \"beaver\". Example: devices_set_default(deviceId: \"12\") with an id from beaver_status().")
         }
         let (_, id) = try await ctx.requireDevice(args, doing: "make it the default", call: "devices_set_default()")
@@ -86,12 +86,13 @@ enum ToolboxTools {
             )
         }
         guard let box = boxes.first(where: { $0.name == wanted }) else {
-            throw ToolError("\(on) has no toolbox \"\(wanted)\". Toolboxes: "
-                + boxes.map(\.name).joined(separator: ", ")
-                + ". Example: toolboxes_list(deviceId: \"\(deviceId)\", toolbox: \"\(boxes.first?.name ?? "storage")\").")
+            throw ToolError("\(on) has no toolbox \"\(wanted)\"." + toolboxesHint(boxes, deviceId: deviceId))
         }
-        // Suggest a read, never storage.delete because it sorts first.
-        let first = box.tools.first { localName($0.name, startsWith: readVerbs) } ?? box.tools[0]
+        // Suggest a read, never storage.delete because it sorts first; without
+        // a read, a placeholder the agent fills from the list above.
+        let next = box.tools.first { localName($0.name, startsWith: readVerbs) }
+            .map { "tools_call(deviceId: \"\(deviceId)\", name: \"\($0.name)\", arguments: \($0.exampleArguments))" }
+            ?? "tools_call(deviceId: \"\(deviceId)\", name: \"\(box.name).…\", arguments: {…}) with a tool from the list above"
         return ToolResult(
             summary: "\(box.name) on \(on): \(box.tools.count) tool(s).",
             body: box.tools.map { $0.signature + ($0.description.isEmpty ? "" : " — " + $0.description) }
@@ -99,7 +100,7 @@ enum ToolboxTools {
             structured: ["deviceId": .string(deviceId), "toolbox": .string(box.name), "tools": .array(box.tools.map {
                 ["name": .string($0.name), "description": .string($0.description), "inputSchema": $0.inputSchema]
             })],
-            next: ["tools_call(deviceId: \"\(deviceId)\", name: \"\(first.name)\", arguments: \(first.exampleArguments))"]
+            next: [next]
         )
     }
 
@@ -108,8 +109,9 @@ enum ToolboxTools {
     static let toolsCall = MCPTool(
         name: "tools_call",
         title: "Call an app's tool",
-        description: "Use to run one tool from toolboxes_list on a connected app (e.g. storage.set, app.restart) and get its answer. deviceId \"beaver\" runs Beaver's own tool by its dotted name (logs.query). Omit deviceId for the default device, or the only connected one.",
+        description: "Use to run one tool from toolboxes_list on a connected app (e.g. storage.set, app.restart) and get its answer. deviceId \"beaver\" runs Beaver's own tool by its dotted name (logs.query). Omit deviceId for the default device, or the only connected one. It is marked destructive, so clients that honor destructiveHint ask the user to confirm, because app tools can delete data or restart the app.",
         kind: .change,
+        destructiveHint: true,
         inputSchema: ToolSchema.object([
             "deviceId": ToolSchema.deviceId,
             "name": ToolSchema.string("The tool's full name from toolboxes_list, e.g. \"storage.set\"."),
@@ -120,7 +122,7 @@ enum ToolboxTools {
             throw ToolError("name is required. Example: tools_call(name: \"storage.get\", arguments: {key: \"volume\"}) — toolboxes_list() shows the names.")
         }
         let arguments = try argumentsObject(args["arguments"])
-        if try args.string("deviceId") == beaverId {
+        if try ToolContext.isBeaver(args) {
             let local = Toolboxes.beaverToolName(name)
             guard !gatewayNames.contains(local), let tool = BeaverTools.all.first(where: { $0.name == local }) else {
                 let own = beaverDeviceTools()
@@ -140,51 +142,69 @@ enum ToolboxTools {
                     : "\(name) is destructive, so Beaver doesn't run it through tools_call. Example: \(local)(\(required))."
                 throw ToolError(message)
             }
+            // The app path's shape (spec §5.1), the inner result inside.
             var result = try await tool.run(ToolArguments(arguments), ctx)
+            result.structured = ["deviceId": .string(beaverId), "name": .string(name), "isError": false,
+                                 "text": .string(result.summary), "structuredContent": result.structured]
             result.journalKind = tool.kind
             return result
         }
-        let (_, id) = try await ctx.requireDevice(args, doing: "call \(name)", call: "tools_call(name: \"\(name)\")")
-        let label = try await appLabel(ctx, id)
+        let (host, id) = try await ctx.requireDevice(args, doing: "call \(name)", call: "tools_call(name: \"\(name)\")")
+        let label = try await ctx.describeTarget(id, args, host)
+        let risky = localName(name, startsWith: destructiveVerbs)
         let before = try await ctx.store.latestEventId(sessionId: id) ?? 0
+        // Started first: the app may drop before it answers.
+        if localName(name, startsWith: endsAppVerbs) { await ctx.watchForDisconnect(after: name, sessionId: id) }
         let reply = try await device(ctx, "tools/call", ["name": .string(name), "arguments": .object(arguments)],
-                                     sessionId: id, timeout: DeviceMCPClient.callTimeout, what: name, label: label)
-        let text = (reply["content"]?.array ?? []).compactMap { $0["text"]?.string }.joined(separator: "\n")
+                                     sessionId: id, timeout: DeviceMCPClient.callTimeout, what: name, label: label,
+                                     retry: "tools_call(deviceId: \"\(id)\", name: \"\(name)\", arguments: \(JSON.object(arguments).text))",
+                                     journalKind: risky ? .destructive : nil)
+        let content = reply["content"]?.array ?? []
+        let text = content.compactMap { $0["text"]?.string }.joined(separator: "\n")
         let box = Toolboxes.name(of: name)
         if reply["isError"]?.bool == true {
-            var hint = ""
+            var hint = " Example: toolboxes_list(deviceId: \"\(id)\", toolbox: \"\(box)\") for its arguments."
             if let listed = try? await device(ctx, "tools/list", [:], sessionId: id, timeout: DeviceMCPClient.listTimeout,
-                                              what: "tools/list", label: label) {
+                                              what: "tools/list", label: label, retry: "toolboxes_list(deviceId: \"\(id)\")") {
                 let tools = Toolboxes.tools(fromListResult: listed)
                 if !tools.contains(where: { $0.name == name }) {
                     let same = tools.filter { Toolboxes.name(of: $0.name) == box }.map(\.name).sorted()
                     hint = same.isEmpty
-                        ? " Toolboxes: " + Toolboxes.group(tools).map(\.name).joined(separator: ", ") + "."
-                        : " Tools in \(box): " + same.joined(separator: ", ") + "."
+                        ? toolboxesHint(Toolboxes.group(tools), deviceId: String(id))
+                        : " Tools in \(box): " + same.joined(separator: ", ") + "." + hint
                 }
             }
-            throw ToolError("\(name) failed on \(label): \(text).\(hint) Example: toolboxes_list(deviceId: \"\(id)\", toolbox: \"\(box)\") for its arguments.")
+            throw ToolError("\(name) failed on \(label): \(text).\(hint)")
         }
+        let others = content.filter { $0["type"]?.string != "text" }.map { $0["type"]?.string ?? "unknown" }
+        let body = [text, others.isEmpty ? "" : "(+\(others.count) non-text item(s): \(others.joined(separator: ", ")))"]
+            .filter { !$0.isEmpty }.joined(separator: "\n")
         let firstLine = text.split(separator: "\n", omittingEmptySubsequences: false).first.map(String.init) ?? ""
         var structured: [String: JSON] = ["deviceId": .string(String(id)), "name": .string(name),
-                                          "isError": false, "text": .string(text), "afterId": JSON(before)]
-        if let content = reply["structuredContent"] { structured["structuredContent"] = content }
+                                          "isError": false, "afterId": JSON(before)]
+        // One copy: the body carries the text; structuredContent is the data.
+        if let data = reply["structuredContent"] { structured["structuredContent"] = data }
+        else { structured["text"] = .string(text) }
         return ToolResult(
-            summary: "\(name) on \(label): " + String(firstLine.prefix(200)),
-            body: text,
+            summary: "\(name) on \(label): " + (text.isEmpty ? "done (no text)" : String(firstLine.prefix(200))),
+            body: body,
             structured: .object(structured),
-            next: ["logs_wait(afterId: \(before), timeoutMs: 15000) for what the app logged"],
+            next: ["logs_wait(sessionId: \(id), afterId: \(before), timeoutMs: 15000) for what the app logged "
+                   + "(after a restart, beaver_status() shows its new session)"],
             sessionId: id,
-            journalKind: localName(name, startsWith: destructiveVerbs) ? .destructive : nil
+            journalKind: risky ? .destructive : nil
         )
     }
 
     // MARK: Helpers
 
     /// An app tool named like these is journaled as destructive (its toast).
-    static let destructiveVerbs = ["delete", "remove", "clear", "kill", "reset"]
+    static let destructiveVerbs = ["delete", "remove", "clear", "kill", "reset", "restart", "execute", "launch"]
+    /// An app tool named like these may end the app: watch for it dropping.
+    static let endsAppVerbs = ["restart", "kill", "launch"]
     /// A tool named like these is safe to suggest in `Next:`.
-    static let readVerbs = ["get", "list", "info", "dump", "tail", "facets"]
+    static let readVerbs = ["get", "list", "info", "dump", "tail", "facets", "status", "state", "snapshot",
+                            "inspect", "current"]
 
     /// Whether the name after its toolbox (`storage.delete` → `delete`)
     /// starts with one of `verbs`, in any case.
@@ -196,33 +216,40 @@ enum ToolboxTools {
     /// The device's tools, or Beaver's own for "beaver".
     private static func tools(_ args: ToolArguments, _ ctx: ToolContext) async throws
         -> (deviceId: String, label: String, tools: [DeviceTool]) {
-        if try args.string("deviceId") == beaverId {
+        if try ToolContext.isBeaver(args) {
             return (beaverId, "Beaver", beaverDeviceTools())
         }
-        let (_, id) = try await ctx.requireDevice(args, doing: "list its toolboxes", call: "toolboxes_list()")
-        let label = try await appLabel(ctx, id)
+        let (host, id) = try await ctx.requireDevice(args, doing: "list its toolboxes", call: "toolboxes_list()")
+        let label = try await ctx.describeTarget(id, args, host)
         let result = try await device(ctx, "tools/list", [:], sessionId: id, timeout: DeviceMCPClient.listTimeout,
-                                      what: "tools/list", label: label)
+                                      what: "tools/list", label: label, retry: "toolboxes_list(deviceId: \"\(id)\")")
         return (String(id), label, Toolboxes.tools(fromListResult: result))
     }
 
     /// Beaver's own tools as toolboxes: not the gateway (no recursion) and
-    /// not the destructive ones — tools_call has no destructiveHint, so
-    /// they're only callable directly.
+    /// not the destructive ones (D75) — they're only callable directly,
+    /// under their own name and annotations.
     private static func beaverDeviceTools() -> [DeviceTool] {
         BeaverTools.all.filter { !gatewayNames.contains($0.name) && $0.kind != .destructive }.map {
             DeviceTool(name: Toolboxes.beaverName($0.name), description: $0.description, inputSchema: $0.inputSchema)
         }
     }
 
-    /// `Alpha 1.0 (iPhone 15, iOS 18.0)`: how summaries and errors name the app.
-    private static func appLabel(_ ctx: ToolContext, _ id: Int64) async throws -> String {
-        try await ctx.store.sessions().first { $0.id == id }.map(StatusTools.describeDevice) ?? "Device \"\(id)\""
+    /// " Toolboxes: a, b. Example: …", or that the app has none.
+    private static func toolboxesHint(_ boxes: [Toolbox], deviceId: String) -> String {
+        guard let first = boxes.first else { return " This app has no tools. Example: beaver_status()." }
+        return " Toolboxes: " + boxes.map(\.name).joined(separator: ", ")
+            + ". Example: toolboxes_list(deviceId: \"\(deviceId)\", toolbox: \"\(first.name)\")."
     }
 
-    /// One MCP request; `DeviceMCPError` becomes a ToolError that says what to do.
+    /// One MCP request; `DeviceMCPError` becomes a ToolError that says what
+    /// to do. `journalKind` goes on a timeout or a drop: the call may have run.
+    /// `retry` is the same call again, for when it never reached the app.
     private static func device(_ ctx: ToolContext, _ method: String, _ params: JSON, sessionId: Int64,
-                               timeout: Duration, what: String, label: String) async throws -> JSON {
+                               timeout: Duration, what: String, label: String, retry: String,
+                               journalKind: AgentActivity.Kind? = nil) async throws -> JSON {
+        let mayHaveRun = method == "tools/call"
+            ? " It may still have run it (app.restart and app.killProcess end the app before answering)." : ""
         do {
             return try await ctx.device.mcp(method, params: params, to: sessionId, timeout: timeout)
         } catch let error as DeviceMCPError {
@@ -230,11 +257,15 @@ enum ToolboxTools {
             case .unsupported:
                 throw ToolError("\(label) doesn't answer MCP, so it has no toolboxes: the app needs quick-brick-xray's native WebSocket sink. Its commands still work. Example: commands_list(deviceId: \"\(sessionId)\").")
             case .timeout:
-                throw ToolError("\(label) didn't answer \(what) in time. It may still have run it — app.restart, for one, drops the connection before answering. Example: beaver_status(), then logs_query(sessionId: \(sessionId), since: \"1m\").")
+                throw ToolError("\(label) didn't answer \(what) in time.\(mayHaveRun) Example: beaver_status(), then logs_query(sessionId: \(sessionId), since: \"1m\").",
+                                journalKind: journalKind)
             case .disconnected:
-                throw ToolError("\(label) disconnected before answering \(what). Example: beaver_status() to see whether it came back.")
+                throw ToolError("\(label) disconnected before answering \(what).\(mayHaveRun) Example: beaver_status() to see whether it came back, then logs_query(sessionId: \(sessionId), since: \"1m\").",
+                                journalKind: journalKind)
             case .rpc(_, let message):
                 throw ToolError("\(label) refused \(what): \(message). Example: toolboxes_list(deviceId: \"\(sessionId)\").")
+            case .notSent(let reason):
+                throw ToolError("\(what) didn't reach \(label): \(reason). Nothing ran on the app. Example: \(retry) to try again, or beaver_status().")
             }
         }
     }

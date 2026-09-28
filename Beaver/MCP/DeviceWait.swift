@@ -196,11 +196,19 @@ extension ToolContext {
     /// With one device it may be omitted (or be "current", as before D73);
     /// with a default set (D76) an omitted one means the default; otherwise
     /// with several it may not. `call` is the tool's own example call; the
-    /// error shows it with a deviceId filled in.
-    public func requireDevice(_ args: ToolArguments, doing what: String, call: String) async throws
+    /// error shows it with a deviceId filled in. `useDefault: false`
+    /// (devices_disconnect) ignores the default: with several apps the
+    /// caller must name one.
+    public func requireDevice(_ args: ToolArguments, doing what: String, call: String,
+                              useDefault: Bool = true) async throws
         -> (host: HostSnapshot, liveSessionId: Int64) {
         let host = await ui.snapshot()
         let live = host.liveSessionIds
+        if try Self.isBeaver(args) {
+            throw ToolError("deviceId \"beaver\" is Beaver itself, not an app, so it can't \(what). "
+                + "Beaver's own tools: toolboxes_list(deviceId: \"beaver\"), or call them directly. "
+                + "Example: beaver_status() for the apps' deviceIds.")
+        }
         guard !live.isEmpty else {
             throw ToolError("No device is connected, so Beaver can't \(what). Ask the user to open the app with "
                 + "remote assistance pointed at \(host.deviceURL ?? "Beaver"), then call beaver_status().")
@@ -211,12 +219,12 @@ extension ToolContext {
            live.contains(id) { return (host, id) }
         if wanted == nil || wanted == "current" {
             // D76: the default, when set, is the only fallback — never another device.
-            if let preferred = host.defaultDevice {
+            if useDefault, let preferred = host.defaultDevice {
                 if let id = preferred.liveSession(in: try await store.sessions(), live: live) { return (host, id) }
                 let list = try await describeDevices(live)
                 let name = try await describeDefault(preferred)
-                throw ToolError("The default device \(name) isn't connected. "
-                    + "Connected: \(list). Example: \(Self.withDeviceId(call, live[0])), "
+                throw ToolError("The default device \(name) isn't connected; it may be restarting. "
+                    + "Connected: \(list). Example: beaver_status() to see whether it is back, "
                     + "or devices_set_default(deviceId: null) to clear the default.")
             }
             if live.count == 1 { return (host, live[0]) }
@@ -225,6 +233,20 @@ extension ToolContext {
         let lead = wanted.map { "No connected device \"\($0)\"." }
             ?? "\(live.count) devices are connected; say which one with deviceId."
         throw ToolError("\(lead) Connected: \(list). Example: \(Self.withDeviceId(call, live[0])).")
+    }
+
+    /// deviceId "beaver", in any case and with spaces around it.
+    static func isBeaver(_ args: ToolArguments) throws -> Bool {
+        try args.string("deviceId").flatMap(trimmedNonEmpty)?.lowercased() == ToolboxTools.beaverId
+    }
+
+    /// `Alpha 1.0 (iPhone 15, iOS 18.0)`, with ` (default)` when
+    /// requireDevice picked it as the default: how a summary names the app
+    /// a call went to.
+    public func describeTarget(_ id: Int64, _ args: ToolArguments, _ host: HostSnapshot) async throws -> String {
+        let name = try await store.sessions().first { $0.id == id }.map(StatusTools.describeDevice) ?? "device \"\(id)\""
+        let wanted = try args.string("deviceId")
+        return name + (host.defaultDevice != nil && (wanted == nil || wanted == "current") ? " (default)" : "")
     }
 
     /// `commands_send(command: "x")` → `commands_send(deviceId: "12", command: "x")`.

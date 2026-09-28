@@ -20,7 +20,7 @@ struct CommandToolsTests {
         #expect(device.sent == ["debug.flag.on newPlayer"])
         #expect(ui.sentCommands == ["debug.flag.on newPlayer"])
         #expect(r.summary.hasPrefix("Sent \"debug.flag.on newPlayer\""))
-        #expect(r.next.contains { $0.hasPrefix("logs_wait(afterId:") })
+        #expect(r.next.contains { $0.hasPrefix("logs_wait(sessionId: ") && $0.contains("afterId:") })
     }
 
     @Test("No device: nothing is sent, and the error says what to do")

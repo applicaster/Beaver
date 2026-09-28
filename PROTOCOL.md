@@ -32,10 +32,16 @@ forbids it.
 
 ## 2. Frame format
 
-All frames are **text** WebSocket frames whose body is a JSON object. Every
-object has a `type` discriminator field. Control frames (ping, pong, close)
-carry no frame: the SDK pings every 20 s to detect a dead socket, and Beaver
-answers without passing the ping payload to the decoder.
+Frames carry a JSON object as their body; every object has a `type`
+discriminator field. iOS/tvOS send every frame — handshake, `event`,
+`mcp` replies, everything — as a **binary** WebSocket frame
+(`task.send(.data(…))`), not text. Beaver accepts both text and binary
+data frames (the opcode check in `WSServer`'s receive loop,
+`receive(on:id:)`: `opcode == .text || opcode == .binary`), so this doesn't break anything, but it means "text frame" is
+not a safe assumption for anything reading this wire. Control frames
+(ping, pong, close) carry no frame: the SDK pings every 20 s to detect
+a dead socket, and Beaver answers without passing the ping payload to
+the decoder.
 
 ```jsonc
 // Generic envelope:
@@ -185,10 +191,12 @@ same socket as `handshake` and `command`, through `DeviceMCPClient`.
   Beaver correlates the reply by the `id` inside `payload`.
 - Before its first request on a connection, Beaver sends `initialize` once,
   lazily (5 s timeout), then the `notifications/initialized` notification.
-  If the app never replies to `initialize`, Beaver treats it as having no
-  toolboxes until it reconnects.
+  If an app that sent no `handshake` (§4.4) never replies to `initialize`,
+  Beaver treats it as having no toolboxes until it reconnects or sends one.
+  After a handshake, a failed `initialize` is retried on the next request.
 - Methods Beaver sends: `initialize`, `tools/list` (5 s timeout), `tools/call`
   (20 s timeout — the device's own React tools time out at 15 s).
+- Beaver sends one request at a time per app; each timeout counts from sending.
 
 ---
 
@@ -359,8 +367,12 @@ elapsed time, not a start timestamp.
 
 ### 4.4 `handshake` (client → server)
 
-Sent once per connection, right after the socket opens (before any `event` /
-`storage` / `network` frame).
+Sent once per connection, right after the socket opens — on iOS/tvOS before
+any `event` / `storage` / `network` frame. **Android is the exception:** its
+sink logs "WebSocket connected" (through X-Ray itself) before calling
+`sendHandshake()`, so an `event` frame reliably arrives first. Beaver handles
+this ordering: the session that started from the `event` takes the
+handshake's fields when it arrives.
 
 ```json
 {"type": "handshake", "deviceId": "<installation uuid, falls back to model>",
@@ -381,6 +393,12 @@ Sent once per connection, right after the socket opens (before any `event` /
 - Sent by iOS and Android's native WebSocket sink (#2848). The JS-only sink
   (`src/sinks/socket.ts`) doesn't send it, so such apps have no device id
   and no toolboxes (§4.5) in Beaver.
+- Android's actual values: `deviceId` is `UUIDUtil.getUUID() ?: Build.MODEL`
+  (the same UUID-or-model fallback as iOS), `platform` is `"Android
+  <RELEASE>"`, e.g. `"Android 15"` — splits the same way as iOS's `"iOS
+  18.6"` / `"tvOS 18.0"`. Android's native sink exists only in debug builds
+  (`XRayPlugin.kt`); a release build never sends a handshake or connects at
+  all.
 
 ### 4.5 `mcp` (client → server)
 
@@ -428,6 +446,14 @@ in `payload`:
    `ended_at`; other connections are unaffected. A half-open connection
    is noticed by TCP keepalive within ~20 s.
 5. New connections after a close start a new session.
+6. **Reconnect behavior is not symmetric across platforms.** iOS/tvOS's
+   sink reconnects on its own, backing off from 1 s to 30 s, forever. **The
+   Android sink does not reconnect at all** (`WebSocketSink.kt`: `// todo:
+   reconnect attempts`) — after a Disconnect in Beaver, or any drop
+   (Wi-Fi hiccup, Beaver restart), the Android app is gone for good until
+   it is relaunched by hand. The Android native sink also only exists in
+   debug builds to begin with (§4.4). Don't tell a user "it'll reconnect on
+   its own" for an Android device.
 
 ---
 
@@ -502,6 +528,33 @@ Tracked for follow-up with the SDK team:
 8. **§3.3/§4.5** — Toolbox descriptions are not in `tools/list` (toolboxes
    are named only by prefix). An `_meta.toolbox` description per tool would
    let Beaver describe them.
+9. **§3.3/§4.5** — iOS replies with no `id` when it fails to encode a
+   response (`McpServer.swift:170` returns `{"jsonrpc":"2.0","error":…}`
+   with no `id`), so Beaver can't correlate the reply and the call times
+   out instead of failing fast. Fix belongs in the SDK: echo the id even
+   on an encode failure.
+10. **§3.3/§4.5** — The JS-only sink shows an on-device status toast
+    ("Unhandled message type null") when Beaver sends it an `mcp` frame,
+    rather than staying silent. Harmless, but visible to whoever is
+    holding the device.
+11. **§3.3/§4.5** — Large replies are dropped by the SDK before Beaver
+    ever sees them. Both SDKs put the result in the frame twice, as
+    `text` and `structuredContent`, which halves the usable size: on iOS
+    (any frame over 5 MiB is dropped at the socket layer) that's roughly
+    2.5 MB of data; on Android (the send queue caps at 16 MiB) roughly
+    8 MiB. Beaver just times out and reports "didn't answer", which
+    reads like a hang rather than a size limit.
+12. **§4.5** — React toolbox names are validated only for being
+    non-blank, so a name may contain a `.`. Beaver groups a toolbox by
+    the prefix before the **first** dot and treats the rest as the
+    tool's local name, so a toolbox named `qb.player` with tool `reset`
+    is read as toolbox `qb`, tool `player.reset` — wrong, and the
+    destructive-name heuristic (which matches on the local name) misses
+    it as a result.
+13. **§3.3/§4.5** — A `tools/call` result integer above 2^53 loses
+    precision going through Beaver's JSON decoding. Neither SDK is known
+    to send one today, but nothing in the schema (`type: "integer"`)
+    stops a React tool from returning one.
 
 Answering these does **not** block scaffolding. The decoder can be
 written to tolerate today's known shapes; the questions sharpen v2.

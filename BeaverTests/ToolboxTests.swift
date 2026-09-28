@@ -25,6 +25,14 @@ struct ToolboxTests {
         #expect(tools[2].description == "")
     }
 
+    @Test("B5: a name listed twice keeps its first entry")
+    func duplicateNames() {
+        let tools = Toolboxes.tools(fromListResult: ["tools": [
+            ["name": "storage.get", "description": "first"], ["name": "storage.get", "description": "second"],
+        ]])
+        #expect(tools.map(\.description) == ["first"])
+    }
+
     @Test("Review focus: grouped by prefix, sorted; a dotless name goes to other; nothing gives nothing")
     func group() {
         let boxes = Toolboxes.group(Toolboxes.tools(fromListResult: Self.list))
@@ -69,5 +77,7 @@ struct ToolboxTests {
         let gone = FakeDevice(onMCP: { _, _ in throw DeviceMCPError.disconnected })
         #expect(await ToolboxLoad.fetch(from: slow, sessionId: 1) == .failed("The app didn't answer in time."))
         #expect(await ToolboxLoad.fetch(from: gone, sessionId: 1) == .failed("The app disconnected."))
+        let refused = FakeDevice(onMCP: { _, _ in throw DeviceMCPError.notSent("the app refused initialize: not ready") })
+        #expect(await ToolboxLoad.fetch(from: refused, sessionId: 1) == .failed("The app refused initialize: not ready."))
     }
 }
