@@ -860,6 +860,18 @@ final class LogFeedViewModel {
         }
     }
 
+    /// Mark a preset as the one new sessions start from (D82), or
+    /// clear the mark with nil.
+    func setDefaultSavedFilter(id: Int64?) {
+        Task { [weak self] in
+            do {
+                try await self?.store.setDefaultSavedFilter(id: id)
+            } catch {
+                print("setDefaultSavedFilter: \(error)")
+            }
+        }
+    }
+
     private func reloadSavedFilters() async {
         do {
             savedFilters = try await store.savedFilters()

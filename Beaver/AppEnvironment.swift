@@ -116,6 +116,26 @@ public final class AppEnvironment {
     public func didConnect(_ connection: UUID, session: Int64) {
         if live.connect(connection, session: session, viewing: viewingSessionId) {
             viewingSessionId = session
+            startFromDefaultFilter()
+        }
+    }
+
+    /// D82: a launch and a newly connected device's session start from the
+    /// saved filter marked Default. Without one, the filter carries over (D42).
+    func startFromDefaultFilter() {
+        Task {
+            if let saved = try? await store.savedFilters().first(where: \.isDefault) {
+                activeFilter = saved.filter
+            }
+        }
+    }
+
+    /// ⌘1…⌘9 (D82): the Log feed with the `index`-th saved filter, from any tab.
+    func applySavedFilter(at index: Int) {
+        Task {
+            guard let saved = try? await store.savedFilters(), saved.indices.contains(index) else { return }
+            selectedTab = .logs
+            activeFilter = saved[index].filter
         }
     }
 

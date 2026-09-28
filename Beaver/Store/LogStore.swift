@@ -923,14 +923,16 @@ public actor LogStore {
 
     // MARK: - Saved filters
 
-    /// All persisted filter presets, alphabetical by name.
+    /// All persisted filter presets, alphabetical by name. ⌘1…⌘9 follow
+    /// this order (D82).
     public func savedFilters() async throws -> [SavedFilter] {
         try await dbQueue.read { db in
             try Row.fetchAll(
                 db,
                 sql: """
                     SELECT id, name, min_level, search, search_rx, exclude, exclude_rx,
-                           search_payloads, subsystems, excluded_subsystems, categories, excluded_categories
+                           search_payloads, subsystems, excluded_subsystems, categories, excluded_categories,
+                           is_default
                     FROM saved_filter
                     ORDER BY name COLLATE NOCASE
                 """
@@ -1014,6 +1016,18 @@ public actor LogStore {
         broadcast(.savedFiltersChanged)
     }
 
+    /// Makes `id` the default saved filter (D82), or clears the default
+    /// with nil. Upserting a filter keeps its default mark.
+    public func setDefaultSavedFilter(id: Int64?) async throws {
+        try await dbQueue.write { db in
+            try db.execute(sql: "UPDATE saved_filter SET is_default = 0 WHERE is_default = 1")
+            if let id {
+                try db.execute(sql: "UPDATE saved_filter SET is_default = 1 WHERE id = ?", arguments: [id])
+            }
+        }
+        broadcast(.savedFiltersChanged)
+    }
+
     // MARK: - Command history (D9)
 
     /// How many sent commands the command bar remembers across launches.
@@ -1059,7 +1073,8 @@ public actor LogStore {
             categories: decodeChips(row["categories"]),
             excludedCategories: decodeChips(row["excluded_categories"])
         )
-        return SavedFilter(id: row["id"], name: row["name"], filter: filter)
+        return SavedFilter(id: row["id"], name: row["name"], filter: filter,
+                           isDefault: ((row["is_default"] as Int?) ?? 0) != 0)
     }
 
     /// Chip sets ride in a JSON array: a subsystem or category can hold

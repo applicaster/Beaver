@@ -67,6 +67,71 @@ struct OrganiseToolsTests {
         #expect(try await store.savedFilters().isEmpty)
     }
 
+    @Test("Default saved filter (D82): one at most, survives an upsert, goes with its row")
+    func defaultSavedFilterInStore() async throws {
+        let store = try LogStore(source: .inMemory)
+        let errors = try await store.upsertSavedFilter(name: "Errors", filter: Filter(minLevel: .error))
+        let warnings = try await store.upsertSavedFilter(name: "Warnings", filter: Filter(minLevel: .warning))
+        #expect(try await store.savedFilters().allSatisfy { !$0.isDefault })
+
+        try await store.setDefaultSavedFilter(id: errors.id)
+        try await store.setDefaultSavedFilter(id: warnings.id)
+        #expect(try await store.savedFilters().filter(\.isDefault).map(\.name) == ["Warnings"])
+
+        _ = try await store.upsertSavedFilter(name: "Warnings", filter: Filter(minLevel: .info))
+        #expect(try await store.savedFilters().first(where: \.isDefault)?.filter.minLevel == .info)
+
+        try await store.setDefaultSavedFilter(id: nil)
+        #expect(try await store.savedFilters().allSatisfy { !$0.isDefault })
+
+        try await store.setDefaultSavedFilter(id: errors.id)
+        try await store.deleteSavedFilter(id: errors.id)
+        _ = try await store.upsertSavedFilter(name: "Errors", filter: Filter(minLevel: .error))
+        #expect(try await store.savedFilters().allSatisfy { !$0.isDefault })
+    }
+
+    @Test("⌘1…⌘9 cover the first nine saved filters")
+    func savedFilterShortcuts() {
+        #expect(SavedFilter.shortcut(at: 0) == "⌘1")
+        #expect(SavedFilter.shortcut(at: 8) == "⌘9")
+        #expect(SavedFilter.shortcut(at: 9) == nil)
+        #expect(SavedFilter.shortcut(at: -1) == nil)
+    }
+
+    @Test("filters_save default: set with a filter, or alone on a saved one; filters_list shows it and the shortcuts")
+    func defaultSavedFilterTools() async throws {
+        let store = try LogStore(source: .inMemory)
+        let ctx = makeContext(store)
+        _ = try await StateTools.filtersSave.run(ToolArguments(["name": "Errors", "filter": ["minLevel": "error"]]), ctx)
+        let r = try await StateTools.filtersSave.run(
+            ToolArguments(["name": "Warnings", "filter": ["minLevel": "warning"], "default": true]), ctx)
+        #expect(r.summary.contains("New sessions start with it."))
+        #expect(try await store.savedFilters().filter(\.isDefault).map(\.name) == ["Warnings"])
+
+        let only = try await StateTools.filtersSave.run(ToolArguments(["name": "Errors", "default": true]), ctx)
+        #expect(only.summary == "“Errors” is the default filter: new sessions start with it.")
+        #expect(try await store.savedFilters().filter(\.isDefault).map(\.name) == ["Errors"])
+        #expect(try await store.savedFilters().first { $0.name == "Errors" }?.filter.minLevel == .error)
+
+        let list = try await StateTools.filtersList.run(ToolArguments(), ctx)
+        #expect(list.body.contains("Errors — level ≥ error (⌘1, default)"))
+        let warnings = try #require(list.structured["filters"]?.array?.last)
+        #expect(warnings["shortcut"] == "⌘2")
+        #expect(warnings["default"] == false)
+
+        _ = try await StateTools.filtersSave.run(ToolArguments(["name": "Warnings", "default": false]), ctx)
+        #expect(try await store.savedFilters().filter(\.isDefault).map(\.name) == ["Errors"])
+        _ = try await StateTools.filtersSave.run(ToolArguments(["name": "Errors", "default": false]), ctx)
+        #expect(try await store.savedFilters().allSatisfy { !$0.isDefault })
+
+        await #expect(throws: ToolError.self) {
+            try await StateTools.filtersSave.run(ToolArguments(["name": "Nope", "default": true]), ctx)
+        }
+        await #expect(throws: ToolError.self) {
+            try await StateTools.filtersSave.run(ToolArguments(["name": "Errors"]), ctx)
+        }
+    }
+
     @Test("filters_save works on a fresh install when the filter needs no names")
     func savedFilterNoSessions() async throws {
         let store = try LogStore(source: .inMemory)

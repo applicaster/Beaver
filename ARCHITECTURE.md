@@ -180,7 +180,8 @@ CREATE TABLE saved_filter (
   search_rx   INTEGER NOT NULL DEFAULT 0,
   exclude     TEXT,
   exclude_rx  INTEGER NOT NULL DEFAULT 0,
-  search_payloads INTEGER NOT NULL DEFAULT 0   -- v8, D40
+  search_payloads INTEGER NOT NULL DEFAULT 0,  -- v8, D40
+  is_default  INTEGER NOT NULL DEFAULT 0       -- v11, D82; unique where 1
 );
 
 CREATE TABLE command_history (

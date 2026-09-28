@@ -279,6 +279,16 @@ enum Schema {
             """)
         }
 
+        // D82: the saved filter a new session starts from. The partial
+        // unique index lets at most one row be the default.
+        migrator.registerMigration("v11_saved_filter_default", foreignKeyChecks: .immediate) { db in
+            try db.execute(sql: """
+                ALTER TABLE saved_filter ADD COLUMN is_default INTEGER NOT NULL DEFAULT 0;
+                CREATE UNIQUE INDEX idx_saved_filter_one_default
+                    ON saved_filter(is_default) WHERE is_default = 1;
+            """)
+        }
+
         return migrator
     }
 }
