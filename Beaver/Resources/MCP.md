@@ -313,7 +313,8 @@ but a session tells you the app's scheme.
    `sessionId` picks another session). The summary says where it came from,
    or that `myapp` is a placeholder — then ask the user, or pass
    `scheme: "…"`.
-2. Pick what the link does:
+2. Pick what the link does (the result's `does` says it in a sentence, as
+   the form does under its template picker):
    - a screen: `screenType` (content type), `screenId`, or `template:
      "feed-content"` with `feedUrl` and `id` or `position` (from 1).
      Optional `state` (inline; fullscreen is the default), `title`, and

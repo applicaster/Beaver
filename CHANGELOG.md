@@ -18,6 +18,9 @@ When releasing:
 - **Updates install themselves.** Beaver checks for a new version on every
   launch and downloads it in the background. When it's ready, choose
   **Restart Now** or **Later**; Later installs it when you quit Beaver.
+- Scheme Generator: under the template picker, a line says what a link of
+  that template does in the app. Agents get the same text: `scheme_build`
+  lists it for every template and returns it as `does`.
 - Several devices can be connected at once. Click the Connected pill in
   the middle of the toolbar to switch between them or open a recent
   session. A device that connects doesn't take the window while you're
