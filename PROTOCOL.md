@@ -36,8 +36,8 @@ Frames carry a JSON object as their body; every object has a `type`
 discriminator field. iOS/tvOS send every frame — handshake, `event`,
 `mcp` replies, everything — as a **binary** WebSocket frame
 (`task.send(.data(…))`), not text. Beaver accepts both text and binary
-data frames (`WSServer.swift:281`: `opcode == .text || opcode ==
-.binary`), so this doesn't break anything, but it means "text frame" is
+data frames (the opcode check in `WSServer`'s receive loop,
+`receive(on:id:)`: `opcode == .text || opcode == .binary`), so this doesn't break anything, but it means "text frame" is
 not a safe assumption for anything reading this wire. Control frames
 (ping, pong, close) carry no frame: the SDK pings every 20 s to detect
 a dead socket, and Beaver answers without passing the ping payload to
@@ -371,9 +371,8 @@ Sent once per connection, right after the socket opens — on iOS/tvOS before
 any `event` / `storage` / `network` frame. **Android is the exception:** its
 sink logs "WebSocket connected" (through X-Ray itself) before calling
 `sendHandshake()`, so an `event` frame reliably arrives first. Beaver handles
-this: every field the handshake fills is written through `COALESCE` (see
-below), so a session that started from an `event` and gets its `handshake`
-moments later loses nothing.
+this ordering: the session that started from the `event` takes the
+handshake's fields when it arrives.
 
 ```json
 {"type": "handshake", "deviceId": "<installation uuid, falls back to model>",
@@ -538,13 +537,13 @@ Tracked for follow-up with the SDK team:
     ("Unhandled message type null") when Beaver sends it an `mcp` frame,
     rather than staying silent. Harmless, but visible to whoever is
     holding the device.
-11. **§3.3/§4.5** — Replies over roughly 2.5 MB of data are dropped by
-    both SDKs before Beaver ever sees them (iOS drops any frame over 5
-    MiB at the socket layer; Android's send queue caps at 16 MiB, but
-    both SDKs put the result in the frame twice, as `text` and
-    `structuredContent`, roughly halving the usable size) — Beaver just
-    times out and reports "didn't answer", which reads like a hang
-    rather than a size limit.
+11. **§3.3/§4.5** — Large replies are dropped by the SDK before Beaver
+    ever sees them. Both SDKs put the result in the frame twice, as
+    `text` and `structuredContent`, which halves the usable size: on iOS
+    (any frame over 5 MiB is dropped at the socket layer) that's roughly
+    2.5 MB of data; on Android (the send queue caps at 16 MiB) roughly
+    8 MiB. Beaver just times out and reports "didn't answer", which
+    reads like a hang rather than a size limit.
 12. **§4.5** — React toolbox names are validated only for being
     non-blank, so a name may contain a `.`. Beaver groups a toolbox by
     the prefix before the **first** dot and treats the rest as the

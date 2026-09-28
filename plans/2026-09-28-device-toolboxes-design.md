@@ -109,10 +109,12 @@ on `.disconnected(c)`. An actor in `Beaver/Transport/DeviceMCPClient.swift`.
   ignored.
 - **Initialize once, lazily** — before the first request on the connection:
   `initialize` (5 s timeout), then the `notifications/initialized`
-  notification. If it times out or fails, the client is marked
-  `unsupported` and every later request fails at once with
-  `.unsupported` until the device reconnects. This keeps a JS-sink app from
-  costing 5 s on every popover open.
+  notification. Only for an app that sent no handshake: if it times out,
+  the client is marked `unsupported` and every later request fails at once
+  with `.unsupported` until the app reconnects or sends a handshake. This
+  keeps a JS-sink app from costing 5 s on every popover open. An app that
+  sent a handshake has an MCP server, so it is never latched: a failed
+  `initialize` fails that request with `.notSent` and the next one retries.
 - Timeouts: `tools/list` 5 s, `tools/call` 20 s (the device's own React
   timeout is 15 s).
 - `handleInbound`: a `mcp` frame goes to that connection's client and is
@@ -179,7 +181,11 @@ public enum Toolboxes { static func group(_ tools: [DeviceTool]) -> [Toolbox] } 
 
 - `tools_call` result: `summary` = `"<name> on <device>: "` + the first line
   of the device's text (truncated to 200 chars); `body` = the full text;
-  `structured` = `{deviceId, name, isError, text, structuredContent?}`.
+  `structured` = `{deviceId, name, isError, afterId}` plus the app's
+  `structuredContent` when it sent one, else its `text` (one copy; the body
+  carries the text). For `deviceId: "beaver"`: `{deviceId, name, isError,
+  text, structuredContent}`, with the inner tool's summary as `text` and its
+  structured result as `structuredContent`.
   The device's `isError: true` becomes a `ToolError`:
   `"<name> failed on <device>: <text>. Example: toolboxes_list(toolbox: "<box>") for its arguments."`
   An unknown tool name fails with the closest names from `tools/list`.
@@ -209,9 +215,10 @@ public enum Toolboxes { static func group(_ tools: [DeviceTool]) -> [Toolbox] } 
 - **Destructive tools are left out.** `toolboxes_list(deviceId: "beaver")`
   doesn't list a tool whose `kind` is `.destructive` (`sessions_delete`,
   `storage_delete`, `filters_delete`, …), and `tools_call(deviceId: "beaver",
-  name: …)` refuses one, pointing at the direct call instead —
-  `tools_call` has no destructive toast and no `destructiveHint`, so those
-  stay reachable only by calling the tool itself.
+  name: …)` refuses one, pointing at the direct call instead — through the
+  gateway they would hide behind `tools_call`'s generic confirmation rather
+  than their own name and annotations, so those stay reachable only by
+  calling the tool itself.
 - `"beaver"` is never the default and never needs to be connected.
 
 ### 5.3 Changed
