@@ -63,17 +63,24 @@ struct SessionCompareView: View {
             ContentUnavailableView("Can't compare", systemImage: "exclamationmark.triangle", description: Text(failure))
                 .frame(maxHeight: .infinity)
         } else if let r = result {
-            List {
-                if let logs = r.logs { logSections(logs) }
-                if let net = r.network { networkSections(net) }
-                ForEach(r.pending, id: \.self) { section in
-                    Section(section == .storage ? "Storage" : "App Info") {
-                        Text(section == .storage
-                             ? "Not compared yet: comes with the storage diff."
-                             : "Not compared yet: comes with App Info (app, SDK and plugin versions, device).")
-                            .foregroundStyle(.secondary)
+            // A plain scroll, not a List: List's section headers stay pinned
+            // and on macOS 26 are see-through, so rows showed under them.
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    if let logs = r.logs { logSections(logs) }
+                    if let net = r.network { networkSections(net) }
+                    ForEach(r.pending, id: \.self) { section in
+                        CompareSection(title: section == .storage ? "Storage" : "App Info", count: nil) {
+                            Text(section == .storage
+                                 ? "Not compared yet: comes with the storage diff."
+                                 : "Not compared yet: comes with App Info (app, SDK and plugin versions, device).")
+                                .foregroundStyle(.secondary)
+                                .padding(.vertical, 4)
+                        }
                     }
                 }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 12)
             }
         } else {
             ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -87,16 +94,18 @@ struct SessionCompareView: View {
         patternSection("Log lines only in B", logs.onlyInB)
         patternSection("Log lines only in A", logs.onlyInA)
         if !logs.levels.isEmpty {
-            Section("Warnings and errors per subsystem, A → B") {
+            CompareSection(title: "Warnings and errors per subsystem, A → B", count: logs.levels.count) {
                 ForEach(logs.levels, id: \.self) { l in
                     HStack {
                         Image(systemName: l.increased ? "arrow.up" : "arrow.down")
                             .foregroundStyle(l.increased ? .red : .green)
                         Circle().fill(l.level.displayColor).frame(width: 7, height: 7)
-                        Text(l.subsystem).lineLimit(1)
+                        Text(EventRecord.shortSubsystem(l.subsystem)).lineLimit(1).help(l.subsystem)
+                        Text(l.level.rawValue).font(.caption).foregroundStyle(.secondary)
                         Spacer()
                         Text("\(l.a) → \(l.b)").monospacedDigit()
                     }
+                    .padding(.vertical, 3)
                 }
             }
         }
@@ -109,16 +118,21 @@ struct SessionCompareView: View {
     @ViewBuilder
     private func patternSection(_ title: String, _ items: [SessionCompare.PatternCount]) -> some View {
         if !items.isEmpty {
-            Section("\(title) (\(items.count))") {
+            CompareSection(title: title, count: items.count) {
                 ForEach(items, id: \.self) { p in
                     Button { open(.event(p.firstId)) } label: {
-                        HStack(alignment: .firstTextBaseline) {
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
                             Circle().fill(p.level.displayColor).frame(width: 7, height: 7)
-                            Text(p.subsystem).foregroundStyle(.secondary).lineLimit(1)
-                            Text(p.pattern).lineLimit(2)
-                            Spacer()
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(p.pattern).lineLimit(2)
+                                Text(EventRecord.shortSubsystem(p.subsystem))
+                                    .font(.caption).foregroundStyle(.secondary)
+                                    .lineLimit(1).truncationMode(.head)
+                            }
+                            Spacer(minLength: 8)
                             Text("×\(p.count)").monospacedDigit().foregroundStyle(.secondary)
                         }
+                        .padding(.vertical, 3)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -143,7 +157,7 @@ struct SessionCompareView: View {
     @ViewBuilder
     private func groupSection(_ title: String, _ items: [SessionCompare.RequestGroup]) -> some View {
         if !items.isEmpty {
-            Section("\(title) (\(items.count))") {
+            CompareSection(title: title, count: items.count) {
                 ForEach(items, id: \.self) { g in
                     Button { open(.network(g.firstId)) } label: {
                         HStack {
@@ -151,6 +165,7 @@ struct SessionCompareView: View {
                             Spacer()
                             Text("×\(g.count) · \(g.statusText)").monospacedDigit().foregroundStyle(.secondary)
                         }
+                        .padding(.vertical, 3)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -164,7 +179,7 @@ struct SessionCompareView: View {
     private func pairSection(_ title: String, _ items: [SessionCompare.RequestPair],
                              _ value: @escaping (SessionCompare.RequestGroup) -> String) -> some View {
         if !items.isEmpty {
-            Section("\(title) (\(items.count))") {
+            CompareSection(title: title, count: items.count) {
                 ForEach(items, id: \.self) { p in
                     HStack {
                         Text(p.key).lineLimit(1).truncationMode(.middle)
@@ -177,6 +192,7 @@ struct SessionCompareView: View {
                     }
                     .buttonStyle(.link)
                     .monospacedDigit()
+                    .padding(.vertical, 3)
                 }
             }
         }
@@ -193,6 +209,37 @@ struct SessionCompareView: View {
             } catch {
                 toasts.error(error.localizedDescription)
             }
+        }
+    }
+}
+
+/// A titled, collapsible block of rows. Its header scrolls with the rows,
+/// so nothing shows through it.
+private struct CompareSection<Rows: View>: View {
+    let title: String
+    let count: Int?
+    @ViewBuilder let rows: Rows
+    @State private var expanded = true
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button { expanded.toggle() } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "chevron.right")
+                        .rotationEffect(.degrees(expanded ? 90 : 0))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text(title).font(.headline)
+                    if let count { Text("\(count)").foregroundStyle(.secondary).monospacedDigit() }
+                    Spacer()
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 14)
+            .padding(.bottom, 6)
+            if expanded { rows }
+            Divider().padding(.top, 8)
         }
     }
 }
