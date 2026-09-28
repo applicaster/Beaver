@@ -242,12 +242,16 @@ public actor WSServer {
             // sends at once would otherwise be yielded first.
             receive(on: connection, id: id)
         case .failed(let error):
+            // Once reading, `receive` still gets the frames buffered before
+            // the failure, then cancels and ends the session after the last
+            // one. Cancelling here would discard them.
+            if ready.contains(id) { break }
             // A failed connection holds its resources — and this handler,
             // which holds it — until cancelled.
             connection.cancel()
             drop(id, reason: error.localizedDescription)
         case .cancelled:
-            drop(id, reason: "cancelled")
+            if !ready.contains(id) { drop(id, reason: "cancelled") }
         case .waiting(let error):
             stateContinuation.yield(.failed(reason: "waiting: \(error.localizedDescription)"))
         case .preparing, .setup:
@@ -274,9 +278,13 @@ public actor WSServer {
     /// with `autoReplyPing` answering the ping. They carry no protocol
     /// frame, so only data messages go on to the decoder (PROTOCOL.md §1).
     ///
-    /// The end of the peer's stream (a FIN, with or without a close frame)
-    /// reaches only this callback: the connection stays `.ready`. Cancel it
-    /// so `.cancelled` ends the session, or the device stays live forever.
+    /// This loop ends the session: the end of the peer's stream (a FIN,
+    /// with or without a close frame) reaches only this callback, and the
+    /// connection stays `.ready`. The error for the peer's close can come
+    /// with a frame while later ones are still buffered, so reading goes on
+    /// until a callback brings no data — the SDK flushes its buffer right
+    /// after connecting, and stopping early lost those logs. `.disconnected`
+    /// is yielded after the last frame, never before it.
     private nonisolated func receive(on connection: NWConnection, id: UUID) {
         connection.receiveMessage { [weak self] data, context, _, error in
             guard let self else { return }
@@ -285,10 +293,11 @@ public actor WSServer {
             if let data, !data.isEmpty, opcode == .text || opcode == .binary {
                 self.inboundContinuation.yield(.frame(id, data))
             }
-            if error == nil, context?.isFinal != true {
+            if context?.isFinal != true, error == nil || data?.isEmpty == false {
                 self.receive(on: connection, id: id)
             } else {
                 connection.cancel()
+                Task { await self.drop(id, reason: error?.localizedDescription ?? "closed") }
             }
         }
     }

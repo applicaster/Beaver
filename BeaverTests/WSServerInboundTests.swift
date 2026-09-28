@@ -89,6 +89,65 @@ struct WSServerInboundTests {
         await server.stop()
     }
 
+    /// Network.framework can hand over a frame together with the error for
+    /// the peer's close while later frames are still buffered; reading had
+    /// to go on until a callback brought no data.
+    @Test("Frames that arrive with the client's close are all kept, before .disconnected")
+    func framesBeforeCloseAreKept() async throws {
+        let server = WSServer(port: 19_088)
+        try await server.start()
+        _ = await race(timeout: .seconds(10)) {
+            for await state in server.state { if case .listening = state { return } }
+        }
+        let upgrade = "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+            + "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"
+        // Client frames are masked; a zero key leaves the payload as is.
+        func frame(_ opcode: UInt8, _ payload: [UInt8]) -> [UInt8] {
+            [0x80 | opcode, 0x80 | UInt8(payload.count), 0, 0, 0, 0] + payload
+        }
+        let frames = frame(0x1, Array("first".utf8)) + frame(0x1, Array("second".utf8)) + frame(0x8, [0x03, 0xE8])
+
+        for round in 0..<1_000 {
+            let client = NWConnection(host: "127.0.0.1", port: 19_088, using: .tcp)
+            client.start(queue: .global())
+            client.send(content: Data(upgrade.utf8), completion: .idempotent)
+            // The 101: from here on the bytes are WebSocket frames.
+            await withCheckedContinuation { done in
+                client.receive(minimumIncompleteLength: 1, maximumLength: 4096) { _, _, _, _ in done.resume() }
+            }
+            // Both frames, the close frame and the FIN in one go.
+            client.send(content: Data(frames), contentContext: .finalMessage, isComplete: true, completion: .idempotent)
+            @Sendable func drain() {
+                client.receive(minimumIncompleteLength: 1, maximumLength: 65_536) { _, _, done, error in
+                    if !done, error == nil { drain() }
+                }
+            }
+            drain()
+
+            let items = await race(timeout: .seconds(10)) { () -> [WSServer.Inbound] in
+                var items: [WSServer.Inbound] = []
+                for await item in server.inbound {
+                    items.append(item)
+                    if case .disconnected = item { break }
+                }
+                return items
+            } ?? []
+            client.cancel()
+            guard case .connected(let id)? = items.first else {
+                Issue.record("round \(round): no .connected first: \(items)")
+                break
+            }
+            #expect(items == [
+                .connected(id),
+                .frame(id, Data("first".utf8)),
+                .frame(id, Data("second".utf8)),
+                .disconnected(id),
+            ], "round \(round): \(items)")
+            if items.count != 4 { break }
+        }
+        await server.stop()
+    }
+
     @Test("Two clients stay connected, frames say who sent them, commands reach the right one")
     func twoClients() async throws {
         let server = WSServer(port: 19_084)
