@@ -40,7 +40,7 @@ struct StorageToolsTests {
         let s = try await store.createSession(source: .live)
         let app = FakeStorageApp(store: store, sessionId: s.id, applies: applies, answers: answers)
         let device = FakeDevice { await app.handle($0) }
-        let ui = HostSnapshot(deviceConnected: true, liveSessionId: s.id, commands: commands)
+        let ui = HostSnapshot(liveSessionIds: [s.id], commandsBySession: [s.id: commands])
         return (store, makeContext(store, ui: ui, device: device), device)
     }
 

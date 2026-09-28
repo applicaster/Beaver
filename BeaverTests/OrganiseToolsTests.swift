@@ -46,7 +46,7 @@ struct OrganiseToolsTests {
         let store = try LogStore(source: .inMemory)
         let s = try await store.createSession(source: .live)
         try await seed(store, session: s.id, [(.warning, "com.app.auth", "", "x")])
-        let ctx = makeContext(store, ui: HostSnapshot(liveSessionId: s.id))
+        let ctx = makeContext(store, ui: HostSnapshot(liveSessionIds: [s.id]))
         let r = try await StateTools.filtersSave.run(
             ToolArguments(["name": "Auth problems", "filter": ["minLevel": "warn", "subsystems": ["*auth*"]]]), ctx)
         #expect(r.summary.hasPrefix("Saved filter “Auth problems”: level ≥ warning; subsystems com.app.auth"))
@@ -100,7 +100,7 @@ struct OrganiseToolsTests {
         let other = try await store.createSession(source: .imported)
         try await seed(store, session: s.id, [(.info, "a", "", "one"), (.info, "a", "", "two")])
         let latest = try #require(try await store.latestEventId(sessionId: s.id))
-        let ui = FakeUI(value: HostSnapshot(liveSessionId: s.id, viewingSessionId: s.id))
+        let ui = FakeUI(value: HostSnapshot(liveSessionIds: [s.id], viewingSessionId: s.id))
         let r = try await LogTools.clear.run(ToolArguments(), makeContext(store, fakeUI: ui))
         #expect(ui.clears == [FakeUI.Clear(sessionId: s.id, through: latest)])
         #expect(r.summary.contains("Nothing was deleted"))

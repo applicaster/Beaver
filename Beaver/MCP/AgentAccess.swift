@@ -216,9 +216,9 @@ public actor AgentAccess {
         Capability(
             icon: "terminal",
             title: "Drive the app",
-            note: "Send the app's commands and collect the logs they cause — even across a restart — or wait for a log to show up.",
+            note: "Send the app's commands and collect the logs they cause — even across a restart — or wait for a log to show up. Disconnect an app when asked.",
             example: "Use beaver: send cmdlist to the app and show me what it logged.",
-            tools: ["commands_list", "commands_send", "logs_wait"]),
+            tools: ["commands_list", "commands_send", "logs_wait", "devices_disconnect"]),
         Capability(
             icon: "binoculars",
             title: "Watch over time",

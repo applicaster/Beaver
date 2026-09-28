@@ -11,7 +11,7 @@ struct StateToolsTests {
         let s = try await store.createSession(source: .live)
         try await store.recordStorageSnapshot(sessionId: s.id, namespace: .local,
                                               dataJSON: #"{"applicaster.v2":{"onboardingDone":"true"}}"#)
-        let ctx = makeContext(store, ui: HostSnapshot(liveSessionId: s.id))
+        let ctx = makeContext(store, ui: HostSnapshot(liveSessionIds: [s.id]))
         let local = try await StorageTools.snapshot.run(ToolArguments(["layer": "local"]), ctx)
         #expect(local.structured["layers"]?["local"]?["data"]?["applicaster.v2"]?["onboardingDone"] == "true")
         let all = try await StorageTools.snapshot.run(ToolArguments(), ctx)
@@ -28,7 +28,7 @@ struct StateToolsTests {
         let store = try LogStore(source: .inMemory)
         let hints = [CommandHint(name: "storage.local.set", syntax: "storage.local.set <key> <value> [namespace]", description: "Write"),
                      CommandHint(name: "custom.thing", syntax: nil, description: nil)]
-        let r = try await StateTools.commandsList.run(ToolArguments(), makeContext(store, ui: HostSnapshot(commands: hints)))
+        let r = try await StateTools.commandsList.run(ToolArguments(), makeContext(store, ui: HostSnapshot(liveSessionIds: [1], commandsBySession: [1: hints])))
         #expect(r.body.contains("storage.local.set <key> <value> [namespace] — Write"))
         #expect(r.body.contains("custom.thing"))
         let none = try await StateTools.commandsList.run(ToolArguments(), makeContext(store))
@@ -42,7 +42,7 @@ struct StateToolsTests {
         try await seed(store, session: s.id, [(.error, "a", "", "keep me")])
         let id = try #require(try await store.latestEventId(sessionId: s.id))
         try await store.addBookmark(eventId: id, sessionId: s.id)
-        let r = try await StateTools.bookmarksList.run(ToolArguments(), makeContext(store, ui: HostSnapshot(liveSessionId: s.id)))
+        let r = try await StateTools.bookmarksList.run(ToolArguments(), makeContext(store, ui: HostSnapshot(liveSessionIds: [s.id])))
         #expect(r.body.contains("keep me"))
         #expect(r.structured["events"]?.array?.count == 1)
     }
@@ -63,7 +63,7 @@ struct StateToolsTests {
         let chunk = String(repeating: "{\"k\":\"" + String(repeating: "x", count: 1000) + "\"}", count: 300)
         let largeJSON = "{\"applicaster.v2\":" + chunk + "}"
         try await store.recordStorageSnapshot(sessionId: s.id, namespace: .local, dataJSON: largeJSON)
-        let ctx = makeContext(store, ui: HostSnapshot(liveSessionId: s.id))
+        let ctx = makeContext(store, ui: HostSnapshot(liveSessionIds: [s.id]))
         let result = try await StorageTools.snapshot.run(ToolArguments(["layer": "local"]), ctx)
         #expect(result.structured["layers"]?["local"]?["dataTruncated"] == true)
         // Verify the structured data is a string (truncated) and ≤256 KB

@@ -11,26 +11,27 @@ enum StatusTools {
     static let status = MCPTool(
         name: "beaver_status",
         title: "Beaver status",
-        description: "Use first, and whenever you are unsure what is connected: whether a device is connected and which app, the live and viewed session ids, the latest event id (a starting point for afterId), and where the device should connect.",
+        description: "Use first, and whenever you are unsure what is connected: which apps are connected (each with the deviceId to pass to device tools), their live and the viewed session ids, the latest event id (a starting point for afterId), and where the device should connect.",
         kind: .read,
         inputSchema: ToolSchema.object([:])
     ) { _, ctx in
         let host = await ctx.ui.snapshot()
         let sessions = try await ctx.store.sessions()
         var devices: [JSON] = []
+        var described: [String] = []
         var lines: [String] = []
-        if host.deviceConnected, let live = host.liveSessionId,
-           let session = sessions.first(where: { $0.id == live }) {
+        for live in host.liveSessionIds {
+            guard let session = sessions.first(where: { $0.id == live }) else { continue }
             let latest = try await ctx.store.latestEventId(sessionId: live)
-            // ponytail: "current" until the device handshake (phase 2) gives a stable device id.
             devices.append([
-                "id": "current",
+                "id": .string(String(live)),
                 "app": JSON(session.appName), "appVersion": JSON(session.appVersion),
                 "model": JSON(session.deviceModel), "platform": JSON(session.platform),
                 "osVersion": JSON(session.osVersion),
                 "liveSessionId": JSON(live), "latestEventId": JSON(latest),
             ])
-            lines.append("Device: \(describeDevice(session)) — live session #\(live)"
+            described.append("\(describeDevice(session)) (deviceId \"\(live)\")")
+            lines.append("Device \"\(live)\": \(describeDevice(session)) — live session #\(live)"
                 + (latest.map { ", latest event #\($0)" } ?? ", no events yet"))
         }
         lines.append("Beaver \(host.beaverVersion) · WebSocket \(host.serverState)"
@@ -45,14 +46,19 @@ enum StatusTools {
         }
         lines.append("Agent notifications: \(host.notifications.rawValue)" + notificationsSuffix)
 
-        let summary = devices.isEmpty
-            ? "No device is connected. \(sessions.isEmpty ? "No sessions are stored yet." : "Past sessions can still be read.")"
-            : "A device is connected: \(lines[0].dropFirst("Device: ".count))."
+        let summary = switch devices.count {
+        case 0: "No device is connected. \(sessions.isEmpty ? "No sessions are stored yet." : "Past sessions can still be read.")"
+        case 1: "A device is connected: \(described[0])."
+        default: "\(devices.count) devices are connected: \(described.joined(separator: "; ")). Pass deviceId to commands and storage changes."
+        }
+        let first = host.liveSessionIds.first
         let next: [String] = devices.isEmpty
             ? (sessions.isEmpty
                 ? ["ask the user to connect the app to \(host.deviceURL ?? "Beaver") with remote assistance, then beaver_status()"]
                 : ["sessions_list()", "logs_facets(sessionId: \(sessions[0].id))"])
-            : ["logs_facets(since: \"10m\")", "logs_query(filter: {minLevel: \"warning\"}, since: \"10m\")"]
+            : devices.count == 1
+                ? ["logs_facets(since: \"10m\")", "logs_query(filter: {minLevel: \"warning\"}, since: \"10m\")"]
+                : ["commands_list(deviceId: \"\(first ?? 0)\")", "logs_facets(sessionId: \(first ?? 0), since: \"10m\")"]
         return ToolResult(
             summary: summary,
             body: lines.joined(separator: "\n"),
@@ -65,7 +71,7 @@ enum StatusTools {
                 "notifications": .string(host.notifications.rawValue),
             ],
             next: next,
-            sessionId: host.liveSessionId
+            sessionId: host.liveSessionIds.max()
         )
     }
 
@@ -104,7 +110,7 @@ enum StatusTools {
         }
         // `Session.isActive` (no endedAt) isn't enough on its own: a crash
         // can leave an old session unended even though it's no longer the
-        // device's current one. Only the host's own liveSessionId says
+        // device's current one. Only the host's own liveSessionIds say
         // which session is actually live now.
         let host = await ctx.ui.snapshot()
         var rows: [JSON] = []
@@ -112,7 +118,7 @@ enum StatusTools {
         for session in all.prefix(limit) {
             let events = try await ctx.store.eventCount(sessionId: session.id, filter: .none)
             let requests = try await ctx.store.networkEntryCount(sessionId: session.id)
-            let liveNow = session.id == host.liveSessionId
+            let liveNow = host.liveSessionIds.contains(session.id)
             rows.append([
                 "id": JSON(session.id), "source": .string(session.source.rawValue),
                 "startedAt": .string(session.startedAt.ISO8601Format()),

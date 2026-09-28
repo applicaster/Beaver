@@ -53,6 +53,70 @@ struct WaitSegment: Sendable {
     let afterId: Int64
 }
 
+/// Follows one device across reconnects (D66). With several devices (D73)
+/// a new live session continues the device when its fingerprint matches;
+/// when either fingerprint is still unknown, only if it is the one session
+/// that came up since the last look.
+// ponytail: fingerprint heuristic — two identical builds on two simulators
+// look alike. A stable device id from the SDK would replace it.
+struct DeviceFollower: Sendable {
+    enum Step: Equatable { case same, moved(Int64), gone }
+
+    private(set) var current: Int64
+    private var lastLive: Set<Int64>
+    /// Sessions live at the same time as `current`: another device, so
+    /// never its restart — not even a twin with the same fingerprint.
+    private var alongside: Set<Int64>
+
+    init(start: Int64, live: [Int64]) {
+        current = start
+        lastLive = Set(live)
+        alongside = Set(live)
+    }
+
+    /// nil while the set of live sessions hasn't changed since the last call.
+    mutating func step(live: [Int64], store: LogStore) async -> Step? {
+        let now = Set(live)
+        guard now != lastLive else { return nil }
+        let appeared = now.subtracting(lastLive)
+        lastLive = now
+        if now.contains(current) {
+            alongside.formUnion(now)
+            return .same
+        }
+        let sessions = (try? await store.sessions()) ?? []
+        let candidates = sessions.filter { now.contains($0.id) && !alongside.contains($0.id) }
+        // A deleted row (the user deleted a live session) knows no
+        // fingerprint: the one session that came up since continues it.
+        let ended = sessions.first(where: { $0.id == current })
+            ?? Session(id: current, startedAt: .distantPast, source: .live)
+        guard let next = Self.successor(of: ended, live: candidates, appeared: appeared) else { return .gone }
+        current = next
+        alongside = now
+        return .moved(next)
+    }
+
+    static func successor(of ended: Session, live: [Session], appeared: Set<Int64>) -> Int64? {
+        let newer = live.filter { $0.id > ended.id }
+        if let print = ended.fingerprint,
+           let same = newer.filter({ $0.fingerprint == print }).map(\.id).max() {
+            return same
+        }
+        let unknown = newer.filter {
+            appeared.contains($0.id) && (ended.fingerprint == nil || $0.fingerprint == nil)
+        }
+        return unknown.count == 1 ? unknown[0].id : nil
+    }
+}
+
+extension Session {
+    /// Which app on which device, to tell devices apart; nil until the SDK reports it.
+    var fingerprint: [String]? {
+        guard let appName else { return nil }
+        return [appName, deviceModel ?? "", platform ?? ""]
+    }
+}
+
 extension ToolContext {
 
     static let pollInterval: Duration = .milliseconds(250)
@@ -65,9 +129,11 @@ extension ToolContext {
                               timeout: Duration, untilFirst: Bool) async throws -> WaitResult {
         let follows = start.how != .given
         var segments = [WaitSegment(sessionId: start.id, afterId: afterId)]
-        var lastLive = await ui.snapshot().liveSessionId
-        let pinnedWasLive = !follows && lastLive == start.id
+        let liveAtStart = await ui.snapshot().liveSessionIds
+        var device = DeviceFollower(start: start.id, live: liveAtStart)
+        let pinnedWasLive = !follows && liveAtStart.contains(start.id)
         var result = WaitResult(sessionId: start.id)
+        result.liveSessionId = liveAtStart.contains(start.id) ? start.id : nil
         let deadline = ContinuousClock.now + timeout
 
         while true {
@@ -75,27 +141,31 @@ extension ToolContext {
             let done = (untilFirst && result.total > 0) || result.sessionEnded
             if done || ContinuousClock.now >= deadline || Task.isCancelled {
                 result.sessionId = segments[segments.count - 1].sessionId
-                result.liveSessionId = lastLive
                 result.timedOut = untilFirst && result.total == 0 && !result.sessionEnded
                 return result
             }
             try? await Task.sleep(for: Self.pollInterval)
-            let live = await ui.snapshot().liveSessionId
-            guard live != lastLive else { continue }
-            lastLive = live
-            if follows {
-                if let live {
-                    if !segments.contains(where: { $0.sessionId == live }) {
-                        segments.append(WaitSegment(sessionId: live, afterId: 0))
-                        result.sessionChanged = SessionChange(from: start.id, to: live)
-                    }
-                    result.deviceDisconnected = false
-                } else {
+            guard let step = await device.step(live: await ui.snapshot().liveSessionIds, store: store) else { continue }
+            switch step {
+            case .same:
+                result.deviceDisconnected = false
+            case .moved(let next):
+                result.liveSessionId = next
+                result.deviceDisconnected = false
+                if follows, !segments.contains(where: { $0.sessionId == next }) {
+                    segments.append(WaitSegment(sessionId: next, afterId: 0))
+                    result.sessionChanged = SessionChange(from: start.id, to: next)
+                } else if pinnedWasLive {
+                    result.sessionEnded = true
+                }
+            case .gone:
+                result.liveSessionId = nil
+                if follows {
+                    result.deviceDisconnected = true
+                } else if pinnedWasLive {
+                    result.sessionEnded = true
                     result.deviceDisconnected = true
                 }
-            } else if pinnedWasLive {
-                result.sessionEnded = true
-                result.deviceDisconnected = live == nil
             }
         }
     }
@@ -113,20 +183,43 @@ extension ToolContext {
         return (events, total)
     }
 
-    /// Design M25: tools that talk to the device take an optional deviceId;
-    /// today there is one device, "current".
-    public func requireDevice(_ args: ToolArguments, doing what: String) async throws
+    /// Design M25 / D73: tools that talk to a device take an optional
+    /// deviceId — the device's live session id, as beaver_status lists it.
+    /// With one device it may be omitted (or be "current", as before D73);
+    /// with several it may not. `call` is the tool's own example call; the
+    /// error shows it with a deviceId filled in.
+    public func requireDevice(_ args: ToolArguments, doing what: String, call: String) async throws
         -> (host: HostSnapshot, liveSessionId: Int64) {
         let host = await ui.snapshot()
-        if let id = try args.string("deviceId"), id != "current" {
-            throw ToolError("No device \"\(id)\". Connected: \(host.deviceConnected ? "\"current\"" : "none"). "
-                + "Example: omit deviceId — Beaver has one device at a time.")
-        }
-        guard host.deviceConnected, let live = host.liveSessionId else {
+        let live = host.liveSessionIds
+        guard !live.isEmpty else {
             throw ToolError("No device is connected, so Beaver can't \(what). Ask the user to open the app with "
                 + "remote assistance pointed at \(host.deviceURL ?? "Beaver"), then call beaver_status().")
         }
-        return (host, live)
+        let wanted = try args.string("deviceId")
+        // args.string turns a number into text; accept "12", 12 and 12.0.
+        if let wanted, let id = Int64(wanted) ?? Double(wanted).flatMap({ Int64(exactly: $0) }),
+           live.contains(id) { return (host, id) }
+        if wanted == nil || wanted == "current", live.count == 1 { return (host, live[0]) }
+        let list = try await describeDevices(live)
+        let lead = wanted.map { "No connected device \"\($0)\"." }
+            ?? "\(live.count) devices are connected; say which one with deviceId."
+        throw ToolError("\(lead) Connected: \(list). Example: \(Self.withDeviceId(call, live[0])).")
+    }
+
+    /// `commands_send(command: "x")` → `commands_send(deviceId: "12", command: "x")`.
+    static func withDeviceId(_ call: String, _ id: Int64) -> String {
+        guard let open = call.firstIndex(of: "(") else { return call }
+        let rest = call[call.index(after: open)...]
+        return String(call[...open]) + "deviceId: \"\(id)\"" + (rest.hasPrefix(")") ? "" : ", ") + rest
+    }
+
+    /// `"12" (Alpha 1.0 · iPhone 15, iOS 18.0), "14" (…)`.
+    public func describeDevices(_ ids: [Int64]) async throws -> String {
+        let sessions = try await store.sessions()
+        return ids.map { id in
+            "\"\(id)\"" + (sessions.first { $0.id == id }.map { " (\(StatusTools.describeDevice($0)))" } ?? "")
+        }.joined(separator: ", ")
     }
 
     /// Design §7.2: when the device drops within `window` after an agent's
@@ -135,18 +228,24 @@ extension ToolContext {
     /// Replaces any earlier command's watcher, so N commands before a restart
     /// write one entry, naming the last.
     func watchForDisconnect(after command: String, sessionId: Int64, window: Duration = .seconds(30)) async {
+        let liveNow = await ui.snapshot().liveSessionIds
         await watches.setDisconnectWatcher(Task { [self] in
+            var device = DeviceFollower(start: sessionId, live: liveNow)
             let dropDeadline = ContinuousClock.now + window
             while ContinuousClock.now < dropDeadline {
                 try? await Task.sleep(for: Self.pollInterval)
                 guard !Task.isCancelled else { return }
-                guard await ui.snapshot().liveSessionId != sessionId else { continue }
+                guard let step = await device.step(live: await ui.snapshot().liveSessionIds, store: store),
+                      step != .same else { continue }
+                var back: Int64?
+                if case .moved(let id) = step { back = id }
                 let backDeadline = ContinuousClock.now + window
-                var back = await ui.snapshot().liveSessionId
                 while back == nil, ContinuousClock.now < backDeadline {
                     try? await Task.sleep(for: Self.pollInterval)
                     guard !Task.isCancelled else { return }
-                    back = await ui.snapshot().liveSessionId
+                    if case .moved(let id)? = await device.step(live: await ui.snapshot().liveSessionIds, store: store) {
+                        back = id
+                    }
                 }
                 guard !Task.isCancelled else { return }
                 let outcome = back.map { " → session #\($0)" } ?? "; not back after \(window.components.seconds) s"

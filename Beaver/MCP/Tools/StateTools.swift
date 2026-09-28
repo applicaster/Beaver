@@ -11,15 +11,16 @@ enum StateTools {
     static let commandsList = MCPTool(
         name: "commands_list",
         title: "Device commands",
-        description: "Use to see which commands the connected app accepts, with syntax where Beaver knows it. The app reports them when it connects (cmdlist).",
+        description: "Use to see which commands a connected app accepts, with syntax where Beaver knows it. The app reports them when it connects (cmdlist).",
         kind: .read,
-        inputSchema: ToolSchema.object([:])
-    ) { _, ctx in
-        let hints = await ctx.ui.snapshot().commands
-        guard !hints.isEmpty else {
-            return ToolResult(summary: "No command list yet: no device is connected, or it hasn't answered cmdlist.",
+        inputSchema: ToolSchema.object(["deviceId": ToolSchema.deviceId])
+    ) { args, ctx in
+        let none = ToolResult(summary: "No command list yet: no device is connected, or it hasn't answered cmdlist.",
                               structured: ["commands": []], next: ["beaver_status()"])
-        }
+        guard await ctx.ui.snapshot().deviceConnected else { return none }
+        let (host, live) = try await ctx.requireDevice(args, doing: "list its commands", call: "commands_list()")
+        let hints = host.commandsBySession[live] ?? []
+        guard !hints.isEmpty else { return none }
         let lines = hints.map { h in
             [h.syntax ?? h.name, h.description].compactMap { $0 }.joined(separator: " — ")
         }

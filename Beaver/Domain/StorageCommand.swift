@@ -134,8 +134,8 @@ public enum StorageCommand {
                                      key: String, expected: String?, sessionId: Int64,
                                      store: LogStore, device: any DeviceLink) async -> Outcome {
         let sentAt = wholeMillisecondNow()
-        await device.send(command: command)
-        await device.send(command: "storage.list")
+        await device.send(command: command, to: sessionId)
+        await device.send(command: "storage.list", to: sessionId)
         var heardBack = false
         for _ in 0..<12 {
             try? await Task.sleep(for: .milliseconds(250))
@@ -154,7 +154,7 @@ public enum StorageCommand {
     public static func refresh(_ layers: [StorageSnapshot.Namespace], sessionId: Int64, timeout: Duration,
                                store: LogStore, device: any DeviceLink) async -> Set<StorageSnapshot.Namespace> {
         let sentAt = wholeMillisecondNow()
-        await device.send(command: "storage.list")
+        await device.send(command: "storage.list", to: sessionId)
         func fresh() async -> Set<StorageSnapshot.Namespace> {
             var found = Set<StorageSnapshot.Namespace>()
             for layer in layers {

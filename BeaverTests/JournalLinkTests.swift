@@ -36,7 +36,7 @@ struct JournalLinkTests {
             try #require(NetworkCapture(#"{"url":"https://api.x.io/feed","method":"GET","status":200,"timing":{"startTime":1}}"#,
                                         fallbackMillis: 0)),
             sessionId: s.id)
-        let ctx = makeContext(store, ui: HostSnapshot(liveSessionId: s.id))
+        let ctx = makeContext(store, ui: HostSnapshot(liveSessionIds: [s.id]))
         let eventIds = try await store.eventPage(sessionId: s.id, filter: .none, limit: 10, newestFirst: false).events.map(\.id)
         let requestId = try #require(try await store.networkEntries(sessionId: s.id).first?.id)
 

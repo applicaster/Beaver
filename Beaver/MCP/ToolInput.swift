@@ -162,7 +162,10 @@ extension ToolContext {
             return ResolvedSession(id: wanted, session: s, how: .given)
         }
         let host = await ui.snapshot()
-        if let id = host.liveSessionId, let s = sessions.first(where: { $0.id == id }) {
+        // D73: with several devices, the one the user is viewing, else the newest.
+        let liveId = host.viewingSessionId.flatMap { host.liveSessionIds.contains($0) ? $0 : nil }
+            ?? host.liveSessionIds.max()
+        if let id = liveId, let s = sessions.first(where: { $0.id == id }) {
             return ResolvedSession(id: id, session: s, how: .live)
         }
         if let id = host.viewingSessionId, let s = sessions.first(where: { $0.id == id }) {
@@ -174,6 +177,15 @@ extension ToolContext {
         throw ToolError("Beaver has no sessions yet. Ask the user to connect the app to Beaver"
             + (host.deviceURL.map { " at \($0)" } ?? "")
             + " (remote assistance on the device), then call beaver_status().")
+    }
+
+    /// The live session of the device `requireDevice` picked. Marked
+    /// `.live`, so a wait on it follows the device across a restart.
+    public func liveSession(_ id: Int64) async throws -> ResolvedSession {
+        guard let s = try await store.sessions().first(where: { $0.id == id }) else {
+            throw ToolError("Session #\(id) is gone. Example: beaver_status() shows what is connected now.")
+        }
+        return ResolvedSession(id: id, session: s, how: .live)
     }
 
     /// Design M30: a weak agent often writes `logs_query(minLevel: "error")`

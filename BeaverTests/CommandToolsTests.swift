@@ -8,7 +8,7 @@ struct CommandToolsTests {
     private func live() async throws -> (LogStore, Session, FakeUI) {
         let store = try LogStore(source: .inMemory)
         let s = try await store.createSession(source: .live)
-        return (store, s, FakeUI(value: HostSnapshot(deviceConnected: true, liveSessionId: s.id)))
+        return (store, s, FakeUI(value: HostSnapshot(liveSessionIds: [s.id])))
     }
 
     @Test("Sends the command, adds it to the command bar's history, says where to look")
@@ -57,10 +57,10 @@ struct CommandToolsTests {
         let device = FakeDevice { _ in
             Task {
                 try? await Task.sleep(for: .milliseconds(200))
-                ui.update { $0.deviceConnected = false; $0.liveSessionId = nil }
+                ui.update { $0.liveSessionIds = [] }
                 try? await Task.sleep(for: .milliseconds(300))
                 guard let b = try? await store.createSession(source: .live) else { return }
-                ui.update { $0.deviceConnected = true; $0.liveSessionId = b.id }
+                ui.update { $0.liveSessionIds = [b.id] }
                 await store.append(event("App started"), to: b.id)
             }
         }
@@ -77,10 +77,10 @@ struct CommandToolsTests {
         let ctx = makeContext(store, fakeUI: ui)
         await ctx.watchForDisconnect(after: "restart", sessionId: a.id, window: .seconds(3))
         try await Task.sleep(for: .milliseconds(300))
-        ui.update { $0.deviceConnected = false; $0.liveSessionId = nil }
+        ui.update { $0.liveSessionIds = [] }
         try await Task.sleep(for: .milliseconds(400))
         let b = try await store.createSession(source: .live)
-        ui.update { $0.deviceConnected = true; $0.liveSessionId = b.id }
+        ui.update { $0.liveSessionIds = [b.id] }
         var rows: [AgentActivity] = []
         for _ in 0..<40 where rows.isEmpty {
             try await Task.sleep(for: .milliseconds(100))
@@ -98,10 +98,10 @@ struct CommandToolsTests {
         await ctx.watchForDisconnect(after: "prepare", sessionId: a.id, window: .seconds(3))
         await ctx.watchForDisconnect(after: "restart", sessionId: a.id, window: .seconds(3))
         try await Task.sleep(for: .milliseconds(300))
-        ui.update { $0.deviceConnected = false; $0.liveSessionId = nil }
+        ui.update { $0.liveSessionIds = [] }
         try await Task.sleep(for: .milliseconds(400))
         let b = try await store.createSession(source: .live)
-        ui.update { $0.deviceConnected = true; $0.liveSessionId = b.id }
+        ui.update { $0.liveSessionIds = [b.id] }
         try await Task.sleep(for: .milliseconds(1000))
         let rows = try await store.agentActivity().filter { $0.kind == .system }
         #expect(rows.map(\.summary) == ["Device disconnected after \"restart\" → session #\(b.id)"])

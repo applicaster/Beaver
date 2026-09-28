@@ -135,7 +135,7 @@ enum SessionTools {
                 throw ToolError("No session #\(id). Example: sessions_list() shows the ids that exist.")
             }
             // Same rule as the Sessions list: the inbound writer is still using it.
-            if id == (await ctx.ui.snapshot().liveSessionId) {
+            if await ctx.ui.snapshot().liveSessionIds.contains(id) {
                 throw ToolError("Session #\(id) is the live one; Beaver won't delete it while the device is connected. Ask the user to disconnect the app first, or pick another id: sessions_list().")
             }
             let events = try await ctx.store.eventCount(sessionId: id, filter: .none)

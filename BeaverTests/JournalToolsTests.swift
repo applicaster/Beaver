@@ -18,7 +18,7 @@ struct JournalToolsTests {
         let s = try await store.createSession(source: .live)
         try await seed(store, session: s.id, [(.error, "com.app.auth", "", "refresh failed 401")])
         let id = try #require(try await store.latestEventId(sessionId: s.id))
-        let ui = FakeUI(value: HostSnapshot(liveSessionId: s.id))
+        let ui = FakeUI(value: HostSnapshot(liveSessionIds: [s.id]))
         let server = MCPServer(tools: BeaverTools.all, context: makeContext(store, fakeUI: ui),
                                journal: AgentJournal(store: store))
         return (store, ui, server, id)

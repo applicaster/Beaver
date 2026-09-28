@@ -6,11 +6,11 @@
 import SwiftUI
 
 /// Bottom-of-window command input. Sends arbitrary strings to the
-/// connected client via `WSServer.send(command:)`. Up/Down arrows
+/// viewed device via `DeviceLink.send(command:to:)`. Up/Down arrows
 /// navigate the in-memory history. Send is gated by whether text is
 /// present — *not* by connection state — so the user can compose
 /// commands while waiting for a client to connect. If no client is
-/// active when Send fires, `WSServer.send(command:)` is a no-op.
+/// active when Send fires, the send is a no-op.
 struct CommandBarView: View {
     @Environment(AppEnvironment.self) private var env
     @State private var vm: CommandBarViewModel?
@@ -25,7 +25,7 @@ struct CommandBarView: View {
         }
         .task {
             if vm == nil {
-                vm = CommandBarViewModel(server: env.server)
+                vm = CommandBarViewModel(device: env)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .beaverCommandSent)) { note in
@@ -65,7 +65,7 @@ private struct CommandBarContent: View {
                             showingCommandHelp = false
                         },
                         onRefresh: {
-                            Task { await env.server.send(command: "cmdlist") }
+                            Task { if let sid = env.viewingSessionId { await env.send(command: "cmdlist", to: sid) } }
                         }
                     )
                 }
@@ -93,7 +93,7 @@ private struct CommandBarContent: View {
                         return .handled
                     }
                     .onSubmit {
-                        if isClientConnected { vm.submit() }
+                        if isClientConnected { vm.submit(to: env.viewingSessionId) }
                     }
 
                 if !vm.input.isEmpty {
@@ -128,7 +128,7 @@ private struct CommandBarContent: View {
                     )
             )
 
-            Button("Send") { vm.submit() }
+            Button("Send") { vm.submit(to: env.viewingSessionId) }
                 .keyboardShortcut(.return, modifiers: [])
                 .disabled(!isClientConnected || trimmedInput.isEmpty)
                 .opacity(isClientConnected ? 1.0 : 0.5)
@@ -145,8 +145,7 @@ private struct CommandBarContent: View {
     }
 
     private var isClientConnected: Bool {
-        if case .clientConnected = env.serverState { return true }
-        return false
+        env.isLive(env.viewingSessionId)
     }
 }
 

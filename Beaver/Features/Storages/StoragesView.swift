@@ -41,7 +41,7 @@ struct StoragesView: View {
             // common "open the app + connect" flow doesn't depend
             // on this.
             .onAppear {
-                vm.requestRefresh(via: env.server)
+                vm.requestRefresh(via: env)
             }
     }
 }
@@ -65,11 +65,11 @@ extension AppEnvironment {
 @MainActor
 private func sendStorageEdit(_ edit: StoragesViewModel.Edit,
                              vm: StoragesViewModel,
-                             server: WSServer,
+                             device: any DeviceLink,
                              toasts: ToastCenter,
                              isUndo: Bool = false) {
     Task {
-        switch await vm.apply(edit, via: server) {
+        switch await vm.apply(edit, via: device) {
         case .applied(let undo):
             if isUndo {
                 toasts.success("Undone")
@@ -79,7 +79,7 @@ private func sendStorageEdit(_ edit: StoragesViewModel.Edit,
                     if undo.namespace == .keychain {
                         vm.pendingKeychainWrite = .init(edit: undo, isUndo: true)
                     } else {
-                        sendStorageEdit(undo, vm: vm, server: server, toasts: toasts, isUndo: true)
+                        sendStorageEdit(undo, vm: vm, device: device, toasts: toasts, isUndo: true)
                     }
                 })
             } else {
@@ -148,7 +148,7 @@ private struct StoragesContent: View {
     @State private var pendingAdd: AddKeyContext?
     @State private var pendingFieldDelete: StorageFieldTarget?
     private func send(_ edit: StoragesViewModel.Edit, isUndo: Bool = false) {
-        sendStorageEdit(edit, vm: vm, server: env.server, toasts: toasts, isUndo: isUndo)
+        sendStorageEdit(edit, vm: vm, device: env, toasts: toasts, isUndo: isUndo)
     }
 
     var body: some View {
@@ -359,7 +359,7 @@ private struct StoragesContent: View {
             while vm.autoRefreshEnabled {
                 try? await Task.sleep(for: .seconds(vm.autoRefreshInterval))
                 if Task.isCancelled || !vm.autoRefreshEnabled { return }
-                vm.requestRefresh(via: env.server)
+                vm.requestRefresh(via: env)
             }
         }
         .fileExporter(
@@ -473,7 +473,7 @@ private struct StoragesTopBar: View {
                       : "Reconnect the device to enable auto-refresh")
 
                 Button {
-                    vm.requestRefresh(via: env.server)
+                    vm.requestRefresh(via: env)
                 } label: {
                     Label("Reload", systemImage: "arrow.clockwise")
                 }
@@ -524,17 +524,18 @@ private struct StoragesTopBar: View {
         .frame(height: 48)
     }
 
+    /// This session's device is connected (D73: another one being
+    /// connected doesn't count).
     private var isClientConnected: Bool {
-        if case .clientConnected = env.serverState { return true }
-        return false
+        env.isLive(vm.sessionId)
     }
 
-    /// True only when the session this view is bound to is the same
-    /// session the WebSocket is currently feeding live. False for
+    /// True only when the session this view is bound to is one a
+    /// connected device is currently feeding live. False for
     /// past sessions even if a new device has connected since.
     /// Drives whether device-editing affordances render at all.
     private var isViewingLiveSession: Bool {
-        env.currentSessionId == vm.sessionId
+        env.isLive(vm.sessionId)
     }
 }
 
@@ -647,8 +648,8 @@ private struct StaleStorageBanner: View {
     }()
 
     private var staleReason: String? {
-        guard case .clientConnected = env.serverState else { return "Disconnected" }
-        return env.currentSessionId == vm.sessionId ? nil : "Past session"
+        guard !env.live.sessionIds.isEmpty else { return "Disconnected" }
+        return env.isLive(vm.sessionId) ? nil : "Past session"
     }
 
     var body: some View {
@@ -908,7 +909,7 @@ private struct StoragesOutline: View {
             return "No keys or values match \"\(trimmed)\"."
         }
         let layer = vm.selectedNamespace.displayName.lowercased()
-        if env.currentSessionId == vm.sessionId {
+        if env.isLive(vm.sessionId) {
             return "No \(layer) data. Click Reload to fetch from the device."
         }
         return "No \(layer) data was captured during this session."
@@ -1044,17 +1045,18 @@ private struct NamespaceRow: View {
         )
     }
 
+    /// This session's device is connected (D73: another one being
+    /// connected doesn't count).
     private var isClientConnected: Bool {
-        if case .clientConnected = env.serverState { return true }
-        return false
+        env.isLive(vm.sessionId)
     }
 
     /// Editing affordances only render when the viewed session is
-    /// the same one the device is currently streaming — for past
+    /// one a device is currently streaming — for past
     /// sessions, add / delete have no live target so we hide them
     /// rather than show non-functional buttons.
     private var isViewingLiveSession: Bool {
-        env.currentSessionId == vm.sessionId
+        env.isLive(vm.sessionId)
     }
 
     /// Write affordances also hide when the device's `cmdlist` doesn't

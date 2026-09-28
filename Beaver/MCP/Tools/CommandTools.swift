@@ -6,7 +6,7 @@
 import Foundation
 
 enum CommandTools {
-    static let all = [send]
+    static let all = [send, disconnect]
 
     static let maxCollectMillis = 30_000
 
@@ -26,15 +26,16 @@ enum CommandTools {
         guard let command = try args.string("command").flatMap(ToolContext.trimmedNonEmpty) else {
             throw ToolError("command is required. Example: commands_send(command: \"storage.list\") — commands_list() shows what the app accepts.")
         }
-        _ = try await ctx.requireDevice(args, doing: "send a command")
-        let session = try await ctx.resolveSession(ToolArguments())
+        let (_, live) = try await ctx.requireDevice(args, doing: "send a command",
+                                                call: "commands_send(command: \"\(command)\")")
+        let session = try await ctx.liveSession(live)
         let collect = min(maxCollectMillis, max(0, try args.int("collectLogsMs") ?? 0))
         let limit = try args.limit(default: 100, max: 500)
         let filter = collect > 0 ? try await ctx.resolveFilter(args, sessionId: session.id)
                                  : ResolvedFilter(filter: .none, notes: [])
         let before = try await ctx.store.latestEventId(sessionId: session.id) ?? 0
 
-        await ctx.device.send(command: command)
+        await ctx.device.send(command: command, to: live)
         await ctx.ui.didSendCommand(command)
         await ctx.watchForDisconnect(after: command, sessionId: session.id)
 
@@ -67,6 +68,24 @@ enum CommandTools {
             structured: .object(structured),
             next: next,
             sessionId: w.sessionId
+        )
+    }
+
+    static let disconnect = MCPTool(
+        name: "devices_disconnect",
+        title: "Disconnect a device",
+        description: "Use when the user asks to drop a connected app, or a stale one is in the way: Beaver closes that app's connection and its session ends, like the Disconnect button. An app that reconnects on its own comes back in a new session. With several apps connected, pass deviceId from beaver_status.",
+        kind: .change,
+        inputSchema: ToolSchema.object(["deviceId": ToolSchema.deviceId])
+    ) { args, ctx in
+        let (_, live) = try await ctx.requireDevice(args, doing: "disconnect it", call: "devices_disconnect()")
+        let session = try await ctx.liveSession(live)
+        await ctx.device.disconnect(live)
+        return ToolResult(
+            summary: "Disconnected \(StatusTools.describeDevice(session.session)) (session #\(live)).",
+            structured: ["disconnected": .string(String(live)), "sessionId": JSON(live)],
+            next: ["beaver_status() — an app that reconnects on its own shows up in a new session"],
+            sessionId: live
         )
     }
 }

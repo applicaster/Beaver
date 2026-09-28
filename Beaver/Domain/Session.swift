@@ -7,9 +7,9 @@ import Foundation
 
 /// A single client connection's worth of events.
 ///
-/// Per D2 (one client at a time) each accepted connection starts a new
-/// session row. Imported JSON files also create sessions, distinguished
-/// by `source`.
+/// Each accepted connection starts a new session row; several can be
+/// live at once (D73). Imported JSON files also create sessions,
+/// distinguished by `source`.
 public struct Session: Identifiable, Hashable, Sendable {
     public enum Source: String, Sendable, Codable {
         case live

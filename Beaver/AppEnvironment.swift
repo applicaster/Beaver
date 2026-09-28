@@ -16,12 +16,14 @@ public final class AppEnvironment {
     public let store: LogStore
     public let server: WSServer
 
-    /// Live session id — set on client connect, cleared on disconnect.
+    /// Connected devices: which connection writes which live session (D73).
     /// Drives where inbound events get appended.
-    public var currentSessionId: Int64?
+    public var live = LiveDevices()
 
-    /// Session id the user is *viewing*. Defaults to `currentSessionId`,
-    /// but can point at any past session via the Sessions sidebar.
+    public func isLive(_ sessionId: Int64?) -> Bool { live.isLive(sessionId) }
+
+    /// Session id the user is *viewing*: a device from the toolbar device
+    /// menu, or any past session via the Sessions sidebar.
     ///
     /// Switching starts Network and Storages at their defaults and drops
     /// the selection, as rebuilding their view models always did — the
@@ -51,11 +53,12 @@ public final class AppEnvironment {
     /// zero, so it is not kept accurate as more requests arrive.
     public var viewingNetworkCount: Int = 0
 
-    /// Commands the connected SDK exposes (from its `cmdlist` reply).
-    /// Refreshed automatically on connect; cleared on disconnect.
-    /// Merged with `CommandRegistry` for syntax help in the
-    /// command-bar popover.
-    public var availableCommands: [CommandHint] = []
+    /// Commands the viewed device's SDK exposes (from its `cmdlist`
+    /// reply). Requested on connect; gone on disconnect. Merged with
+    /// `CommandRegistry` for syntax help in the command-bar popover.
+    public var availableCommands: [CommandHint] {
+        viewingSessionId.flatMap { live.commands[$0] } ?? []
+    }
 
     /// Mirror of the active `LogFeedViewModel.filter`. The Log-feed
     /// view keeps this in sync via an `.onChange` modifier so the
@@ -94,21 +97,22 @@ public final class AppEnvironment {
         self.server = server
     }
 
-    /// Called when the WebSocket transitions to `.clientConnected`
-    /// and a new session row is created in the store.
+    /// Called when a connection opens and its session row is created.
     ///
-    /// Always shows the new session, even over a past or imported one
-    /// the user opened: a device that connects is what they want to see.
-    public func didConnectSession(_ id: Int64) {
-        currentSessionId = id
-        viewingSessionId = id
+    /// Shows the new device over a past or imported session the user
+    /// opened, but not over another live device (D73): that one stays,
+    /// and the new one waits in the device menu.
+    public func didConnect(_ connection: UUID, session: Int64) {
+        if live.connect(connection, session: session, viewing: viewingSessionId) {
+            viewingSessionId = session
+        }
     }
 
-    public func didDisconnectSession() {
-        currentSessionId = nil
-        // viewingSessionId stays — the user can keep reading the now-ended
-        // session.
-        availableCommands = []
+    /// viewingSessionId stays — the user can keep reading the now-ended
+    /// session. Returns the session that ended.
+    @discardableResult
+    public func didDisconnect(_ connection: UUID) -> Int64? {
+        live.disconnect(connection)
     }
 
     /// Re-query the event count for the viewing session. Called on
@@ -124,5 +128,18 @@ public final class AppEnvironment {
         let count = (try? await store.eventCount(sessionId: sid, filter: .none)) ?? 0
         viewingEventCount = count
         viewingNetworkCount = (try? await store.networkEntryCount(sessionId: sid)) ?? 0
+    }
+}
+
+extension AppEnvironment: DeviceLink {
+    /// Sends to the connection that writes `sessionId`; no-op once it's gone.
+    nonisolated public func send(command: String, to sessionId: Int64) async {
+        guard let connection = await MainActor.run(body: { self.live.connection(for: sessionId) }) else { return }
+        await server.send(command: command, to: connection)
+    }
+
+    nonisolated public func disconnect(_ sessionId: Int64) async {
+        guard let connection = await MainActor.run(body: { self.live.connection(for: sessionId) }) else { return }
+        await server.disconnect(connection)
     }
 }

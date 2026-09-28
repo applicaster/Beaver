@@ -7,7 +7,8 @@ import Foundation
 
 /// Drives the bottom command bar (D9). Holds the current input text and
 /// an in-memory history of previously-sent commands. On submit, dispatches
-/// to `WSServer.send(command:)` and pushes the command onto history.
+/// to the viewed device via `DeviceLink.send(command:to:)` and pushes the
+/// command onto history.
 ///
 /// Persistent on-disk history + autocomplete from `cmdlist` are tracked
 /// for a follow-up pass. For now: in-memory ring buffer.
@@ -24,23 +25,23 @@ final class CommandBarViewModel {
     /// nil means "user is typing fresh input".
     private var historyCursor: Int?
 
-    private let server: WSServer
+    private let device: any DeviceLink
     private let historyLimit = 50
 
-    init(server: WSServer) {
-        self.server = server
+    init(device: any DeviceLink) {
+        self.device = device
     }
 
     // MARK: - Send
 
-    func submit() {
+    func submit(to sessionId: Int64?) {
         let command = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !command.isEmpty else { return }
+        guard !command.isEmpty, let sessionId else { return }
         remember(command)
 
-        // Send via the server.
-        Task { [server, command] in
-            await server.send(command: command)
+        // Send to that session's device.
+        Task { [device, command] in
+            await device.send(command: command, to: sessionId)
         }
 
         // Reset input + cursor.

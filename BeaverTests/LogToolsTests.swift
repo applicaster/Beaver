@@ -17,7 +17,7 @@ struct LogToolsTests {
             (.info, "player.core", "", "play"),
         ])
         let ids = try await store.eventPage(sessionId: s.id, filter: .none, limit: 10, newestFirst: false).events.map(\.id)
-        return (makeContext(store, ui: HostSnapshot(liveSessionId: s.id)), s.id, ids)
+        return (makeContext(store, ui: HostSnapshot(liveSessionIds: [s.id])), s.id, ids)
     }
 
     @Test("Facets: levels, subsystems, categories, under the filter")
@@ -120,7 +120,7 @@ struct LogToolsTests {
             (.info, "com.app.auth", "", "with small data"),
         ], data: smallData)
 
-        let ctx = makeContext(store, ui: HostSnapshot(liveSessionId: s.id))
+        let ctx = makeContext(store, ui: HostSnapshot(liveSessionIds: [s.id]))
         let r = try await LogTools.query.run(ToolArguments([
             "includeData": true, "order": "oldest"
         ]), ctx)
@@ -153,7 +153,7 @@ struct LogToolsTests {
         }
         try await seed(store, session: s.id, events)
 
-        let ctx = makeContext(store, ui: HostSnapshot(liveSessionId: s.id))
+        let ctx = makeContext(store, ui: HostSnapshot(liveSessionIds: [s.id]))
         let r = try await LogTools.facets.run(ToolArguments([:]), ctx)
 
         let subsystemsArray = r.structured["subsystems"]?.array ?? []
@@ -201,7 +201,7 @@ struct LogToolsTests {
         let store = try LogStore(source: .inMemory)
         let s = try await store.createSession(source: .live)
         try await seed(store, session: s.id, [(.info, "a", "", "before")])
-        let ctx = makeContext(store, ui: HostSnapshot(liveSessionId: s.id))
+        let ctx = makeContext(store, ui: HostSnapshot(liveSessionIds: [s.id]))
         Task {
             try await Task.sleep(for: .milliseconds(300))
             try await seed(store, session: s.id, [(.info, "a", "", "noise"), (.error, "a", "", "App started")])
@@ -218,7 +218,7 @@ struct LogToolsTests {
         let store = try LogStore(source: .inMemory)
         let s = try await store.createSession(source: .live)
         try await seed(store, session: s.id, [(.info, "a", "", "before")])
-        let ctx = makeContext(store, ui: HostSnapshot(liveSessionId: s.id))
+        let ctx = makeContext(store, ui: HostSnapshot(liveSessionIds: [s.id]))
         _ = Task {
             try await Task.sleep(for: .milliseconds(300))
             try await seed(store, session: s.id, [(.error, "a", "", "App started")])
@@ -272,7 +272,7 @@ struct LogToolsTests {
             events.append((.info, "a", "", "match \(i)"))
         }
         try await seed(store, session: s.id, events)
-        let ctx = makeContext(store, ui: HostSnapshot(liveSessionId: s.id))
+        let ctx = makeContext(store, ui: HostSnapshot(liveSessionIds: [s.id]))
         let r = try await LogTools.wait.run(ToolArguments(["afterId": .number(0), "limit": 50]), ctx)
         #expect(r.structured["timedOut"] == false)
         #expect(r.structured["total"] == 60)

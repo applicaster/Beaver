@@ -11,8 +11,8 @@ struct StatusToolsTests {
         let store = try LogStore(source: .inMemory)
         let s = try await store.createSession(source: .live)
         try await seed(store, session: s.id, [(.info, "a", "", "x")])
-        let ctx = makeContext(store, ui: HostSnapshot(serverState: "clientConnected", deviceConnected: true,
-                                                      liveSessionId: s.id, viewingSessionId: s.id))
+        let ctx = makeContext(store, ui: HostSnapshot(serverState: "clientConnected",
+                                                      liveSessionIds: [s.id], viewingSessionId: s.id))
         let r = try await StatusTools.status.run(ToolArguments(), ctx)
         #expect(r.summary.hasPrefix("A device is connected"))
         #expect(r.structured["devices"]?.array?.count == 1)
@@ -50,7 +50,7 @@ struct StatusToolsTests {
         let store = try LogStore(source: .inMemory)
         let orphaned = try await store.createSession(source: .live)
         let current = try await store.createSession(source: .live)
-        let ctx = makeContext(store, ui: HostSnapshot(liveSessionId: current.id))
+        let ctx = makeContext(store, ui: HostSnapshot(liveSessionIds: [current.id]))
         let r = try await StatusTools.sessionsList.run(ToolArguments(), ctx)
         let rows = try #require(r.structured["sessions"]?.array)
         let byId = Dictionary(uniqueKeysWithValues: rows.compactMap { row in row["id"]?.int64.map { ($0, row) } })
