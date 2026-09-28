@@ -168,7 +168,14 @@ struct BeaverApp: App {
                         await env.send(command: "storage.list", to: session.id)
                     }
                 case .frame(let connection, let frame):
-                    guard let sessionId = env.live.session(for: connection) else { continue }
+                    guard let sessionId = env.live.session(for: connection) else {
+                        // D75: an MCP reply still reaches its request while a
+                        // deleted live session is being replaced.
+                        if case .success(.mcp(let message)) = ProtocolDecoder.decode(frame) {
+                            await env.mcpClients[connection]?.receive(message)
+                        }
+                        continue
+                    }
                     await Self.handleInbound(frame: frame, connection: connection, sessionId: sessionId, env: env)
                 case .disconnected(let connection):
                     await env.mcpClients.removeValue(forKey: connection)?.close()

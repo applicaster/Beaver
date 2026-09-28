@@ -124,4 +124,12 @@ extension AppEnvironment: AgentUI {
     nonisolated public func setDefaultDevice(_ device: DefaultDevice?) async {
         await MainActor.run { defaultDevice = device }
     }
+
+    /// The device popover's toggle: set it, and say so in the Agent panel.
+    public func setDefaultDeviceByUser(_ device: DefaultDevice?, name: String, sessionId: Int64) {
+        defaultDevice = device
+        let text = device == nil ? "You cleared the default device for agents"
+                                 : "You made \(name) the default device for agents"
+        Task { await AgentJournal(store: store).post(.system, text, sessionId: sessionId) }
+    }
 }

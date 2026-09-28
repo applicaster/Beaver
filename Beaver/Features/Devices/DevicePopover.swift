@@ -138,7 +138,9 @@ struct DevicePopover: View {
 
     private func reload() async {
         load = .loading
-        load = await ToolboxLoad.fetch(from: env, sessionId: session.id)
+        let fetched = await ToolboxLoad.fetch(from: env, sessionId: session.id)
+        guard !Task.isCancelled else { return }
+        load = fetched
     }
 }
 

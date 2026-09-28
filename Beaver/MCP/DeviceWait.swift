@@ -54,9 +54,10 @@ struct WaitSegment: Sendable {
 }
 
 /// Follows one device across reconnects (D66). With several devices (D73)
-/// a new live session continues the device when its fingerprint matches;
-/// when either fingerprint is still unknown, only if it is the one session
-/// that came up since the last look.
+/// a new live session continues the device when its device id matches
+/// (D77); a different known device id is another device. Without device
+/// ids, the fingerprint decides as a fallback; when either fingerprint is
+/// still unknown, only the one session that came up since the last look.
 // ponytail: the fingerprint heuristic is now the fallback for SDKs without a
 // client handshake (D77). A session whose handshake lands after the 250 ms
 // poll that sees it appear is judged by fingerprint on that poll.
