@@ -14,6 +14,13 @@ When releasing:
 
 ## [Unreleased]
 
+### Added
+- Several devices can be connected at once. The device menu on the left of
+  the toolbar switches between them and shows recent sessions; a device that
+  connects doesn't take the window while you're looking at another live one.
+- Agents: `beaver_status` lists every connected device; with more than one,
+  `commands_send`, `commands_list` and storage changes take `deviceId`.
+
 ### Fixed
 - A device that connects is shown at once, even if a past or imported
   session was open — before, you had to pick it in Sessions by hand.

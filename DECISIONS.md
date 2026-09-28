@@ -53,7 +53,7 @@ scroll position), not the full event set.
 
 ## D2. Connections: one client at a time
 
-**Status:** Accepted (2026-05-15)
+**Status:** Superseded by D73 (2026-09-28)
 
 **Decision.** The WebSocket listener accepts a single active client. While a
 client is connected, additional connection attempts are rejected with a
@@ -2385,6 +2385,7 @@ won't decode, and the feed starts unfiltered once.
   breaking change for agents).
 - **To change:** lifting D2 changes `WSServer` and session creation;
   the tool API stays as is.
+- **Done:** D73 lifted D2; the tool API stayed as is.
 
 ---
 
@@ -2560,3 +2561,22 @@ won't decode, and the feed starts unfiltered once.
 - **To change:** `ToolInput.fileURL` and the checks at the top of
   `SessionTools.exportFile`.
 
+---
+
+## D73. Several devices at once
+
+**Status:** Accepted (2026-09-28). Spec: plans/2026-09-28-multi-device-design.md.
+
+- **Decision:** the WebSocket listener keeps every connection; each gets its
+  own live session. The live session id is the device's identity: the
+  toolbar device menu sets `viewingSessionId`, commands go to the viewed
+  session's connection, and MCP's `deviceId` is that id as a string.
+- **Why:** the user debugs several apps side by side, like zapp-support's
+  emitter switcher. The session was already the unit of viewing, so no second
+  "selected device" state.
+- **A new device** takes the window only when the viewed session isn't live.
+- **Following a restart (D66)** with several devices: same fingerprint (app,
+  model, platform), else the one session that just came up. Two identical
+  builds look alike until the SDK sends a device id.
+- **Alternatives:** a separate selected-device state (two states to sync); a
+  merged feed (rejected in D2).

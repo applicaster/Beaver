@@ -73,8 +73,8 @@ this document gets updated.
                                   ▼
 ┌──────────────────────────────────────────────────────────────────────┐
 │                     WSServer (actor, Network.fwk)                    │
-│   • start(port:)   • accept(client) (single-client policy from D2)   │
-│   • send(command:) • inbound: AsyncStream<Inbound>                   │
+│   • start(port:)   • accept(clients) (several at once, D73)          │
+│   • send(command:to:) • inbound: AsyncStream<Inbound>                │
 └──────────────────────────────────────────────────────────────────────┘
                                   ▲
                                   │  WebSocket frames (mobile SDK)
@@ -295,17 +295,11 @@ actor.
 
 Built on `Network.framework` (`NWListener`, `NWProtocolWebSocket`).
 
-**Single-client policy (D2).**
-```swift
-actor WSServer {
-  private var listener: NWListener?
-  private var current: NWConnection?
-  let inbound: AsyncStream<Inbound>  // .connected, .frame(Data), .disconnected
-
-  // New connection while current != nil → cancel with close code 1008
-  // ("policy violation") plus a short reason payload.
-}
-```
+**Several clients (D73).** `WSServer` keeps `[UUID: NWConnection]` and tags
+every `Inbound` item with the connection's id. `AppEnvironment.live`
+(`LiveDevices`) maps each connection to its live session; frames are written
+there, and `AppEnvironment.send(command:to:)` routes a command to the
+connection of a session. The toolbar device menu switches `viewingSessionId`.
 
 **IPv4 + IPv6.** Today's listener forces IPv4. We accept both; the
 "Copy URL" command picks the best available address (IPv6 if reachable,
@@ -524,7 +518,7 @@ An MCP server inside the app lets AI agents read what Beaver collected
         ► MCPServer (JSON-RPC, stateless) ► BeaverTools (MCPTool values)
         ► ToolContext { LogStore, AgentUI (AppEnvironment: window state, show(UIChange)), DeviceLink (WSServer), Watches }
 
-Actions reach the device through `DeviceLink` (`WSServer.send(command:)`).
+Actions reach a device through `DeviceLink` (`AppEnvironment.send(command:to:)`, which picks the connection of that live session, D73).
 Waits follow the device across a reconnect (`DeviceWait.swift`). Notes,
 watches firing and the device dropping after a command are journal rows;
 the app reads new rows for toasts and the Dock badge, and `AgentNotifier`
