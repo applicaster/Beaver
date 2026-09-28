@@ -28,11 +28,14 @@ When releasing:
   (`"12"`); `deviceId: "current"` still works while one device is
   connected.
 - **Scheme Generator.** A new "Tools" section in the sidebar builds deep
-  links into a Zapp app, as zapp-support's Scheme Generator does: mobile
-  (`myapp://open?…`, `myapp://present?…`) or web (`index.html?…`), with
-  the Screen Type, Feed Content, Direct Screen and Present templates,
-  optional state and title, Copy and a QR code to scan with the device.
-- Agents: new tool `scheme_build` builds the same links, fills the Scheme
+  links into a Zapp app: open a screen or a feed entry, present a feed, a
+  web page or another layout, X-Ray (open the logger, connect the device
+  to this Beaver, a remote assistance PIN, share or export logs, logger
+  settings), reset the device ID, external account, or any plugin host —
+  with extra parameters, Copy and a QR code to scan with the device. The
+  app's own scheme comes from the active session's storage.
+- Agents: new tool `scheme_build` builds the same links — with the
+  connected app's own scheme, read from its storage, unless given — fills the Scheme
   Generator form on screen (`show: true`, in the background), copies it to
   the clipboard (`copy: true`) and saves a QR code (`qrFile`).
   `ui_show(tab: "schemes")` opens the tab and `ui_state` returns the form
