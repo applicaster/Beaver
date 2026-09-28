@@ -38,6 +38,8 @@ struct StorageToolsTests {
         async throws -> (LogStore, ToolContext, FakeDevice) {
         let store = try LogStore(source: .inMemory)
         let s = try await store.createSession(source: .live)
+        try await store.setSessionDeviceInfo(id: s.id, appName: "Alpha", appVersion: nil, deviceModel: nil,
+                                             platform: nil, osVersion: nil)
         let app = FakeStorageApp(store: store, sessionId: s.id, applies: applies, answers: answers)
         let device = FakeDevice { await app.handle($0) }
         let ui = HostSnapshot(liveSessionIds: [s.id], commandsBySession: [s.id: commands])
@@ -51,7 +53,10 @@ struct StorageToolsTests {
             ToolArguments(["layer": "local", "key": "onboardingDone", "value": "false"]), ctx)
         #expect(device.sent == ["storage.local.set onboardingDone false", "storage.list"])
         #expect(r.structured["outcome"] == "applied")
-        #expect(r.summary.hasPrefix("Set local/applicaster.v2/onboardingDone = false: applied"))
+        #expect(r.summary.hasPrefix("Set local/applicaster.v2/onboardingDone = false on Alpha: applied"))
+        let live = try #require(r.structured["sessionId"]?.int64)
+        #expect(r.next.contains { $0.hasPrefix("logs_wait(sessionId: \(live), afterId: ") })
+        #expect(r.next.contains { $0.hasPrefix("storage_snapshot(sessionId: \(live), ") })
     }
 
     @Test("A JSON value is sent compact and matched by content")
@@ -101,6 +106,7 @@ struct StorageToolsTests {
         let (_, ctx, _) = try await fixture(applies: false)
         let r = try await StorageTools.set.run(ToolArguments(["layer": "local", "key": "k", "value": "v"]), ctx)
         #expect(r.structured["outcome"] == "notApplied")
+        #expect(r.next.first?.hasPrefix("logs_query(sessionId: ") == true)
     }
 
     @Test("The app never answered: noAnswer")
@@ -137,7 +143,8 @@ struct StorageToolsTests {
         let (_, ctx, device) = try await fixture()
         let r = try await StorageTools.snapshot.run(ToolArguments(["layer": "local"]), ctx)
         #expect(device.sent == ["storage.list"])
-        #expect(r.summary.contains("Fresh from the app."))
+        #expect(r.summary.contains("Fresh from Alpha."))
+        #expect(r.next.contains { $0.contains("logs_query(sessionId: ") })
         #expect(r.structured["layers"]?["local"]?["data"]?["applicaster.v2"]?["onboardingDone"] == "true")
         let stored = try await StorageTools.snapshot.run(ToolArguments(["layer": "local", "refresh": false]), ctx)
         #expect(stored.summary.contains("refresh: false"))

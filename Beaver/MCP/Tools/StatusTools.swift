@@ -20,10 +20,12 @@ enum StatusTools {
         var devices: [JSON] = []
         var described: [String] = []
         var lines: [String] = []
+        // The one session device tools use, not every session with its uid.
+        let defaultId = host.defaultDevice?.liveSession(in: sessions, live: host.liveSessionIds)
         for live in host.liveSessionIds {
             guard let session = sessions.first(where: { $0.id == live }) else { continue }
             let latest = try await ctx.store.latestEventId(sessionId: live)
-            let isDefault = host.defaultDevice?.matches(session) ?? false
+            let isDefault = live == defaultId
             devices.append([
                 "id": .string(String(live)),
                 "app": JSON(session.appName), "appVersion": JSON(session.appVersion),
@@ -66,8 +68,7 @@ enum StatusTools {
         let defaultNote: String
         if let preferred = host.defaultDevice {
             let described = try await ctx.describeDefault(preferred)
-            let connected = preferred.liveSession(in: sessions, live: host.liveSessionIds) != nil
-            defaultNote = " Default device: " + described + (connected ? "." : " (not connected).")
+            defaultNote = " Default device: " + described + (defaultId != nil ? "." : " (not connected).")
         } else {
             defaultNote = ""
         }

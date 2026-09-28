@@ -69,8 +69,8 @@ enum StorageTools {
             body: blocks.joined(separator: "\n\n"),
             structured: ["sessionId": JSON(s.id), "layers": .object(out)],
             next: found > 0
-                ? ["storage_set(layer: \"local\", key: \"…\", value: \"…\") to change a value",
-                   "logs_query(filter: {search: \"storage\"}) for storage-related logs"]
+                ? ["storage_set(" + (isLive ? "deviceId: \"\(s.id)\", " : "") + "layer: \"local\", key: \"…\", value: \"…\") to change a value",
+                   "logs_query(sessionId: \(s.id), filter: {search: \"storage\"}) for storage-related logs"]
                 : (isLive ? ["storage_snapshot(timeoutMs: 15000) to give the app longer"]
                           : ["beaver_status() — storage arrives while the app is connected"]),
             sessionId: s.id
@@ -92,9 +92,10 @@ enum StorageTools {
                                                  store: ctx.store, device: ctx.device)
         if fresh.isEmpty { return " The app didn't answer within \(timeout) ms; this is the last stored snapshot." }
         let missing = layers.filter { !fresh.contains($0) }
+        let app = StatusTools.describeDevice(s.session)
         return missing.isEmpty
-            ? " Fresh from the app."
-            : " Fresh from the app, which sent no \(missing.map(\.displayName).joined(separator: ", ")) layer."
+            ? " Fresh from \(app)."
+            : " Fresh from \(app), which sent no \(missing.map(\.displayName).joined(separator: ", ")) layer."
     }
 
     static let set = MCPTool(
@@ -183,11 +184,13 @@ enum StorageTools {
         }
         let command = value.map { StorageCommand.set(layer, key: key, value: $0, parent: parent) }
             ?? StorageCommand.delete(layer, key: key, parent: parent)
+        let target = try await ctx.describeTarget(live, args, host)
+        let before = try await ctx.store.latestEventId(sessionId: live) ?? 0
         let outcome = await StorageCommand.sendAndVerify(command, layer: layer, parent: parent, key: key,
                                                          expected: value, sessionId: live,
                                                          store: ctx.store, device: ctx.device)
         let path = "\(layer.wireKey)/\(parent ?? StorageCommand.defaultNamespace)/\(key)"
-        let request = value.map { "Set \(path) = \($0)" } ?? "Delete \(path)"
+        let request = (value.map { "Set \(path) = \($0)" } ?? "Delete \(path)") + " on \(target)"
         let summary = switch outcome {
         case .applied: "\(request): applied (Beaver re-read the app's storage and saw it)."
         case .notApplied: "\(request): not applied — the app sent its storage back without the change."
@@ -199,9 +202,10 @@ enum StorageTools {
                          "layer": .string(layer.wireKey), "namespace": .string(parent ?? StorageCommand.defaultNamespace),
                          "key": .string(key), "value": JSON(value), "sessionId": JSON(live)],
             next: outcome == .applied
-                ? ["storage_snapshot(layer: \"\(layer.wireKey)\")",
-                   "logs_wait(filter: {search: \"\(key)\"}) for what the app does with it"]
-                : ["logs_query(filter: {search: \"\(key)\"}, since: \"1m\") for the app's own message about it",
+                ? ["storage_snapshot(sessionId: \(live), layer: \"\(layer.wireKey)\")",
+                   "logs_wait(sessionId: \(live), afterId: \(before), filter: {search: \"\(key)\"}, timeoutMs: 15000) "
+                       + "for what the app does with it (after a restart, beaver_status() shows its new session)"]
+                : ["logs_query(sessionId: \(live), filter: {search: \"\(key)\"}, since: \"1m\") for the app's own message about it",
                    "beaver_status()"],
             sessionId: live
         )
