@@ -583,41 +583,45 @@ struct MainWindow: View {
 ///     [icon] ● Miami Heat
 ///            11.0.1 · iPhone 15 Pro Max · iOS 26.4.2
 ///
-/// Right-click → "Copy device fingerprint" pastes the same info
-/// as a single line into the clipboard for bug reports.
+/// Click → the device popover (app, Disconnect, default for agents,
+/// toolboxes); right-click → Copy device fingerprint.
 private struct ToolbarDeviceBadge: View {
     let session: Session
     let isLive: Bool
     @Environment(ToastCenter.self) private var toasts
+    @State private var showingDetails = false
 
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "iphone.gen3")
-                .font(.system(size: 14))
-                .foregroundStyle(.secondary)
-            VStack(alignment: .leading, spacing: 1) {
-                HStack(spacing: 4) {
-                    if isLive {
-                        Circle().fill(.green).frame(width: 6, height: 6)
-                    }
-                    Text(Self.title(session))
-                        .font(.system(size: 12, weight: .semibold))
-                        .lineLimit(1)
-                }
-                Text(Self.subtitle(session))
-                    .font(.system(size: 10))
+        Button { showingDetails.toggle() } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "iphone.gen3")
+                    .font(.system(size: 14))
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack(spacing: 4) {
+                        if isLive {
+                            Circle().fill(.green).frame(width: 6, height: 6)
+                        }
+                        Text(Self.title(session))
+                            .font(.system(size: 12, weight: .semibold))
+                            .lineLimit(1)
+                    }
+                    Text(Self.subtitle(session))
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
             }
+            // Matches ConnectionIndicator's chrome — same padding, same
+            // solid background — so the two toolbar clouds read as
+            // siblings at different ends of the bar.
+            .padding(.horizontal, 14)
+            .padding(.vertical, 5)
+            .background(Capsule().fill(Color(.controlBackgroundColor)))
+            .contentShape(Capsule())
         }
-        // Matches ConnectionIndicator's chrome — same padding, same
-        // solid background — so the two toolbar clouds read as
-        // siblings at different ends of the bar.
-        .padding(.horizontal, 14)
-        .padding(.vertical, 5)
-        .background(Capsule().fill(Color(.controlBackgroundColor)))
-        .contentShape(Capsule())
+        .buttonStyle(.plain)
         .help(Self.fingerprint(session))
         .contextMenu {
             Button("Copy device fingerprint") {
@@ -625,6 +629,9 @@ private struct ToolbarDeviceBadge: View {
                 NSPasteboard.general.setString(Self.fingerprint(session), forType: .string)
                 toasts.success("Copied device fingerprint")
             }
+        }
+        .popover(isPresented: $showingDetails, arrowEdge: .bottom) {
+            DevicePopover(session: session, isLive: isLive)
         }
     }
 
@@ -685,7 +692,8 @@ private struct DeviceSwitcher: View {
                     Text("No device connected")
                 } else {
                     ForEach(sections.connected) { s in
-                        choice(s, Self.item(s, suffix: Self.detail(s)))
+                        choice(s, Self.item(s, suffix: Self.detail(s))
+                            + (env.defaultDevice?.matches(s) == true ? " — default for agents" : ""))
                     }
                 }
             }
