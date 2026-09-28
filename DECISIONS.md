@@ -2560,3 +2560,27 @@ won't decode, and the feed starts unfiltered once.
 - **To change:** `ToolInput.fileURL` and the checks at the top of
   `SessionTools.exportFile`.
 
+
+## D73. Scheme Generator: zapp-support's links, one form in the window state
+
+**Status:** Accepted (2026-09-28).
+
+- **What:** A "Tools" section in the sidebar holds the Scheme Generator
+  tab (`UITab.schemes`): it builds deep links into a Zapp app — mobile
+  `scheme://open?…` / `scheme://present?…` or a web `index.html?…` — with
+  a QR code. `SchemeLink` builds the URL exactly as zapp-support's
+  `xraySchemeGenerator.ts` does (URLSearchParams encoding, `btoa` for
+  `data_source` and a non-URL-safe `entry_id`); tests pin its output to
+  URLs that code produced. The form is one `SchemeLink` in
+  `AppEnvironment.schemeLink`, part of `UIState` (D54), kept across
+  session switches. One set of fields serves every template, so switching
+  template keeps what was typed. Agents use `scheme_build`: without
+  `show` it builds a fresh link and the window stays put; `show: true`
+  edits the form on screen; `copy: true` puts the URL on the clipboard
+  through `AgentUI.copyToClipboard` (tests use a fake, never the real
+  clipboard); `qrFile` saves the QR code (D72 rules).
+- **Why:** Support builds these links while looking at a device's logs;
+  both tools must give the same URL for the same fields. The form is not
+  tied to a session, so no view model: the view binds `env` directly.
+- **To change:** `SchemeLink.url` together with zapp-support's generator,
+  and the expected URLs in `SchemeToolsTests.urls`.

@@ -35,7 +35,8 @@ public struct MCPServer: Sendable {
         attention only when they must look now; if it returns notified: false, tell them and pass \
         on howToEnable. Work in the background: to point the user at something in Beaver use \
         ui_show (tab, filter, select); pass reveal: true only when they ask to see it — nothing else \
-        moves Beaver's window to the front. Every result ends with Next: suggestions. If unsure how \
+        moves Beaver's window to the front. To build a deep link into the app (the Scheme \
+        Generator) use scheme_build. Every result ends with Next: suggestions. If unsure how \
         to do something, call beaver_guide.
         """
 

@@ -12,6 +12,7 @@ final class FakeUI: AgentUI {
         var clears: [Clear] = []
         var notes: [AgentNote] = []
         var changes: [UIChange] = []
+        var copied: [String] = []
         var outcome = NotifyOutcome(notified: true)
     }
 
@@ -27,6 +28,7 @@ final class FakeUI: AgentUI {
     var clears: [Clear] { calls.withLock { $0.clears } }
     var notes: [AgentNote] { calls.withLock { $0.notes } }
     var changes: [UIChange] { calls.withLock { $0.changes } }
+    var copied: [String] { calls.withLock { $0.copied } }
     func setNotifyOutcome(_ outcome: NotifyOutcome) { calls.withLock { $0.outcome = outcome } }
 
     func snapshot() async -> HostSnapshot { value }
@@ -41,6 +43,7 @@ final class FakeUI: AgentUI {
     func notify(_ note: AgentNote) async -> NotifyOutcome {
         calls.withLock { $0.notes.append(note); return $0.outcome }
     }
+    func copyToClipboard(_ text: String) async { calls.withLock { $0.copied.append(text) } }
 }
 
 /// The app on the other end of the WebSocket. `onSend` plays its part:

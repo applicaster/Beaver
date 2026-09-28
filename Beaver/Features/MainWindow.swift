@@ -197,6 +197,11 @@ struct MainWindow: View {
                 .tag(UITab.network)
             Label("Sessions",  systemImage: "clock.arrow.circlepath")
                 .tag(UITab.sessions)
+            // Tools that don't depend on a session, apart like in zapp-support.
+            Section("Tools") {
+                Label("Scheme Generator", systemImage: "link")
+                    .tag(UITab.schemes)
+            }
         }
         .navigationTitle("Beaver")
     }
@@ -254,6 +259,8 @@ struct MainWindow: View {
                     // to do is flip to the Log feed tab.
                     env.selectedTab = .logs
                 })
+            case .schemes:
+                SchemeGeneratorView()
             }
         }
         // No explicit alignment — defaults to center, which is what

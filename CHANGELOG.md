@@ -14,6 +14,17 @@ When releasing:
 
 ## [Unreleased]
 
+### Added
+- **Scheme Generator.** A new "Tools" section in the sidebar builds deep
+  links into a Zapp app, as zapp-support's Scheme Generator does: mobile
+  (`myapp://open?…`, `myapp://present?…`) or web (`index.html?…`), with
+  the Screen Type, Feed Content, Direct Screen and Present templates,
+  optional state and title, Copy and a QR code to scan with the device.
+- Agents: new tool `scheme_build` builds the same links, fills the Scheme
+  Generator form on screen (`show: true`, in the background), copies it to
+  the clipboard (`copy: true`) and saves a QR code (`qrFile`). `ui_show(tab: "schemes")` opens the tab and
+  `ui_state` returns the form and its URL.
+
 ### Fixed
 - A device that connects is shown at once, even if a past or imported
   session was open — before, you had to pick it in Sessions by hand.

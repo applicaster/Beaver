@@ -105,6 +105,7 @@ or a release):
 | `journal_note` | Tell the user something in the Agent panel, with clickable links; `attention` also notifies |
 | `ui_state` | What Beaver's window shows: tab, session, filters, selection, whether it is in front |
 | `ui_show` | Point the window at a tab, session, filter or row — in the background unless `reveal: true` |
+| `scheme_build` | Build a deep link into a Zapp app (Scheme Generator), fill its form on screen, copy it, save its QR code |
 | `beaver_guide` | These recipes, by topic |
 
 Conventions: omitting `sessionId` means the live session, else the viewed one,
@@ -271,3 +272,25 @@ see it.
 6. An event or request hidden by the user's filter fails with the call that
    shows it. `filter: {}` shows every event, including ones the user cleared
    from view.
+
+### schemes — a deep link into the app
+
+The Scheme Generator tab builds the same links as zapp-support's. Nothing
+here needs a device or a session.
+
+1. `scheme_build(scheme: "myapp", screenType: "movie", id: "42")` —
+   `myapp://open?type=movie&id=42`. Templates: `screen-type` (default),
+   `feed-content` (`feedUrl` + `id` or `position`), `direct-screen`
+   (`screenId`), `present` (mobile only: `feedUrl`, `screenId`, `id`).
+   `mode: "web"` with `baseUrl` gives an `index.html?…` link instead.
+   Optional `state` (fullscreen, inline) and `title`.
+2. The user wants to see it or scan it: `scheme_build(show: true, …)` fills
+   the form on screen and switches to the tab, in the background; the keys
+   you pass change the form, the rest stays (`reset: true` starts empty).
+   `reveal: true` also brings Beaver forward. `ui_show(tab: "schemes")` just
+   opens the tab; `ui_state()` returns the form and its URL.
+3. The user asks to copy it: `scheme_build(copy: true, …)` puts the URL on
+   their clipboard, like the Copy button. Only when asked — it replaces
+   what they copied.
+4. `scheme_build(template: "present", feedUrl: "https://feeds.example.com/movies.json", screenId: "MOVIE_SCREEN", qrFile: "~/Downloads/movie.png")`
+   — saves the QR code to scan with the device.

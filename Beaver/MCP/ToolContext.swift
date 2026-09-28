@@ -21,6 +21,8 @@ public protocol AgentUI: Sendable {
     /// An attention note for the person (design §7.2, M28): the app decides
     /// whether a macOS notification goes out, and says why not.
     func notify(_ note: AgentNote) async -> NotifyOutcome
+    /// Puts `text` on the clipboard, like a Copy button. Takes no focus.
+    func copyToClipboard(_ text: String) async
 }
 
 public struct HostSnapshot: Sendable, Equatable {
