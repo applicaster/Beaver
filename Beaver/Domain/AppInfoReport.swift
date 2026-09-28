@@ -101,7 +101,9 @@ public struct AppInfoReport: Sendable {
             cellStyles: json[.layout].map { AppInfo.cellStyles(fromLayout: $0, known: storageCells) } ?? storageCells,
             cellStylesSource: json[.layout] != nil ? "layout.json" : "local storage cache",
             plugins: pluginList ?? AppInfo.pluginsFromStorage(leaves),
-            pluginsSource: pluginList != nil ? "plugin configurations" : "session storage namespaces",
+            // The app's own list is the build's; Zapp's file is today's and
+            // may have moved on (a plugin bumped without a rebuild).
+            pluginsSource: pluginList != nil ? "in Zapp now, may differ from the build" : "session storage namespaces",
             configs: configs,
             cms: cms,
             storageAsOf: [session?.takenAt, local?.takenAt].compactMap { $0 }.max()
