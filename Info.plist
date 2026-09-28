@@ -74,6 +74,15 @@
     <key>SUFeedURL</key>
     <string>https://applicaster.github.io/Beaver/appcast.xml</string>
 
+    <!-- Check and download updates without asking first; when one is
+         downloaded, BeaverUpdaterDelegate asks "Restart Now / Later".
+         Defaults only: a choice the user made in Sparkle's own dialog
+         wins. -->
+    <key>SUEnableAutomaticChecks</key>
+    <true/>
+    <key>SUAutomaticallyUpdate</key>
+    <true/>
+
     <!-- ── Imported types ───────────────────────────────────────── -->
     <!-- macOS declares no UTI for .har; without one, Export HAR's
          `UTType(filenameExtension:conformingTo:)` still works but the
