@@ -17,19 +17,17 @@ public actor WSServer {
     public enum State: Sendable {
         case stopped
         case listening
-        case clientConnected
+        /// `count` devices are connected (D73).
+        case clientConnected(count: Int)
         case clientDisconnected(reason: String)
         case failed(reason: String)
     }
 
-    /// A client's frames, bracketed by its connect and disconnect, in
-    /// order. One stream so the consumer opens the session before it
-    /// sees the first frame and ends it after the last one — `state`
-    /// is a separate stream and gives no ordering against frames.
+    /// Every item says which connection it came from (D73).
     public enum Inbound: Sendable, Equatable {
-        case connected
-        case frame(Data)
-        case disconnected
+        case connected(UUID)
+        case frame(UUID, Data)
+        case disconnected(UUID)
     }
 
     public nonisolated let inbound: AsyncStream<Inbound>
@@ -37,7 +35,9 @@ public actor WSServer {
 
     private let port: NWEndpoint.Port
     private var listener: NWListener?
-    private var current: NWConnection?
+    private var connections: [UUID: NWConnection] = [:]
+    /// Connections past the handshake; `State.clientConnected` counts these.
+    private var ready = Set<UUID>()
 
     /// Pending re-bind after the listener failed. `nil` when the server
     /// is either healthy or deliberately stopped.
@@ -118,8 +118,9 @@ public actor WSServer {
         retryTask?.cancel()
         retryTask = nil
         retryAttempt = 0
-        current?.cancel()
-        current = nil
+        for connection in connections.values { connection.cancel() }
+        connections = [:]
+        ready = []
         listener?.cancel()
         listener = nil
         stateContinuation.yield(.stopped)
@@ -209,106 +210,70 @@ public actor WSServer {
     }
 
     private func handleNewConnection(_ connection: NWConnection) {
-        print("[WSServer] new connection arriving (endpoint=\(connection.endpoint))")
-        if let old = current {
-            // Take-over policy: assume the previous connection is
-            // dead (TCP keepalive may not have proven it yet) and
-            // accept the new one. The single-client invariant is
-            // preserved — we just always pick "newest wins" rather
-            // than rejecting. Rationale: in our debug-tool use case
-            // a second incoming client almost always means the same
-            // device reconnected, not a competing real client.
-            print("[WSServer] replacing existing connection with the new one")
-            old.cancel()
-        }
-        current = connection
+        let id = UUID()
+        print("[WSServer] new connection \(id) (endpoint=\(connection.endpoint))")
+        connections[id] = connection
         connection.stateUpdateHandler = { [weak self] state in
-            print("[WSServer] connection state changed: \(state)")
-            Task { await self?.handleConnectionState(state, connection: connection) }
+            Task { await self?.handleConnectionState(state, id: id) }
         }
         connection.start(queue: networkQueue)
     }
 
-    private func handleConnectionState(
-        _ state: NWConnection.State,
-        connection: NWConnection
-    ) async {
-        // Guard against stale state callbacks from a connection that
-        // was already replaced by a newer one. Without this, the old
-        // connection's `.cancelled` event (from `old.cancel()` in
-        // handleNewConnection) would race in and clear `current`,
-        // wiping out the new connection's reference.
-        guard connection === current else {
-            print("[WSServer] ignoring stale state update from replaced connection: \(state)")
-            return
-        }
-        print("[WSServer] handleConnectionState: \(state)")
+    private func handleConnectionState(_ state: NWConnection.State, id: UUID) async {
+        // A connection that already failed can still report `.cancelled`.
+        guard let connection = connections[id] else { return }
+        print("[WSServer] connection \(id): \(state)")
         switch state {
         case .ready:
-            print("[WSServer] -> client ready, sending handshake")
-            let id = UUID()
-            if let payload = try? ProtocolEncoder.encodeHandshake(id: id) {
+            if let payload = try? ProtocolEncoder.encodeHandshake(id: UUID()) {
                 send(payload, on: connection)
             }
-            stateContinuation.yield(.clientConnected)
-            // Read only after `.connected` is out: a frame the client
-            // sends at once would otherwise be yielded first.
-            inboundContinuation.yield(.connected)
-            receive(on: connection)
+            ready.insert(id)
+            stateContinuation.yield(.clientConnected(count: ready.count))
+            inboundContinuation.yield(.connected(id))
+            receive(on: connection, id: id)
         case .failed(let error):
-            print("[WSServer] -> client failed: \(error)")
-            // A failed connection holds its resources — and this handler,
-            // which holds it — until cancelled.
             connection.cancel()
-            current = nil
-            stateContinuation.yield(.clientDisconnected(reason: error.localizedDescription))
-            inboundContinuation.yield(.disconnected)
+            drop(id, reason: error.localizedDescription)
         case .cancelled:
-            print("[WSServer] -> client cancelled")
-            current = nil
-            stateContinuation.yield(.clientDisconnected(reason: "cancelled"))
-            inboundContinuation.yield(.disconnected)
+            drop(id, reason: "cancelled")
         case .waiting(let error):
-            print("[WSServer] -> client waiting: \(error)")
             stateContinuation.yield(.failed(reason: "waiting: \(error.localizedDescription)"))
-        case .preparing:
-            print("[WSServer] -> client preparing")
-        case .setup:
-            print("[WSServer] -> client setup")
+        case .preparing, .setup:
+            break
         @unknown default:
-            print("[WSServer] -> client unknown state")
+            break
         }
     }
 
-    /// Yields straight from the callback: a `Task` per frame gives no
-    /// ordering guarantee, and an older storage snapshot overtaking a
-    /// newer one would win as "latest".
-    ///
-    /// Control frames (ping, pong, close) are delivered here too, even
-    /// with `autoReplyPing` answering the ping. They carry no protocol
-    /// frame, so only data messages go on to the decoder (PROTOCOL.md §1).
-    private nonisolated func receive(on connection: NWConnection) {
+    private func drop(_ id: UUID, reason: String) {
+        connections[id] = nil
+        guard ready.remove(id) != nil else { return }
+        stateContinuation.yield(ready.isEmpty
+            ? .clientDisconnected(reason: reason)
+            : .clientConnected(count: ready.count))
+        inboundContinuation.yield(.disconnected(id))
+    }
+
+    private nonisolated func receive(on connection: NWConnection, id: UUID) {
         connection.receiveMessage { [weak self] data, context, _, error in
             guard let self else { return }
             let opcode = (context?.protocolMetadata(definition: NWProtocolWebSocket.definition)
                 as? NWProtocolWebSocket.Metadata)?.opcode
             if let data, !data.isEmpty, opcode == .text || opcode == .binary {
-                self.inboundContinuation.yield(.frame(data))
+                self.inboundContinuation.yield(.frame(id, data))
             }
             if error == nil {
-                // Continue reading.
-                self.receive(on: connection)
+                self.receive(on: connection, id: id)
             }
         }
     }
 
-    // MARK: - Outbound
-
-    /// Send a command frame to the connected client. No-op if no client.
-    public func send(command: String) {
-        guard let current else { return }
-        guard let payload = try? ProtocolEncoder.encodeCommand(command) else { return }
-        send(payload, on: current)
+    /// No-op when that connection is gone.
+    public func send(command: String, to connection: UUID) {
+        guard let target = connections[connection],
+              let payload = try? ProtocolEncoder.encodeCommand(command) else { return }
+        send(payload, on: target)
     }
 
     private nonisolated func send(_ data: Data, on connection: NWConnection) {

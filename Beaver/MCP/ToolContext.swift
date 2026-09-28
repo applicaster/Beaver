@@ -67,7 +67,6 @@ public protocol DeviceLink: Sendable {
     func send(command: String) async
 }
 
-extension WSServer: DeviceLink {}
 
 /// Everything a tool handler gets.
 public struct ToolContext: Sendable {
