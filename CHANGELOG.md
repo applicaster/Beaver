@@ -51,6 +51,8 @@ When releasing:
   restarts. `beaver_status.devices` gains `default`, `uid`, `appPackage`.
   An app tool that deletes, removes, clears, kills or resets shows the
   destructive toast in the Agent panel.
+- The Agent panel's "What an agent can do" covers several connected apps,
+  the default app and each app's toolboxes.
 
 ### Changed
 - An app that restarts is recognised by its device id, so two identical builds

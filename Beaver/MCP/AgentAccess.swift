@@ -192,7 +192,7 @@ public actor AgentAccess {
         Capability(
             icon: "dot.radiowaves.left.and.right",
             title: "Know what's going on",
-            note: "Which device and app are connected, which session is live, and what you're looking at in Beaver right now.",
+            note: "Which apps are connected — several at once — and which one is the default, which sessions are live, and what you're looking at in Beaver right now.",
             example: "Use beaver: what is connected, and what am I looking at?",
             tools: ["beaver_status", "ui_state", "beaver_guide"]),
         Capability(
@@ -221,9 +221,9 @@ public actor AgentAccess {
             tools: ["commands_list", "commands_send", "logs_wait", "devices_disconnect"]),
         Capability(
             icon: "shippingbox",
-            title: "Use what the app offers beyond commands",
-            note: "List a connected app's toolboxes (storage, app, debug features, React tools…) and call one directly. Set a default app when several are connected.",
-            example: "Use beaver: what toolboxes does the app have, and read the volume from storage.",
+            title: "Use the app's toolboxes",
+            note: "See each connected app's toolboxes — storage, app, debug features, React ones — with every tool's arguments, and call a tool directly. With several apps connected, make one the default so it needn't be named each time; it stays the default when the app restarts. Deletes and kills show here as destructive. The same toolboxes are in the device popover on the toolbar.",
+            example: "Use beaver: make the iPhone app the default, list its toolboxes, and read the volume key from storage.",
             tools: ["devices_set_default", "toolboxes_list", "tools_call"]),
         Capability(
             icon: "binoculars",
