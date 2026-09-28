@@ -9,8 +9,9 @@
 import Foundation
 
 public enum DeviceMCPError: Error, Sendable, Equatable {
-    /// The app never answered `initialize`: it has no toolboxes (the
-    /// JS-only socket sink, an older SDK). Stays so until it reconnects.
+    /// The app never answered `initialize` and never sent a handshake: it
+    /// has no toolboxes (the JS-only socket sink, an older SDK). Stays so
+    /// until it reconnects or sends a handshake.
     case unsupported
     /// No answer in time. The device may still have run the call.
     case timeout
@@ -33,6 +34,7 @@ public actor DeviceMCPClient {
     private var nextId = 1
     private var waiters: [Int: CheckedContinuation<JSON, Error>] = [:]
     private var closed = false
+    private var native = false
 
     public init(setupTimeout: Duration = .seconds(5), send: @escaping @Sendable (Data) async -> Void) {
         self.setupTimeout = setupTimeout
@@ -60,6 +62,13 @@ public actor DeviceMCPClient {
         }
     }
 
+    /// The app sent a client `handshake`: a native sink, which has an MCP
+    /// server. A missed `initialize` is then retried, never latched.
+    public func markNative() {
+        native = true
+        if case .unsupported = setup { setup = .idle }
+    }
+
     /// The connection closed: every waiting call fails with `.disconnected`.
     public func close() {
         closed = true
@@ -81,11 +90,14 @@ public actor DeviceMCPClient {
         do {
             try await task.value
             setup = .ready
-        } catch DeviceMCPError.disconnected {
-            throw DeviceMCPError.disconnected
-        } catch {
+        } catch DeviceMCPError.timeout where !native {
+            // Silence from a sink that never sent a handshake: the JS-only
+            // sink has no MCP server, so don't ask again.
             setup = .unsupported
             throw DeviceMCPError.unsupported
+        } catch {
+            setup = .idle
+            throw error
         }
     }
 

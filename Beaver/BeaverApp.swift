@@ -283,7 +283,12 @@ struct BeaverApp: App {
         case .success(.network(let capture)):
             try? await env.store.recordNetworkEntry(capture, sessionId: sessionId)
         case .success(.clientHandshake(let handshake)):
-            await MainActor.run { env.live.setHandshake(handshake, for: connection) }
+            let client = await MainActor.run {
+                env.live.setHandshake(handshake, for: connection)
+                return env.mcpClients[connection]
+            }
+            // Only native sinks send a handshake, and they serve MCP (D75).
+            await client?.markNative()
             try? await env.store.applyHandshake(handshake, to: sessionId)
         case .success(.mcp(let message)):
             // D75: an answer to Beaver's request; not a log line.

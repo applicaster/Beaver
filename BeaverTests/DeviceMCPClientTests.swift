@@ -122,6 +122,47 @@ struct DeviceMCPClientTests {
         #expect(device.methods == ["initialize"])
     }
 
+    @Test("A native app that misses initialize times out, and the next request tries initialize again")
+    func nativeTimeoutRetries() async {
+        let (client, device) = connect { _, _ in nil }
+        await client.markNative()
+        for _ in 0..<2 {
+            await #expect(throws: DeviceMCPError.timeout) {
+                try await client.request("tools/list", timeout: .seconds(1))
+            }
+        }
+        #expect(device.methods == ["initialize", "initialize"])
+    }
+
+    @Test("A JSON-RPC error to initialize is .rpc, not .unsupported, and the next request retries")
+    func initializeRPCErrorRetries() async throws {
+        let attempts = Mutex(0)
+        let (client, device) = connect { method, _ in
+            guard method == "initialize" else { return Self.tools }
+            let n = attempts.withLock { $0 += 1; return $0 }
+            return n == 1 ? ["error": ["code": -32603, "message": "not ready"]] : [:]
+        }
+        await #expect(throws: DeviceMCPError.rpc(code: -32603, message: "not ready")) {
+            try await client.request("tools/list", timeout: .seconds(1))
+        }
+        let tools = try await client.request("tools/list", timeout: .seconds(1))
+        #expect(tools == Self.tools)
+        #expect(device.methods == ["initialize", "initialize", "notifications/initialized", "tools/list"])
+    }
+
+    @Test("A handshake after the unsupported latch clears it")
+    func markNativeClearsLatch() async {
+        let (client, device) = connect { _, _ in nil }
+        await #expect(throws: DeviceMCPError.unsupported) {
+            try await client.request("tools/list", timeout: .seconds(1))
+        }
+        await client.markNative()
+        await #expect(throws: DeviceMCPError.timeout) {
+            try await client.request("tools/list", timeout: .seconds(1))
+        }
+        #expect(device.methods == ["initialize", "initialize"])
+    }
+
     @Test("Closing fails the waiting call with .disconnected, and later ones too")
     func closeWhileWaiting() async throws {
         let (client, _) = connect { method, _ in method == "initialize" ? [:] : nil }
