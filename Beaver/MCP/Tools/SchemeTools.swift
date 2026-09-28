@@ -96,12 +96,13 @@ enum SchemeTools {
                 if let schemes, let first = schemes.first {
                     link.scheme = first
                     schemeFrom = session.id
-                    notes.append("scheme \(first) from session \(session.label)'s storage"
-                        + (schemes.count > 1 ? " (also \(schemes.dropFirst().joined(separator: ", ")))" : ""))
+                    var note = "scheme \(first) from session \(session.label)'s storage"
+                    if schemes.count > 1 { note += " (also \(schemes.dropFirst().joined(separator: ", ")))" }
+                    notes.append(note)
                 } else if link.scheme == SchemeLink().scheme {
-                    notes.append("myapp is a placeholder: session \(session.label) "
-                        + (schemes == nil ? "has no storage yet (storage_snapshot() asks a connected app)"
-                                          : "storage has no applicaster.v2.urlScheme") + ", pass scheme")
+                    let why = schemes == nil ? "has no storage yet (storage_snapshot() asks a connected app)"
+                        : "storage has no applicaster.v2.urlScheme"
+                    notes.append("myapp is a placeholder: session \(session.label) \(why), pass scheme")
                 }
             } else if link.scheme == SchemeLink().scheme {
                 notes.append("myapp is a placeholder: no session to read the app's scheme from, pass scheme")
@@ -220,20 +221,26 @@ enum SchemeTools {
             o["schemeFromSessionId"] = JSON(schemeFrom)
             structured = .object(o)
         }
-        let lead = reveal ? "Brought Beaver forward on the Scheme Generator: "
-            : show ? "Filled the Scheme Generator in the background, nothing took focus: " : "Link: "
-        return ToolResult(
-            summary: lead + url + (notes.isEmpty ? "" : " (" + notes.joined(separator: "; ") + ")")
-                + (copy ? ". Copied to the clipboard" : "")
-                + (qrPath.map { ". QR code saved to \($0)" } ?? ""),
-            body: fields(link).map { "\($0.0): \($0.1)" }.joined(separator: "\n"),
-            structured: structured,
-            next: show
-                ? (reveal ? ["ui_state() to check what the user sees"] : ["scheme_build(reveal: true) when the user asks to see it"])
-                : ["scheme_build(show: true, …) to put it in the Scheme Generator for the user",
-                   "scheme_build(qrFile: \"~/Downloads/link.png\", …) for a QR code to scan"],
-            sessionId: schemeFrom
-        )
+        // Built step by step: CI's compiler times out on it as one expression.
+        var summary: String
+        let next: [String]
+        if reveal {
+            summary = "Brought Beaver forward on the Scheme Generator: "
+            next = ["ui_state() to check what the user sees"]
+        } else if show {
+            summary = "Filled the Scheme Generator in the background, nothing took focus: "
+            next = ["scheme_build(reveal: true) when the user asks to see it"]
+        } else {
+            summary = "Link: "
+            next = ["scheme_build(show: true, …) to put it in the Scheme Generator for the user",
+                    "scheme_build(qrFile: \"~/Downloads/link.png\", …) for a QR code to scan"]
+        }
+        summary += url
+        if !notes.isEmpty { summary += " (\(notes.joined(separator: "; ")))" }
+        if copy { summary += ". Copied to the clipboard" }
+        if let qrPath { summary += ". QR code saved to \(qrPath)" }
+        let body = fields(link).map { "\($0.0): \($0.1)" }.joined(separator: "\n")
+        return ToolResult(summary: summary, body: body, structured: structured, next: next, sessionId: schemeFrom)
     }
 
     // MARK: - Inputs
