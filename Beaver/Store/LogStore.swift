@@ -83,6 +83,18 @@ public actor LogStore {
         }
 
         try Schema.migrator().migrate(self.dbQueue)
+
+        // A live session is ended when its device disconnects. One still
+        // open now was left by a quit or a crash: no device writes to it
+        // any more, so end it at its last event (else its start). Runs
+        // before any device can connect to this store.
+        try dbQueue.write { db in
+            try db.execute(sql: """
+                UPDATE session SET ended_at = COALESCE(
+                    (SELECT MAX(timestamp_ms) FROM event WHERE event.session_id = session.id), started_at)
+                WHERE source = 'live' AND ended_at IS NULL
+            """)
+        }
     }
 
     /// SQLite custom function exposed as `REGEXP`.
