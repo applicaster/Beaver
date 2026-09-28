@@ -63,6 +63,9 @@ When releasing:
 ### Changed
 - An app that restarts is recognised by its device id, so two identical builds
   on two simulators are no longer confused.
+- Agents: `tools_call(deviceId: "beaver")` returns Beaver's result under
+  `structuredContent`; on an app, `tools_call` returns `structuredContent`
+  when the app sent one and `text` otherwise.
 
 ### Fixed
 - A device that connects is shown at once, even if a past or imported
@@ -72,8 +75,9 @@ When releasing:
 - A device whose app closes its socket is disconnected at once. Before, if
   the socket closed cleanly (no reset), Beaver never noticed, and the
   device and its session stayed live until you disconnected it by hand.
-- Agents: your MCP client asks you to confirm each `tools_call`, since an
-  app tool can delete data or restart the app. Restart, kill, launch and
+- Agents: `tools_call` is marked destructive, so clients that honor
+  destructiveHint ask you to confirm, since an app tool can delete data or
+  restart the app. Restart, kill, launch and
   execute tools are marked destructive in the Agent panel, also when the app
   drops before answering, and the panel notes the drop.
 - Agents: device tools name the app a call went to (and "default" when the

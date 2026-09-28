@@ -71,7 +71,7 @@ enum StorageTools {
             next: found > 0
                 ? ["storage_set(" + (isLive ? "deviceId: \"\(s.id)\", " : "") + "layer: \"local\", key: \"…\", value: \"…\") to change a value",
                    "logs_query(sessionId: \(s.id), filter: {search: \"storage\"}) for storage-related logs"]
-                : (isLive ? ["storage_snapshot(timeoutMs: 15000) to give the app longer"]
+                : (isLive ? ["storage_snapshot(sessionId: \(s.id), timeoutMs: 15000) to give the app longer"]
                           : ["beaver_status() — storage arrives while the app is connected"]),
             sessionId: s.id
         )

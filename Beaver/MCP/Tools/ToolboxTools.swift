@@ -109,7 +109,7 @@ enum ToolboxTools {
     static let toolsCall = MCPTool(
         name: "tools_call",
         title: "Call an app's tool",
-        description: "Use to run one tool from toolboxes_list on a connected app (e.g. storage.set, app.restart) and get its answer. deviceId \"beaver\" runs Beaver's own tool by its dotted name (logs.query). Omit deviceId for the default device, or the only connected one. Your client asks the user to confirm each call, because app tools can delete data or restart the app.",
+        description: "Use to run one tool from toolboxes_list on a connected app (e.g. storage.set, app.restart) and get its answer. deviceId \"beaver\" runs Beaver's own tool by its dotted name (logs.query). Omit deviceId for the default device, or the only connected one. It is marked destructive, so clients that honor destructiveHint ask the user to confirm, because app tools can delete data or restart the app.",
         kind: .change,
         destructiveHint: true,
         inputSchema: ToolSchema.object([

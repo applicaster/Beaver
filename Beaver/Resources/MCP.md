@@ -101,7 +101,7 @@ or a release):
 | `devices_disconnect` | Close a connected app's connection (the Disconnect button); its session ends. With several apps, `deviceId` is required: the default doesn't count |
 | `devices_set_default` | Make one connected app the default for device tools (follows it across restarts); `null` clears |
 | `toolboxes_list` | An app's toolboxes, or one toolbox's tools with their arguments; `deviceId: "beaver"` for Beaver's own |
-| `tools_call` | Run one tool from `toolboxes_list` on the app (or on Beaver) and get its answer; your client asks the user to confirm each call (app tools can delete data or restart the app) |
+| `tools_call` | Run one tool from `toolboxes_list` on the app (or on Beaver) and get its answer; it is marked destructive, so clients that honor destructiveHint ask the user to confirm (app tools can delete data or restart the app) |
 | `commands_send` | Send a command to the app; optionally collect the logs it causes, following a restart |
 | `bookmarks_list` | Events and requests the user bookmarked |
 | `bookmarks_set` | Bookmark an event or request, or remove the bookmark |
@@ -213,9 +213,9 @@ takes focus, unless you pass `reveal: true`.
 1. `beaver_status()` — pick the app; with several, `devices_set_default(deviceId: "14")` so you can omit `deviceId`.
 2. `toolboxes_list()` — its toolboxes, e.g. `storage (7)`, `app (3)`, `debugfeatures (2)`.
 3. `toolboxes_list(toolbox: "storage")` — each tool's arguments.
-4. `tools_call(name: "storage.get", arguments: {key: "volume"})` — the app's answer. The summary names the app (`(default)` when the default picked it); Next's `logs_wait(sessionId: …)` reads that app's logs. Your client asks the user to confirm each `tools_call`: app tools can delete data or restart the app.
+4. `tools_call(name: "storage.get", arguments: {key: "volume"})` — the app's answer. The summary names the app (`(default)` when the default picked it); Next's `logs_wait(sessionId: …)` reads that app's logs. `tools_call` is marked destructive, so clients that honor destructiveHint ask the user to confirm: app tools can delete data or restart the app.
 5. `tools_call(name: "app.restart")` may time out or report a disconnect: the app drops the connection first, so it may still have run. `beaver_status()` shows it back in a new session; the default follows it. The Agent panel notes the drop. An error that says the call didn't reach the app is different: nothing ran, so the same call can be sent again.
-6. `toolboxes_list(deviceId: "beaver")` and `tools_call(deviceId: "beaver", name: "logs.query", arguments: {since: "5m"})` — Beaver's own tools the same way (`"beaver"` in any case). Beaver's destructive tools aren't listed there: call them directly.
+6. `toolboxes_list(deviceId: "beaver")` and `tools_call(deviceId: "beaver", name: "logs.query", arguments: {since: "5m"})` — Beaver's own tools the same way (`"beaver"` in any case). Beaver's destructive tools aren't listed there: call them directly. A Beaver tool reached through `tools_call` is marked destructive too (the hint is `tools_call`'s), so call Beaver's tools directly to avoid a confirmation.
 
 ### organise — bookmarks, saved filters, a clean screen
 
