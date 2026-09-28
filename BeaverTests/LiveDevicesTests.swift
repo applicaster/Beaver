@@ -70,6 +70,30 @@ struct LiveDevicesTests {
         #expect(live.sessionIds.isEmpty)
     }
 
+    @Test("A cmdlist Beaver asked for itself answers quietly; the person's own doesn't")
+    func quietCmdlist() {
+        var live = LiveDevices()
+        let hints = [CommandHint(name: "cmdlist", syntax: nil, description: nil)]
+        _ = live.connect(UUID(), session: 1, viewing: nil)
+        live.expectQuietCmdlist(for: 1)
+        let first = live.receiveCmdlist(hints, for: 1)
+        let second = live.receiveCmdlist(hints, for: 1)
+        #expect(first)
+        #expect(!second)
+        #expect(live.commands[1] == hints)
+    }
+
+    @Test("Disconnect drops a quiet cmdlist still waiting for its reply")
+    func quietCmdlistDisconnect() {
+        var live = LiveDevices()
+        let a = UUID()
+        _ = live.connect(a, session: 1, viewing: nil)
+        live.expectQuietCmdlist(for: 1)
+        live.disconnect(a)
+        let quiet = live.receiveCmdlist([], for: 1)
+        #expect(!quiet)
+    }
+
     @Test("The device menu: connected first, then the 5 newest other live sessions, no imports")
     func menu() {
         func s(_ id: Int64, _ source: Session.Source = .live) -> Session {

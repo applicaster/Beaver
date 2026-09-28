@@ -184,6 +184,12 @@ struct MainWindow: View {
                 fresh.show(filter: env.networkFilter, select: env.selectedNetworkId)
             }
         }
+        // Drop a session file or HAR anywhere on the window to import it.
+        .dropDestination(for: URL.self) { urls, _ in
+            guard let url = urls.first(where: \.isFileURL) else { return false }
+            importFile(url)
+            return true
+        }
         .fileImporter(
             isPresented: $showingImporter,
             allowedContentTypes: [.json, .har],
@@ -557,17 +563,29 @@ struct MainWindow: View {
 
     private func handleImport(_ result: Result<[URL], Error>) {
         guard case .success(let urls) = result, let url = urls.first else { return }
+        importFile(url)
+    }
+
+    /// The Import button and a file dropped on the window (D7).
+    private func importFile(_ url: URL) {
         Task {
             // Security-scoped resource access for sandbox.
             let didStart = url.startAccessingSecurityScopedResource()
             defer { if didStart { url.stopAccessingSecurityScopedResource() } }
 
-            guard let data = try? Data(contentsOf: url),
-                  let imported = try? await SessionImport.run(
-                      data, label: url.deletingPathExtension().lastPathComponent, store: env.store)
-            else { return }
-            // Switch the LogFeed to the newly imported session.
-            env.viewingSessionId = imported.session.id
+            do {
+                let data = try Data(contentsOf: url)
+                guard let imported = try await SessionImport.run(
+                    data, label: url.deletingPathExtension().lastPathComponent, store: env.store)
+                else {
+                    toasts.error("\(url.lastPathComponent) isn't a Beaver, zapp-support or HAR file")
+                    return
+                }
+                // Switch the LogFeed to the newly imported session.
+                env.viewingSessionId = imported.session.id
+            } catch {
+                toasts.error("Couldn't import \(url.lastPathComponent): \(error.localizedDescription)")
+            }
         }
     }
 }

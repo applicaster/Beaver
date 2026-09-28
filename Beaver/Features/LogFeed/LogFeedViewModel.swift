@@ -46,6 +46,10 @@ final class LogFeedViewModel {
     /// Total events that match the current filter, for table sizing.
     private(set) var totalCount: Int = 0
 
+    /// Why the last reload failed; the feed shows it with Retry. Nil
+    /// once a reload succeeds.
+    private(set) var loadError: String?
+
     /// Events in the session before any filtering, so the bar can say
     /// "shown / total" and make the filter's effect visible.
     private(set) var unfilteredCount: Int = 0
@@ -285,6 +289,11 @@ final class LogFeedViewModel {
     /// window scroll) into a single SQL pass that runs after the
     /// activity quiets down. Replaces direct `reload()` calls
     /// everywhere except one-shot user actions like jump-to-match.
+    /// The error banner's Retry.
+    func retryLoad() {
+        Task { await reload() }
+    }
+
     private func requestReload() {
         reloadDebounce?.cancel()
         reloadDebounce = Task { [weak self] in
@@ -354,6 +363,7 @@ final class LogFeedViewModel {
                     limit: limit
                 )
                 guard self.isCurrentReload(generation) else { return }
+                self.loadError = nil
                 self.totalCount = snapshot.total
                 self.unfilteredCount = snapshot.unfiltered
                 self.feed.replace(with: snapshot.events)
@@ -368,8 +378,9 @@ final class LogFeedViewModel {
                 // skipped; fetch whatever landed after the read.
                 self.requestTail()
             } catch {
-                // TODO: surface to UI as a banner.
-                print("LogFeedViewModel.reload: \(error)")
+                // A superseded reload is cancelled on purpose: not an error.
+                guard self.isCurrentReload(generation), !(error is CancellationError) else { return }
+                self.loadError = error.localizedDescription
             }
         }
         loadTask = task

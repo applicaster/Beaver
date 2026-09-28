@@ -165,7 +165,7 @@ struct BeaverApp: App {
                     // registering its handlers.
                     Task {
                         try? await Task.sleep(for: .milliseconds(500))
-                        await env.send(command: "cmdlist", to: session.id)
+                        await env.sendQuietCmdlist(to: session.id)
                         await env.send(command: "storage.list", to: session.id)
                     }
                 case .frame(let connection, let frame):
@@ -271,15 +271,17 @@ struct BeaverApp: App {
     private static func handleInbound(frame: Data, connection: UUID, sessionId: Int64, env: AppEnvironment) async {
         switch ProtocolDecoder.decode(frame) {
         case .success(.event(let event)):
-            await env.store.append(event, to: sessionId)
             // Side-channel: detect cmdlist responses and populate the
-            // command-help popover (see CommandHints.cmdListNames). Event
-            // still appears in the log feed normally.
+            // command-help popover (see CommandHints.cmdListNames). The
+            // reply to a cmdlist the person sent stays in the log feed;
+            // one Beaver sent itself doesn't.
             if let names = CommandHints.cmdListNames(in: event) {
-                await MainActor.run {
-                    env.live.setCommands(CommandHints.merge(sdkNames: names), for: sessionId)
+                let quiet = await MainActor.run {
+                    env.live.receiveCmdlist(CommandHints.merge(sdkNames: names), for: sessionId)
                 }
+                if quiet { return }
             }
+            await env.store.append(event, to: sessionId)
         case .success(.storage(let namespaces)):
             for (namespace, json) in namespaces {
                 try? await env.store.recordStorageSnapshot(

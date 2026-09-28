@@ -1014,6 +1014,37 @@ public actor LogStore {
         broadcast(.savedFiltersChanged)
     }
 
+    // MARK: - Command history (D9)
+
+    /// How many sent commands the command bar remembers across launches.
+    public static let commandHistoryLimit = 50
+
+    /// Sent commands, newest first, each once.
+    public func commandHistory() async throws -> [String] {
+        try await dbQueue.read { db in
+            try String.fetchAll(db, sql: "SELECT command FROM command_history ORDER BY id DESC")
+        }
+    }
+
+    /// Moves `command` to the top of the history and drops the oldest
+    /// beyond `commandHistoryLimit`.
+    public func recordCommand(_ command: String) async throws {
+        try await dbQueue.write { db in
+            try db.execute(sql: "DELETE FROM command_history WHERE command = ?", arguments: [command])
+            try db.execute(
+                sql: "INSERT INTO command_history (command, issued_at) VALUES (?, ?)",
+                arguments: [command, Int(Date().timeIntervalSince1970 * 1000)]
+            )
+            try db.execute(
+                sql: """
+                    DELETE FROM command_history WHERE id NOT IN
+                        (SELECT id FROM command_history ORDER BY id DESC LIMIT ?)
+                """,
+                arguments: [Self.commandHistoryLimit]
+            )
+        }
+    }
+
     private static func makeSavedFilter(_ row: Row) -> SavedFilter {
         let level = LogLevel(rawValue: row["min_level"] as String) ?? .verbose
         let filter = Filter(

@@ -6,19 +6,17 @@
 import Foundation
 
 /// Drives the bottom command bar (D9). Holds the current input text and
-/// an in-memory history of previously-sent commands. On submit, dispatches
-/// to the viewed device via `DeviceLink.send(command:to:)` and pushes the
-/// command onto history.
-///
-/// Persistent on-disk history + autocomplete from `cmdlist` are tracked
-/// for a follow-up pass. For now: in-memory ring buffer.
+/// the history of sent commands, kept in the store across launches. On
+/// submit, dispatches to the viewed device via
+/// `DeviceLink.send(command:to:)` and pushes the command onto history.
 @Observable
 @MainActor
 final class CommandBarViewModel {
 
     var input: String = ""
 
-    /// Most recent commands, newest first. Capped at 50 for memory.
+    /// Most recent commands, newest first. Capped at
+    /// `LogStore.commandHistoryLimit`.
     private(set) var history: [String] = []
 
     /// Index into `history` while the user is arrow-navigating.
@@ -26,10 +24,18 @@ final class CommandBarViewModel {
     private var historyCursor: Int?
 
     private let device: any DeviceLink
-    private let historyLimit = 50
+    private let store: LogStore
 
-    init(device: any DeviceLink) {
+    init(device: any DeviceLink, store: LogStore) {
         self.device = device
+        self.store = store
+    }
+
+    /// Loads the history saved by earlier launches.
+    func loadHistory() async {
+        guard let saved = try? await store.commandHistory() else { return }
+        // A command sent while loading is newer than anything saved.
+        history += saved.filter { !history.contains($0) }
     }
 
     // MARK: - Send
@@ -54,9 +60,10 @@ final class CommandBarViewModel {
     func remember(_ command: String) {
         history.removeAll { $0 == command }
         history.insert(command, at: 0)
-        if history.count > historyLimit {
-            history.removeLast(history.count - historyLimit)
+        if history.count > LogStore.commandHistoryLimit {
+            history.removeLast(history.count - LogStore.commandHistoryLimit)
         }
+        Task { [store] in try? await store.recordCommand(command) }
     }
 
     // MARK: - History navigation
