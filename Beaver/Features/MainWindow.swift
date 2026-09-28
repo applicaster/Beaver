@@ -297,7 +297,7 @@ struct MainWindow: View {
         // strip rather than left-padded space.
         ToolbarItem(placement: .navigation) {
             if let viewed = sessions.first(where: { $0.id == env.viewingSessionId }) {
-                ToolbarDeviceBadge(session: viewed, isLive: env.isLive(viewed.id))
+                ToolbarDeviceBadge(session: viewed, isLive: env.isLive(viewed.id), sessions: sessions)
             }
         }
         ToolbarItem(placement: .primaryAction) {
@@ -588,11 +588,15 @@ struct MainWindow: View {
 private struct ToolbarDeviceBadge: View {
     let session: Session
     let isLive: Bool
+    /// Every session row — threaded down to `DevicePopover` (C3), which
+    /// needs the full list to resolve the one live session a shared
+    /// device uid's default actually targets.
+    let sessions: [Session]
     @Environment(ToastCenter.self) private var toasts
     @State private var showingDetails = false
 
     var body: some View {
-        Button { showingDetails.toggle() } label: {
+        Button { showingDetails = true } label: {
             HStack(spacing: 8) {
                 Image(systemName: "iphone.gen3")
                     .font(.system(size: 14))
@@ -606,6 +610,8 @@ private struct ToolbarDeviceBadge: View {
                             .font(.system(size: 12, weight: .semibold))
                             .lineLimit(1)
                     }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("\(Self.title(session)), \(isLive ? "connected" : "not connected")")
                     Text(Self.subtitle(session))
                         .font(.system(size: 10))
                         .foregroundStyle(.secondary)
@@ -631,7 +637,7 @@ private struct ToolbarDeviceBadge: View {
             }
         }
         .popover(isPresented: $showingDetails, arrowEdge: .bottom) {
-            DevicePopover(session: session, isLive: isLive)
+            DevicePopover(session: session, isLive: isLive, sessions: sessions)
         }
     }
 
@@ -693,7 +699,10 @@ private struct DeviceSwitcher: View {
                 } else {
                     ForEach(sections.connected) { s in
                         choice(s, Self.item(s, suffix: Self.detail(s))
-                            + (env.defaultDevice?.matches(s) == true ? " — default for agents" : ""))
+                            // C3: only the session the default resolves to is
+                            // "the" default — not every session sharing its uid.
+                            + (env.defaultDevice?.liveSession(in: sessions, live: env.live.sessionIds) == s.id
+                                ? " — default for agents" : ""))
                     }
                 }
             }

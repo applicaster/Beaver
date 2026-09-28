@@ -11,6 +11,10 @@ import SwiftUI
 struct DevicePopover: View {
     let session: Session
     let isLive: Bool
+    /// Every session row (C3) — to resolve which live session among
+    /// several sharing a device uid is the one agents' default
+    /// actually targets.
+    let sessions: [Session]
     @Environment(AppEnvironment.self) private var env
     @Environment(ToastCenter.self) private var toasts
     @State private var load: ToolboxLoad = .loading
@@ -56,12 +60,14 @@ struct DevicePopover: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(.headline)
+            Text(title).font(.headline).lineLimit(2)
             if let package = session.appPackage {
                 Text(package).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                    .lineLimit(1).truncationMode(.middle)
             }
             if !deviceLine.isEmpty {
                 Text(deviceLine).font(.caption).foregroundStyle(.secondary)
+                    .lineLimit(1).truncationMode(.middle)
             }
             if let uid = session.deviceUID {
                 HStack(spacing: 4) {
@@ -74,6 +80,7 @@ struct DevicePopover: View {
                     } label: { Image(systemName: "doc.on.doc") }
                         .buttonStyle(.borderless)
                         .help("Copy device id")
+                        .accessibilityLabel("Copy device id")
                 }
             }
             Text(stateLine).font(.caption).foregroundStyle(.secondary)
@@ -82,7 +89,10 @@ struct DevicePopover: View {
 
     private var defaultBinding: Binding<Bool> {
         Binding(
-            get: { env.defaultDevice?.matches(session) ?? false },
+            // C3: several live sessions can share a device uid — only
+            // the one `liveSession` resolves to is the actual default,
+            // not every session `matches()` would accept.
+            get: { env.defaultDevice?.liveSession(in: sessions, live: env.live.sessionIds) == session.id },
             set: { on in
                 env.setDefaultDeviceByUser(on ? DefaultDevice(session: session) : nil,
                                            name: title, sessionId: session.id)
@@ -98,14 +108,22 @@ struct DevicePopover: View {
             Button { Task { await reload() } } label: { Image(systemName: "arrow.clockwise") }
                 .buttonStyle(.borderless)
                 .help("Ask the app for its toolboxes again")
+                .accessibilityLabel("Reload toolboxes")
                 .disabled(load == .loading)
         }
         switch load {
         case .loading:
             ProgressView().controlSize(.small).frame(maxWidth: .infinity)
         case .unsupported:
-            Text("This app doesn't answer MCP — it needs quick-brick-xray's native WebSocket sink.")
-                .font(.caption).foregroundStyle(.secondary)
+            HStack {
+                Text("This app doesn't answer MCP — it needs quick-brick-xray's native WebSocket sink.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                // A native app that was merely slow to answer once
+                // latches .unsupported too (batch A made initialize
+                // retryable) — Retry gives it a second chance.
+                Button("Retry") { Task { await reload() } }
+            }
         case .failed(let message):
             HStack {
                 Text(message).font(.caption).foregroundStyle(.secondary)
@@ -116,7 +134,7 @@ struct DevicePopover: View {
             Text("This app has no toolboxes.").font(.caption).foregroundStyle(.secondary)
         case .loaded(let boxes):
             ScrollView {
-                VStack(alignment: .leading, spacing: 6) {
+                LazyVStack(alignment: .leading, spacing: 6) {
                     ForEach(boxes, id: \.name) { box in
                         DisclosureGroup(isExpanded: Binding(
                             get: { openToolbox == box.name },
@@ -154,9 +172,11 @@ private struct ToolRow: View {
                 .textSelection(.enabled)
             if !tool.description.isEmpty {
                 Text(tool.description).font(.caption).foregroundStyle(.secondary)
+                    .lineLimit(4).help(tool.description)
             }
             ForEach(tool.parameters, id: \.name) { p in
                 Text(p.line).font(.caption2.monospaced()).foregroundStyle(.secondary)
+                    .lineLimit(2)
             }
         }
     }
