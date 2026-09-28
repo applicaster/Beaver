@@ -20,7 +20,8 @@ public struct MCPServer: Sendable {
         Start with beaver_status. With more than one device connected, pass deviceId (from beaver_status) \
         to commands_send, commands_list and storage changes. If no device is connected you can still read past sessions \
         (sessions_list) and log files the user has (sessions_import). Omitting sessionId means the \
-        live session, else the one the user is viewing, else the most recent. Before filtering by \
+        live session (with several, the viewed one if live, else the newest), else the one the user \
+        is viewing, else the most recent. Before filtering by \
         subsystem or category call logs_facets: names are namespaced and you will not guess them \
         (globs like "*auth*" and name fragments work, and results say what they matched). Use \
         since: "5m" or afterId to look at recent events. To see what an action causes, send it with \

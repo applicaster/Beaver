@@ -41,14 +41,33 @@ struct LiveDevicesTests {
         #expect(!live.isLive(nil))
     }
 
-    @Test("A replaced session keeps its connection")
-    func replace() {
+    @Test("Deleted sessions stop receiving at once; the device gets a fresh one")
+    func detachAttach() {
+        var live = LiveDevices()
+        let a = UUID(), b = UUID()
+        _ = live.connect(a, session: 1, viewing: nil)
+        _ = live.connect(b, session: 2, viewing: 1)
+        let waiting = live.detach { $0 == 1 }
+        #expect(waiting == [a])
+        #expect(live.session(for: a) == nil)
+        #expect(live.session(for: b) == 2)
+        let attached = live.attach(a, session: 9)
+        #expect(attached)
+        #expect(live.session(for: a) == 9)
+        #expect(!live.isLive(1))
+    }
+
+    @Test("A device that leaves while waiting for a fresh session gets none")
+    func detachThenDisconnect() {
         var live = LiveDevices()
         let a = UUID()
         _ = live.connect(a, session: 1, viewing: nil)
-        live.replace(session: 1, with: 9)
-        #expect(live.session(for: a) == 9)
-        #expect(!live.isLive(1))
+        _ = live.detach { _ in true }
+        let ended = live.disconnect(a)
+        #expect(ended == nil)
+        let attached = live.attach(a, session: 9)
+        #expect(!attached)
+        #expect(live.sessionIds.isEmpty)
     }
 
     @Test("The device menu: connected first, then the 5 newest other live sessions, no imports")

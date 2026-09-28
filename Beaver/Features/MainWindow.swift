@@ -697,7 +697,7 @@ private struct DeviceSwitcher: View {
             }
             Button("All Sessions…") { env.selectedTab = .sessions }
         } label: {
-            ConnectionIndicator(state: env.serverState, showsChevron: true)
+            ConnectionIndicator(state: env.serverState, liveCount: env.live.sessionIds.count, showsChevron: true)
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
@@ -806,6 +806,10 @@ private struct ConnectionPlaceholder: View {
 
 private struct ConnectionIndicator: View {
     let state: WSServer.State
+    /// Connected devices (D73). While any is connected the pill says so,
+    /// whatever the last server-state update was: that one value is shared
+    /// by every connection, and one of them `.waiting` would read "Error".
+    var liveCount = 0
     var showsChevron = false
 
     var body: some View {
@@ -833,7 +837,8 @@ private struct ConnectionIndicator: View {
     }
 
     private var color: Color {
-        switch state {
+        if liveCount > 0 { return .green }
+        return switch state {
         case .clientConnected:       .green
         case .listening:             .yellow
         case .clientDisconnected:    .orange
@@ -843,7 +848,8 @@ private struct ConnectionIndicator: View {
     }
 
     private var label: String {
-        switch state {
+        if liveCount > 0 { return liveCount > 1 ? "Connected · \(liveCount)" : "Connected" }
+        return switch state {
         case .clientConnected(let count): count > 1 ? "Connected · \(count)" : "Connected"
         case .listening:             "Listening"
         case .clientDisconnected:    "Disconnected"

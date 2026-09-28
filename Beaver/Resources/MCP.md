@@ -110,7 +110,8 @@ or a release):
 | `ui_show` | Point the window at a tab, session, filter or row — in the background unless `reveal: true` |
 | `beaver_guide` | These recipes, by topic |
 
-Conventions: omitting `sessionId` means the live session, else the viewed one,
+Conventions: omitting `sessionId` means the live session (with several
+devices, the viewed one if it is live, else the newest), else the viewed one,
 else the most recent — and during a wait it follows the device into its new
 session if the app restarts (`sessionChanged`); a given `sessionId` stays put
 (`sessionEnded`). Subsystem and category values accept `*` globs, name

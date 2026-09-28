@@ -86,9 +86,11 @@ struct DeviceFollower: Sendable {
         }
         let sessions = (try? await store.sessions()) ?? []
         let candidates = sessions.filter { now.contains($0.id) && !alongside.contains($0.id) }
-        guard let ended = sessions.first(where: { $0.id == current }),
-              let next = Self.successor(of: ended, live: candidates, appeared: appeared)
-        else { return .gone }
+        // A deleted row (the user deleted a live session) knows no
+        // fingerprint: the one session that came up since continues it.
+        let ended = sessions.first(where: { $0.id == current })
+            ?? Session(id: current, startedAt: .distantPast, source: .live)
+        guard let next = Self.successor(of: ended, live: candidates, appeared: appeared) else { return .gone }
         current = next
         alongside = now
         return .moved(next)
@@ -183,8 +185,10 @@ extension ToolContext {
 
     /// Design M25 / D73: tools that talk to a device take an optional
     /// deviceId — the device's live session id, as beaver_status lists it.
-    /// With one device it may be omitted; with several it may not.
-    public func requireDevice(_ args: ToolArguments, doing what: String) async throws
+    /// With one device it may be omitted (or be "current", as before D73);
+    /// with several it may not. `call` is the tool's own example call; the
+    /// error shows it with a deviceId filled in.
+    public func requireDevice(_ args: ToolArguments, doing what: String, call: String) async throws
         -> (host: HostSnapshot, liveSessionId: Int64) {
         let host = await ui.snapshot()
         let live = host.liveSessionIds
@@ -196,11 +200,18 @@ extension ToolContext {
         // args.string turns a number into text; accept "12", 12 and 12.0.
         if let wanted, let id = Int64(wanted) ?? Double(wanted).flatMap({ Int64(exactly: $0) }),
            live.contains(id) { return (host, id) }
-        if wanted == nil, live.count == 1 { return (host, live[0]) }
+        if wanted == nil || wanted == "current", live.count == 1 { return (host, live[0]) }
         let list = try await describeDevices(live)
         let lead = wanted.map { "No connected device \"\($0)\"." }
             ?? "\(live.count) devices are connected; say which one with deviceId."
-        throw ToolError("\(lead) Connected: \(list). Example: deviceId: \"\(live[0])\".")
+        throw ToolError("\(lead) Connected: \(list). Example: \(Self.withDeviceId(call, live[0])).")
+    }
+
+    /// `commands_send(command: "x")` → `commands_send(deviceId: "12", command: "x")`.
+    static func withDeviceId(_ call: String, _ id: Int64) -> String {
+        guard let open = call.firstIndex(of: "(") else { return call }
+        let rest = call[call.index(after: open)...]
+        return String(call[...open]) + "deviceId: \"\(id)\"" + (rest.hasPrefix(")") ? "" : ", ") + rest
     }
 
     /// `"12" (Alpha 1.0 · iPhone 15, iOS 18.0), "14" (…)`.

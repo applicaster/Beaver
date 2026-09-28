@@ -84,17 +84,20 @@ public actor WSServer {
         // PROTOCOL.md §1: accept both IPv4 and IPv6.
 
         // Enable TCP keepalive with aggressive timing so we detect
-        // half-open connections within ~60 seconds. Default OS
+        // half-open connections within ~20 seconds. Default OS
         // keepalive idle is ~2 hours, which means a killed client
-        // would leave us showing "Connected" until next reboot.
+        // would leave us showing "Connected" until next reboot. With
+        // several devices (D73) a device that reconnects over a dead
+        // socket shows twice until the old one is detected, so keep
+        // the budget short.
         //
         // Detection budget = keepaliveIdle + (keepaliveInterval *
-        // keepaliveCount) = 30 + (10 * 3) = 60 seconds.
+        // keepaliveCount) = 10 + (5 * 2) = 20 seconds.
         if let tcp = parameters.defaultProtocolStack.transportProtocol as? NWProtocolTCP.Options {
             tcp.enableKeepalive = true
-            tcp.keepaliveIdle = 30
-            tcp.keepaliveInterval = 10
-            tcp.keepaliveCount = 3
+            tcp.keepaliveIdle = 10
+            tcp.keepaliveInterval = 5
+            tcp.keepaliveCount = 2
         }
 
         let wsOptions = NWProtocolWebSocket.Options()

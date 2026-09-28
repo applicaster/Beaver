@@ -175,7 +175,8 @@ enum StorageTools {
 
     static func edit(_ action: StorageCommand.Action, layer: StorageSnapshot.Namespace, key: String,
                      value: String?, parent: String?, _ args: ToolArguments, _ ctx: ToolContext) async throws -> ToolResult {
-        let (host, live) = try await ctx.requireDevice(args, doing: "change its storage")
+        let (host, live) = try await ctx.requireDevice(args, doing: "change its storage",
+            call: "storage_\(action.rawValue)(layer: \"\(layer.wireKey)\", key: \"\(key)\")")
         guard StorageCommand.isSupported(action, in: layer, by: (host.commandsBySession[live] ?? []).map(\.name)) else {
             throw ToolError("This app doesn't accept \(StorageCommand.name(action, in: layer)) (it isn't in commands_list()), "
                 + "so Beaver can't \(action.rawValue) \(layer.wireKey) keys. storage_snapshot() still reads them.")

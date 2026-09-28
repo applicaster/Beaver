@@ -9,8 +9,10 @@ import Foundation
 @Suite("WSServer control frames", .timeLimit(.minutes(1)))
 struct WSServerControlFrameTests {
 
-    /// Away from 9080 (a running Beaver) and 19080 (the rebind suite).
-    private static let port: UInt16 = 19_081
+    /// Away from 9080 (a running Beaver), 19080 (the rebind suite) and
+    /// 19081/19084/19085 (the inbound suite): with several clients allowed
+    /// (D73), a client landing on another suite's server shows up there.
+    private static let port: UInt16 = 19_086
 
     @Test("Pings from the client are answered, not forwarded as messages")
     func pingIsNotForwarded() async throws {

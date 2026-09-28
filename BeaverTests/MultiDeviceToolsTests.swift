@@ -30,7 +30,7 @@ struct MultiDeviceToolsTests {
         } catch let error as ToolError {
             #expect(error.message.contains("\"\(a.id)\" (Alpha"))
             #expect(error.message.contains("\"\(b.id)\" (Beta"))
-            #expect(error.message.contains("deviceId"))
+            #expect(error.message.contains("commands_send(deviceId: \"\(a.id)\", command: \"cmdlist\")"))
         }
         #expect(device.sent.isEmpty)
     }
@@ -49,7 +49,8 @@ struct MultiDeviceToolsTests {
     func unknownDeviceId() async throws {
         let (store, _, _, ui) = try await twoDevices()
         await #expect(throws: ToolError.self) {
-            try await makeContext(store, fakeUI: ui).requireDevice(ToolArguments(["deviceId": "999"]), doing: "send a command")
+            try await makeContext(store, fakeUI: ui).requireDevice(ToolArguments(["deviceId": "999"]), doing: "send a command",
+                                                                  call: "commands_send(command: \"cmdlist\")")
         }
     }
 
@@ -101,5 +102,20 @@ struct MultiDeviceToolsTests {
             try await CommandTools.disconnect.run(ToolArguments(), makeContext(store, fakeUI: ui, device: device))
         }
         #expect(device.disconnected.isEmpty)
+    }
+
+    @Test("deviceId \"current\" still works with one device, and fails with two")
+    func current() async throws {
+        let (store, a, b, ui) = try await twoDevices()
+        let ctx = makeContext(store, fakeUI: ui)
+        await #expect(throws: ToolError.self) {
+            try await ctx.requireDevice(ToolArguments(["deviceId": "current"]), doing: "send a command",
+                                        call: "commands_send(command: \"cmdlist\")")
+        }
+        ui.update { $0.liveSessionIds = [b.id] }
+        let one = try await ctx.requireDevice(ToolArguments(["deviceId": "current"]), doing: "send a command",
+                                              call: "commands_send(command: \"cmdlist\")")
+        #expect(one.liveSessionId == b.id)
+        _ = a
     }
 }

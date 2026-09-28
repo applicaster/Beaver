@@ -362,10 +362,10 @@ elapsed time, not a start timestamp.
 3. The connection remains open indefinitely. Either side may close at
    any time; Beaver closes one when the user (or an agent) disconnects
    that device.
-4. On unexpected close (network failure, client crash), Beaver marks
-   the current session's `ended_at` and writes a synthetic event with
-   subsystem `loggernext.transport`, level `info`, message
-   `"connection closed (reason: …)"`.
+4. When a connection closes (network failure, client crash, or a
+   Disconnect in Beaver), Beaver sets that connection's session
+   `ended_at`; other connections are unaffected. A half-open connection
+   is noticed by TCP keepalive within ~20 s.
 5. New connections after a close start a new session.
 
 ---

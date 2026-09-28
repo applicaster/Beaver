@@ -18,7 +18,7 @@ enum StateTools {
         let none = ToolResult(summary: "No command list yet: no device is connected, or it hasn't answered cmdlist.",
                               structured: ["commands": []], next: ["beaver_status()"])
         guard await ctx.ui.snapshot().deviceConnected else { return none }
-        let (host, live) = try await ctx.requireDevice(args, doing: "list its commands")
+        let (host, live) = try await ctx.requireDevice(args, doing: "list its commands", call: "commands_list()")
         let hints = host.commandsBySession[live] ?? []
         guard !hints.isEmpty else { return none }
         let lines = hints.map { h in

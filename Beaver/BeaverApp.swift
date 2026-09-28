@@ -191,12 +191,14 @@ struct BeaverApp: App {
                 case .sessionStarted, .sessionEnded:
                     await env.refreshViewingEventCount()
                 case .sessionDeleted(let id):
-                    if env.viewingSessionId == id { env.viewingSessionId = nil }
-                    await replaceDeletedLiveSessions(env: env) { $0 == id }
+                    let viewed = env.viewingSessionId
+                    if viewed == id { env.viewingSessionId = nil }
+                    await replaceDeletedLiveSessions(env: env, viewed: viewed) { $0 == id }
                     await env.refreshViewingEventCount()
                 case .sessionsCleared:
+                    let viewed = env.viewingSessionId
                     env.viewingSessionId = nil
-                    await replaceDeletedLiveSessions(env: env) { _ in true }
+                    await replaceDeletedLiveSessions(env: env, viewed: viewed) { _ in true }
                     await env.refreshViewingEventCount()
                 default:
                     break
@@ -294,15 +296,26 @@ struct BeaverApp: App {
 
 /// A deleted live session (e.g., right after the user deleted every
 /// session) leaves its device with nowhere to write: give each such
-/// connection a fresh live session, and show it if nothing is viewed.
-/// Without this, events from the device would be silently dropped until
-/// it reconnected.
+/// connection a fresh live session. Without this, events from the device
+/// would be silently dropped until it reconnected.
+///
+/// Detaches first, before any await, so frames stop going to the deleted
+/// rows at once (a write there fails its whole batch). The window follows
+/// the device it showed; with none, it shows the first fresh session. A
+/// device that leaves meanwhile gets its fresh session ended.
 @MainActor
-private func replaceDeletedLiveSessions(env: AppEnvironment, deleted: (Int64) -> Bool) async {
-    for sessionId in env.live.sessionIds where deleted(sessionId) {
+private func replaceDeletedLiveSessions(env: AppEnvironment, viewed: Int64?,
+                                        deleted: (Int64) -> Bool) async {
+    let viewedConnection = viewed.flatMap { env.live.connection(for: $0) }
+    for connection in env.live.detach(where: deleted) {
         guard let fresh = try? await env.store.createSession(source: .live) else { continue }
-        env.live.replace(session: sessionId, with: fresh.id)
-        if env.viewingSessionId == nil { env.viewingSessionId = fresh.id }
+        guard env.live.attach(connection, session: fresh.id) else {
+            try? await env.store.endSession(fresh.id)
+            continue
+        }
+        if connection == viewedConnection || (viewedConnection == nil && env.viewingSessionId == nil) {
+            env.viewingSessionId = fresh.id
+        }
     }
 }
 

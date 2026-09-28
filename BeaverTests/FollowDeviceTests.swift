@@ -90,14 +90,17 @@ struct FollowDeviceTests {
     func requireDevice() async throws {
         let (store, a, ui) = try await liveFixture()
         let ctx = makeContext(store, fakeUI: ui)
-        let ok = try await ctx.requireDevice(ToolArguments(["deviceId": JSON(String(a.id))]), doing: "send a command")
+        let ok = try await ctx.requireDevice(ToolArguments(["deviceId": JSON(String(a.id))]), doing: "send a command",
+                                             call: "commands_send(command: \"cmdlist\")")
         #expect(ok.liveSessionId == a.id)
         await #expect(throws: ToolError.self) {
-            try await ctx.requireDevice(ToolArguments(["deviceId": "pixel-7"]), doing: "send a command")
+            try await ctx.requireDevice(ToolArguments(["deviceId": "pixel-7"]), doing: "send a command",
+                                             call: "commands_send(command: \"cmdlist\")")
         }
         ui.update { $0.liveSessionIds = [] }
         do {
-            _ = try await ctx.requireDevice(ToolArguments(), doing: "send a command")
+            _ = try await ctx.requireDevice(ToolArguments(), doing: "send a command",
+                                             call: "commands_send(command: \"cmdlist\")")
             Issue.record("expected an error")
         } catch let error as ToolError {
             #expect(error.message.hasPrefix("No device is connected, so Beaver can't send a command."))
@@ -205,5 +208,18 @@ struct FollowDeviceTests {
         let a2 = try await store.createSession(source: .live)
         let back = await follower.step(live: [b.id, a2.id], store: store)
         #expect(back == .moved(a2.id))
+    }
+
+    @Test("A deleted live session's device is followed into its fresh session")
+    func followsAfterDeletion() async throws {
+        let store = try LogStore(source: .inMemory)
+        let a = try await store.createSession(source: .live)
+        var follower = DeviceFollower(start: a.id, live: [a.id])
+        try await store.deleteSession(id: a.id)
+        let gone = await follower.step(live: [], store: store)
+        #expect(gone == .gone)
+        let fresh = try await store.createSession(source: .live)
+        let back = await follower.step(live: [fresh.id], store: store)
+        #expect(back == .moved(fresh.id))
     }
 }

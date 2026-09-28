@@ -12,6 +12,8 @@ import Foundation
 public struct LiveDevices: Sendable, Equatable {
     public private(set) var sessions: [UUID: Int64] = [:]
     public private(set) var commands: [Int64: [CommandHint]] = [:]
+    /// Connections whose live session was deleted, waiting for a fresh one.
+    public private(set) var waiting: Set<UUID> = []
 
     public init() {}
 
@@ -38,16 +40,29 @@ public struct LiveDevices: Sendable, Equatable {
 
     @discardableResult
     public mutating func disconnect(_ connection: UUID) -> Int64? {
+        waiting.remove(connection)
         guard let sessionId = sessions.removeValue(forKey: connection) else { return nil }
         commands[sessionId] = nil
         return sessionId
     }
 
-    /// A live session was deleted; its device writes to `new` from now on.
-    public mutating func replace(session old: Int64, with new: Int64) {
-        guard let connection = connection(for: old) else { return }
-        sessions[connection] = new
-        commands[new] = commands.removeValue(forKey: old)
+    /// Live sessions were deleted: stop writing to them at once (their
+    /// frames are dropped until `attach`). Returns their connections.
+    public mutating func detach(where deleted: (Int64) -> Bool) -> [UUID] {
+        let gone = sessions.filter { deleted($0.value) }.map(\.key)
+        for connection in gone {
+            if let sessionId = sessions.removeValue(forKey: connection) { commands[sessionId] = nil }
+            waiting.insert(connection)
+        }
+        return gone
+    }
+
+    /// Gives a detached connection its fresh session. False when the
+    /// device disconnected meanwhile: that session should be ended.
+    public mutating func attach(_ connection: UUID, session: Int64) -> Bool {
+        guard waiting.remove(connection) != nil else { return false }
+        sessions[connection] = session
+        return true
     }
 
     public mutating func setCommands(_ hints: [CommandHint], for sessionId: Int64) {

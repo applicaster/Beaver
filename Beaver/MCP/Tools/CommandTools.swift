@@ -26,7 +26,8 @@ enum CommandTools {
         guard let command = try args.string("command").flatMap(ToolContext.trimmedNonEmpty) else {
             throw ToolError("command is required. Example: commands_send(command: \"storage.list\") — commands_list() shows what the app accepts.")
         }
-        let (_, live) = try await ctx.requireDevice(args, doing: "send a command")
+        let (_, live) = try await ctx.requireDevice(args, doing: "send a command",
+                                                call: "commands_send(command: \"\(command)\")")
         let session = try await ctx.liveSession(live)
         let collect = min(maxCollectMillis, max(0, try args.int("collectLogsMs") ?? 0))
         let limit = try args.limit(default: 100, max: 500)
@@ -77,7 +78,7 @@ enum CommandTools {
         kind: .change,
         inputSchema: ToolSchema.object(["deviceId": ToolSchema.deviceId])
     ) { args, ctx in
-        let (_, live) = try await ctx.requireDevice(args, doing: "disconnect it")
+        let (_, live) = try await ctx.requireDevice(args, doing: "disconnect it", call: "devices_disconnect()")
         let session = try await ctx.liveSession(live)
         await ctx.device.disconnect(live)
         return ToolResult(

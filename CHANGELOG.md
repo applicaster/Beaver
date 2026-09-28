@@ -24,7 +24,9 @@ When releasing:
   reconnects on its own comes back in a new session.
 - Agents: `beaver_status` lists every connected device; with more than one,
   `commands_send`, `commands_list` and storage changes take `deviceId`.
-  New tool `devices_disconnect`.
+  New tool `devices_disconnect`. A device's id is now its live session id
+  (`"12"`); `deviceId: "current"` still works while one device is
+  connected.
 
 ### Fixed
 - A device that connects is shown at once, even if a past or imported
