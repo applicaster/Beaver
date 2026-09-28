@@ -18,7 +18,10 @@ public struct MCPServer: Sendable {
         Beaver is a macOS log viewer. Mobile apps connect to it over WebSocket, several at once, and Beaver \
         stores everything the app sends: logs, network requests, storage snapshots. \
         Start with beaver_status. With more than one device connected, pass deviceId (from beaver_status) \
-        to commands_send, commands_list and storage changes. If no device is connected you can still read past sessions \
+        to commands_send, commands_list and storage changes. Or set a default with devices_set_default. Apps built with quick-brick-xray's \
+        native sink also offer toolboxes (storage, app, debugfeatures, React ones): list them with \
+        toolboxes_list and run one with tools_call; deviceId "beaver" reaches Beaver's own tools the same way. \
+        If no device is connected you can still read past sessions \
         (sessions_list) and log files the user has (sessions_import). Omitting sessionId means the \
         live session (with several, the viewed one if live, else the newest), else the one the user \
         is viewing, else the most recent. Before filtering by \

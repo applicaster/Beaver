@@ -146,7 +146,7 @@ public enum ToolSchema {
         "Session id. Omit it for the live session (with several devices, the viewed one if live, else the newest), else the one the user is viewing, else the most recent.")
 
     public static let deviceId = string(
-        "Which connected device: its id from beaver_status (e.g. \"12\"). Omit it when only one device is connected.")
+        "Which connected app: its deviceId from beaver_status. Omit it for the default device (devices_set_default), or the only connected one.")
 
     public static let range: [String: JSON] = [
         "afterId": integer("Only events with a larger id (a cursor from an earlier result)."),

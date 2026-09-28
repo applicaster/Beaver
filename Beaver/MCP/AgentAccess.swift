@@ -220,6 +220,12 @@ public actor AgentAccess {
             example: "Use beaver: send cmdlist to the app and show me what it logged.",
             tools: ["commands_list", "commands_send", "logs_wait", "devices_disconnect"]),
         Capability(
+            icon: "shippingbox",
+            title: "Use what the app offers beyond commands",
+            note: "List a connected app's toolboxes (storage, app, debug features, React tools…) and call one directly. Set a default app when several are connected.",
+            example: "Use beaver: what toolboxes does the app have, and read the volume from storage.",
+            tools: ["devices_set_default", "toolboxes_list", "tools_call"]),
+        Capability(
             icon: "binoculars",
             title: "Watch over time",
             note: "Count matching logs for minutes or hours and notify you when they reach a count, even with Beaver in the background.",

@@ -73,6 +73,9 @@ or a release):
    appear in the menu behind the toolbar's Connected pill, and `beaver_status` lists both.
 11. Report problems with the Beaver version (Beaver → About) and the Agent
    panel's **Copy** output.
+12. Toolboxes: connect an app built with quick-brick-xray's **native** WebSocket
+   sink (the JS-only sink has none), click the device badge on the left of the
+   toolbar — the popover lists its toolboxes. Nothing to turn on in Beaver.
 
 ## Tools
 
@@ -96,6 +99,9 @@ or a release):
 | `storage_delete` | Delete a storage key, with the same check |
 | `commands_list` | Commands a connected app accepts (`deviceId` when several are connected) |
 | `devices_disconnect` | Close a connected app's connection (the Disconnect button); its session ends |
+| `devices_set_default` | Make one connected app the default for device tools (follows it across restarts); `null` clears |
+| `toolboxes_list` | An app's toolboxes, or one toolbox's tools with their arguments; `deviceId: "beaver"` for Beaver's own |
+| `tools_call` | Run one tool from `toolboxes_list` on the app (or on Beaver) and get its answer |
 | `commands_send` | Send a command to the app; optionally collect the logs it causes, following a restart |
 | `bookmarks_list` | Events and requests the user bookmarked |
 | `bookmarks_set` | Bookmark an event or request, or remove the bookmark |
@@ -201,6 +207,15 @@ takes focus, unless you pass `reveal: true`.
 3. `commands_send(deviceId: "14", command: "<command>", collectLogsMs: 5000)`.
 4. `logs_query(sessionId: 12, since: "5m")` — reads take a sessionId; a device's live session id is its deviceId.
 5. `devices_disconnect(deviceId: "12")` — only when the user asks to drop Alpha; an app that reconnects on its own comes back in a new session.
+
+### toolboxes — use what the app offers beyond commands
+
+1. `beaver_status()` — pick the app; with several, `devices_set_default(deviceId: "14")` so you can omit `deviceId`.
+2. `toolboxes_list()` — its toolboxes, e.g. `storage (7)`, `app (3)`, `debugfeatures (2)`.
+3. `toolboxes_list(toolbox: "storage")` — each tool's arguments.
+4. `tools_call(name: "storage.get", arguments: {key: "volume"})` — the app's answer.
+5. `tools_call(name: "app.restart")` may time out: the app drops the connection first. `beaver_status()` shows it back in a new session; the default follows it.
+6. `toolboxes_list(deviceId: "beaver")` and `tools_call(deviceId: "beaver", name: "logs.query", arguments: {since: "5m"})` — Beaver's own tools the same way.
 
 ### organise — bookmarks, saved filters, a clean screen
 
