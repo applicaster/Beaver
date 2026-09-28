@@ -142,6 +142,9 @@ Replaces `ToolbarDeviceBadge` in the same capsule chrome, with a chevron.
   Unknown id fails with the list.
 - `commands_send`, `storage_set`, `storage_delete`, `storage_snapshot`
   (reload) send to that session.
+- `commands_list` takes `deviceId` too and answers with that app's commands.
+- Reads without `sessionId` (`resolveSession`): with several live devices,
+  the one the user is viewing, else the newest.
 - **Following a reconnect (D66)** with several devices: the wait moves to a new
   live session if its fingerprint (`app_name`, `device_model`, `platform`)
   matches the ended one; if either fingerprint is unknown, only if exactly one
