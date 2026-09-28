@@ -53,6 +53,8 @@ or a release):
    - "set local storage key `beaverTest` to `1`, then delete it" → the panel
      shows both calls; the delete is highlighted and a toast says
      "Agent: Delete …" with **Journal**.
+   - "what changed in storage since I connected?" → `storage_diff`; the
+     Storages tab's **Changes** button shows the same for the layer on screen.
    - "watch for errors and tell me at the first one" → `watch_start` with
      `notify`; trigger an error on the device: an attention note appears,
      with a toast (Beaver in front) or a macOS notification (Beaver in the
@@ -103,6 +105,7 @@ or a release):
 | `network_get` | One request with headers and bodies |
 | `network_copy` | A request as cURL, fetch() or JSON, with replay warnings |
 | `storage_snapshot` | Session / local / keychain storage, fresh from the app when connected |
+| `storage_diff` | What changed in storage between two snapshots of the session: keys added, removed, changed (old → new), fields inside JSON values; default earliest → latest |
 | `storage_set` | Set a storage key; Beaver re-reads storage and says whether the app applied it |
 | `storage_delete` | Delete a storage key, with the same check |
 | `commands_list` | Commands a connected app accepts (`deviceId` when several are connected) |
@@ -182,6 +185,20 @@ takes focus, unless you pass `reveal: true`.
    Values can't contain spaces: pick another value.
 3. `storage_delete(layer: "local", key: "onboardingDone")`.
 4. `logs_wait(filter: {search: "onboardingDone"})` — what the app did with it.
+
+### storage-changes — what changed in storage after login
+
+1. `logs_query(filter: {search: "login"})` — note the id of the line where
+   login starts.
+2. `storage_diff(beforeEventId: <id>)` — every layer, from the last snapshot
+   before that line to the latest (fresh from the app when connected):
+   `+` added, `-` removed, `~` changed with old → new; a JSON value lists the
+   fields that changed inside it. Or `since: "5m"`; with neither, the whole
+   session (earliest → latest).
+3. The result lists each layer's `snapshots` (id, time): `storage_diff(layer:
+   "local", fromId: <id>, toId: <id>)` compares any two.
+4. "Nothing to compare" means one snapshot per layer: Beaver keeps a new one
+   only when storage changes, and an imported session has one.
 
 ### commands — what the app accepts, and sending one
 

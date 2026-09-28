@@ -414,6 +414,7 @@ private struct StoragesTopBar: View {
     let onAddKey: () -> Void
 
     @AppStorage(storageExportRedactKey) private var redactKeychain = true
+    @State private var showingChanges = false
 
     var body: some View {
         HStack(spacing: 10) {
@@ -482,6 +483,19 @@ private struct StoragesTopBar: View {
                 .help(isClientConnected
                       ? "Re-fetch the device's storage snapshot now (⌘R)"
                       : "Reconnect the device to refresh")
+            }
+
+            // Works on past and imported sessions too: it reads what
+            // Beaver stored, never the device.
+            Button {
+                showingChanges.toggle()
+            } label: {
+                Label("Changes", systemImage: "clock.arrow.circlepath")
+            }
+            .disabled(vm.snapshots[vm.selectedNamespace] == nil)
+            .help("Compare this layer with an earlier snapshot of the session")
+            .popover(isPresented: $showingChanges, arrowEdge: .bottom) {
+                StorageChangesPopover(vm: vm)
             }
 
             // Same two choices as the Log feed's Export, writing the
@@ -680,8 +694,140 @@ private struct StaleStorageBanner: View {
         }
     }
 
-    private static func format(_ date: Date) -> String {
+    fileprivate static func format(_ date: Date) -> String {
         (Calendar.current.isDateInToday(date) ? timeOnly : dateAndTime).string(from: date)
+    }
+}
+
+/// Changes (D80): the layer on screen against an earlier snapshot of this
+/// session, key by key. Beaver keeps a new snapshot only when a layer's
+/// content changes, so the picker lists the moments something did.
+private struct StorageChangesPopover: View {
+    let vm: StoragesViewModel
+    @Environment(AppEnvironment.self) private var env
+    @State private var history: [(id: Int64, takenAt: Date)] = []
+    @State private var baseId: Int64?
+    @State private var changes: [StorageChange] = []
+
+    private var current: StorageSnapshot? { vm.snapshots[vm.selectedNamespace] }
+
+    /// The rows' measured height.
+    @State private var listHeight: CGFloat = 0
+
+    /// Snapshots before the one on screen, newest first.
+    private var earlier: [(id: Int64, takenAt: Date)] {
+        history.filter { $0.id < (current?.id ?? .max) }.reversed()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if earlier.isEmpty {
+                Text("Only one \(vm.selectedNamespace.displayName) snapshot in this session — nothing to compare.")
+                    .fontWeight(.medium)
+                Text("Beaver keeps a new snapshot each time the app's storage changes. An imported session has one.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            } else {
+                Picker("Compare with", selection: $baseId) {
+                    ForEach(earlier, id: \.id) { snap in
+                        Text(StaleStorageBanner.format(snap.takenAt)).tag(Int64?.some(snap.id))
+                    }
+                }
+                .fixedSize()
+                .help("An earlier snapshot of this layer; the time is when the device last reported it")
+                if changes.isEmpty {
+                    Text("No changes").foregroundStyle(.secondary)
+                } else {
+                    Text("\(changes.count) change\(changes.count == 1 ? "" : "s") since then")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    // A ScrollView has no height of its own, so in a popover
+                    // it collapses to nothing: size it to its rows, up to 380.
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(changes, id: \.self) { StorageChangeRow(change: $0) }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { listHeight = $0 }
+                    }
+                    .frame(height: min(380, listHeight))
+                }
+            }
+        }
+        .padding(12)
+        // Top-aligned: the popover doesn't shrink at once when the list
+        // gets shorter, and centred content jumped down.
+        .frame(width: 480, alignment: .topLeading)
+        .frame(maxHeight: 460, alignment: .top)
+        .task(id: current?.id) {
+            history = (try? await env.store.storageSnapshotHistory(
+                sessionId: vm.sessionId, namespace: vm.selectedNamespace)) ?? []
+            // The earliest by default: "what changed during the session".
+            if !earlier.contains(where: { $0.id == baseId }) { baseId = earlier.last?.id }
+        }
+        .task(id: [baseId, current?.id]) {
+            guard let baseId, let current,
+                  let base = try? await env.store.storageSnapshot(id: baseId),
+                  base.namespace == current.namespace else {
+                changes = []
+                return
+            }
+            changes = StorageDiff.changes(from: base.dataJSON, to: current.dataJSON)
+        }
+    }
+}
+
+/// `+` added, `−` removed, `~` changed, then the changed fields inside a
+/// JSON value.
+private struct StorageChangeRow: View {
+    let change: StorageChange
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            mark(change.kind)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(change.path).font(.system(.callout, design: .monospaced)).fontWeight(.medium)
+                if change.fields.isEmpty {
+                    values(change.kind, change.old, change.new)
+                } else {
+                    ForEach(change.fields.prefix(20), id: \.self) { field in
+                        HStack(alignment: .firstTextBaseline, spacing: 4) {
+                            mark(field.kind)
+                            Text(field.path).font(.system(.caption, design: .monospaced))
+                            values(field.kind, field.old, field.new)
+                        }
+                    }
+                    if change.fields.count > 20 {
+                        Text("… \(change.fields.count - 20) more").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+        .textSelection(.enabled)
+    }
+
+    private func mark(_ kind: StorageChange.Kind) -> some View {
+        let (symbol, color): (String, Color) = switch kind {
+        case .added: ("+", .green)
+        case .removed: ("−", .red)
+        case .changed: ("~", .orange)
+        }
+        return Text(symbol)
+            .font(.system(.callout, design: .monospaced).weight(.bold))
+            .foregroundStyle(color)
+    }
+
+    private func values(_ kind: StorageChange.Kind, _ old: String?, _ new: String?) -> some View {
+        let text = switch kind {
+        case .added: new ?? ""
+        case .removed: "was \(old ?? "")"
+        case .changed: "\(old ?? "") → \(new ?? "")"
+        }
+        return Text(text)
+            .font(.system(.caption, design: .monospaced))
+            .foregroundStyle(.secondary)
+            .lineLimit(3)
+            .truncationMode(.middle)
     }
 }
 

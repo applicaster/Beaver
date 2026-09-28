@@ -159,4 +159,66 @@ struct StorageToolsTests {
         let r = try await StorageTools.snapshot.run(ToolArguments(), makeContext(store, ui: HostSnapshot(viewingSessionId: s.id)))
         #expect(r.summary.contains("Not refreshed: no device is connected"))
     }
+
+    @Test("storage_diff: earliest against latest, fresh from the connected app")
+    func diffLive() async throws {
+        let (_, ctx, device) = try await fixture()
+        _ = try await StorageTools.snapshot.run(ToolArguments(["layer": "local"]), ctx)
+        let first = try await StorageTools.diff.run(ToolArguments(["layer": "local"]), ctx)
+        #expect(first.summary.contains("nothing to compare"))
+        _ = try await StorageTools.set.run(
+            ToolArguments(["layer": "local", "key": "onboardingDone", "value": "false"]), ctx)
+        let sentBefore = device.sent.count
+
+        let r = try await StorageTools.diff.run(ToolArguments(["layer": "local"]), ctx)
+        #expect(Array(device.sent.dropFirst(sentBefore)) == ["storage.list"])
+        #expect(r.summary.contains("earliest snapshot → latest: 1 change(s) (local 1). Fresh from Alpha."))
+        #expect(r.body.contains("~ applicaster.v2/onboardingDone: true → false"))
+        let change = r.structured["layers"]?["local"]?["changes"]?.array?.first
+        #expect(change?["change"] == "changed" && change?["old"] == "true" && change?["new"] == "false")
+        #expect(r.structured["layers"]?["local"]?["snapshots"]?.array?.count == 2)
+        #expect(r.next.contains { $0.contains("filter: {search: \"onboardingDone\"}") })
+    }
+
+    @Test("storage_diff: beforeEventId starts from the last snapshot before the event")
+    func diffBeforeEvent() async throws {
+        let store = try LogStore(source: .inMemory)
+        let s = try await store.createSession(source: .imported)
+        func record(_ json: String) async throws {
+            try await store.recordStorageSnapshot(sessionId: s.id, namespace: .local, dataJSON: json)
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        try await record(#"{"ns":{"k":"0"}}"#)
+        try await record(#"{"ns":{"k":"1"}}"#)
+        try await seed(store, session: s.id, [(.info, "auth", "", "login")],
+                       startMillis: UInt64(Date().timeIntervalSince1970 * 1000))
+        try await Task.sleep(for: .milliseconds(5))
+        try await record(#"{"ns":{"k":"1","user":"{\"id\":7}"}}"#)
+        let ctx = makeContext(store)
+        let eventId = try #require(try await store.latestEventId(sessionId: s.id))
+
+        let all = try await StorageTools.diff.run(ToolArguments(["sessionId": JSON(s.id), "layer": "local"]), ctx)
+        #expect(all.summary.contains("2 change(s)"))
+        let after = try await StorageTools.diff.run(
+            ToolArguments(["sessionId": JSON(s.id), "layer": "local", "beforeEventId": JSON(eventId)]), ctx)
+        #expect(after.summary.contains("before event #\(eventId) → latest: 1 change(s)"))
+        #expect(after.body.contains(#"+ ns/user = {"id":7}"#))
+    }
+
+    @Test("storage_diff: one snapshot per layer says so; a wrong id says what to call")
+    func diffNothingToCompare() async throws {
+        let store = try LogStore(source: .inMemory)
+        let s = try await store.createSession(source: .imported)
+        try await store.recordStorageSnapshot(sessionId: s.id, namespace: .local, dataJSON: #"{"ns":{"k":"v"}}"#)
+        let ctx = makeContext(store)
+        let r = try await StorageTools.diff.run(ToolArguments(["sessionId": JSON(s.id)]), ctx)
+        #expect(r.summary.contains("nothing to compare — one snapshot per layer"))
+        #expect(r.next == ["storage_snapshot(sessionId: \(s.id), refresh: false) for what is stored"])
+        do {
+            _ = try await StorageTools.diff.run(ToolArguments(["sessionId": JSON(s.id), "fromId": 999]), ctx)
+            Issue.record("expected an error")
+        } catch let error as ToolError {
+            #expect(error.message.contains("storage_diff(sessionId: \(s.id))"))
+        }
+    }
 }

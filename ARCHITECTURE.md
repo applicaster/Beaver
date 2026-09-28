@@ -171,6 +171,9 @@ CREATE TABLE storage_snapshot (
   namespace    TEXT NOT NULL,          -- 'session' | 'local' | 'keychain'
   data_json    TEXT NOT NULL
 );
+-- A new row only when a layer's content changes; an unchanged report
+-- moves the latest row's taken_at. The rows are the layer's history:
+-- the Storages tab's Changes and `storage_diff` compare two (D80).
 
 CREATE TABLE saved_filter (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -387,6 +390,7 @@ Beaver/
 │   │   ├── JSONKind.swift          (D18 typed tree)
 │   │   ├── LogLevel.swift
 │   │   ├── Session.swift
+│   │   ├── StorageDiff.swift       (D80 snapshot diff)
 │   │   ├── StorageRecord.swift
 │   │   └── StorageSnapshot.swift
 │   ├── Store/
