@@ -16,6 +16,23 @@ extension EnvironmentValues {
     /// shows them all — Storages and Network; the log detail pane sets
     /// it, since an event payload can hold arrays of thousands.
     @Entry var jsonTreePageSize: Int? = nil
+    /// The log detail pane's find (D84). `nil` everywhere else.
+    @Entry var jsonTreeFind: JSONTreeFind? = nil
+}
+
+/// What the detail pane's find asks of one tree: paint `term`, open the
+/// path in `reveal` and outline `currentId`, the match being shown.
+/// Computed, not stored in the rows' state, so the whole path opens in
+/// one update and the match is there to scroll to.
+struct JSONTreeFind: Equatable {
+    var term: String
+    var isRegex: Bool
+    var currentId: String? = nil
+    /// `DetailFind.Match.reveal`: parent id → index of the child to show.
+    var reveal: [String: Int] = [:]
+
+    /// `.id` of the current match's row, for `ScrollViewProxy.scrollTo`.
+    static let anchor = "detail-find-current"
 }
 
 /// Recursive JSON tree, shared by the log detail pane (DATA / CONTEXT)
@@ -50,6 +67,7 @@ struct JSONTreeView: View {
     /// Containers start open (the structure is the point); a decodable
     /// leaf starts closed, so a payload full of tokens isn't unrolled.
     @State private var expandedOverride: Bool?
+    @Environment(\.jsonTreeFind) private var find
 
     private static let indentStep: CGFloat = 14
 
@@ -83,15 +101,28 @@ struct JSONTreeView: View {
         hasChildren || decodedContent != nil
     }
 
+    /// On the way to the current find match: open whatever the user chose.
     private var isExpanded: Bool {
-        expandedOverride ?? ((expandsRoot && canOpen) || (hasChildren && depth < Self.autoExpandDepth))
+        find?.reveal[record.id] != nil
+            || expandedOverride ?? ((expandsRoot && canOpen) || (hasChildren && depth < Self.autoExpandDepth))
+    }
+
+    private var isCurrentMatch: Bool {
+        find?.currentId == record.id
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 disclosureChevron
-                JSONTreeRow(record: record, decode: decode, rowIndex: rowIndex)
+                JSONTreeRow(record: record, decode: decode, rowIndex: rowIndex,
+                            highlight: find?.term, isRegex: find?.isRegex ?? false)
+                    .overlay {
+                        if isCurrentMatch {
+                            RoundedRectangle(cornerRadius: 4)
+                                .strokeBorder(Color.accentColor, lineWidth: 2)
+                        }
+                    }
             }
             .padding(.leading, CGFloat(depth) * Self.indentStep)
             .contentShape(Rectangle())
@@ -99,6 +130,7 @@ struct JSONTreeView: View {
                 guard canOpen else { return }
                 expandedOverride = !isExpanded
             }
+            .id(isCurrentMatch ? JSONTreeFind.anchor : record.id)
 
             if isExpanded {
                 if let decoded = decodedContent {
@@ -108,7 +140,7 @@ struct JSONTreeView: View {
                         // re-encoding to write back — copy-only.
                         .environment(\.storageFieldEditor, nil)
                 } else if let children = record.children, !children.isEmpty {
-                    JSONTreeList(children: children, depth: depth + 1)
+                    JSONTreeList(children: children, depth: depth + 1, parentId: record.id)
                 }
             }
         }
@@ -166,13 +198,21 @@ struct JSONTreeView: View {
 struct JSONTreeList: View {
     let children: [StorageRecord]
     var depth: Int = 0
+    /// The row these are the children of — what find's `reveal` is keyed by.
+    var parentId: String? = nil
 
     @Environment(\.jsonTreePageSize) private var pageSize
+    @Environment(\.jsonTreeFind) private var find
     /// Pages revealed so far with "Show more".
     @State private var pages = 1
 
+    /// Also down to the page holding the current find match.
     private var shown: Int {
         guard let pageSize else { return children.count }
+        var pages = self.pages
+        if let parentId, let index = find?.reveal[parentId] {
+            pages = max(pages, index / pageSize + 1)
+        }
         return min(children.count, pageSize * pages)
     }
 
@@ -199,6 +239,8 @@ private struct JSONTreeRow: View {
     let record: StorageRecord
     let decode: LeafDecode?
     let rowIndex: Int
+    var highlight: String? = nil
+    var isRegex = false
 
     @State private var isHovered = false
     @Environment(\.storageFieldEditor) private var editor
@@ -208,7 +250,9 @@ private struct JSONTreeRow: View {
             JSONSyntax.row(
                 key: record.key,
                 isArrayIndex: record.key.looksLikeJSONArrayIndex,
-                kind: record.kind
+                kind: record.kind,
+                highlight: highlight,
+                isRegex: isRegex
             )
             .textSelection(.enabled)
             .lineLimit(1)

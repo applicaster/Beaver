@@ -186,7 +186,7 @@ buttons and the underlying global-occurrence-index machinery are removed.
 - Adds a `highlightedAttributedString(for:term:)` helper that runs once per
   row on filter change.
 - Detail pane gets a Cmd-F / Cmd-G text search later if intra-message
-  navigation is ever requested.
+  navigation is ever requested. → Done in D84 (⌥⌘F, Return / ⇧Return).
 
 ---
 
@@ -2785,3 +2785,39 @@ won't decode, and the feed starts unfiltered once.
   explain than an age); purge on the very first launch (a 3-month store
   loses two months without warning); `VACUUM` after every purge (seconds
   each time and needs free disk the store's size).
+## D84. Find inside the event detail pane: ⌥⌘F, stepped with Return
+
+**Status:** Accepted (2026-09-28). Picks up D5's deferred detail search.
+
+- **Decision:** ⌥⌘F (or the magnifier next to the level in the pane)
+  opens a find bar over the selected event. It matches the message and
+  every key and stored value of DATA and CONTEXT (`DetailFind`, the same
+  matcher as Storages' Discover, `.*` for regex), highlights all hits,
+  shows "n of N", and Return / ⇧Return (or ▲ ▼) step through them. The
+  current match is outlined; the path to it opens — collapsed rows and
+  "Show more" pages — and it scrolls into view. Esc closes. The term stays
+  as the selection moves; matches are per event.
+- **Why ⌥⌘F, not ⌘F:** ⌘F already means "filter the feed" wherever focus
+  is (`LogFeedShortcuts`), and the pane — text and trees, no focusable
+  control — has no focus state to switch on, so ⌘F would depend on where
+  the last click landed. A second chord is predictable. ⌘G / ⇧⌘G stay
+  the feed's match steps for the same reason; the find field steps with
+  Return like Storages' Discover field.
+- **Why a row, not an occurrence:** a match is a tree row (key or value),
+  as in Discover. The message counts as one match: SwiftUI `Text` can't
+  scroll to a range inside it, so every occurrence is highlighted instead.
+- **Performance:** the search walks the trees the pane already parsed —
+  nothing is decoded again — off the main thread, 150 ms after typing
+  stops. Opening the path is computed from the current match rather than
+  stored in each row, so it opens in one update and doesn't stay open
+  after moving on.
+- **Not searched:** views decoded out of a string leaf (Base64 / JWT /
+  JSON text, `LeafDecoder`) — the raw string is searched instead. Network
+  detail has no find yet: its headers are a grid, bodies switch to raw
+  text and sections collapse, so the same component doesn't fit
+  without more work.
+- **Alternatives:** ⌘F when the pane has focus (see above); per-occurrence
+  stepping inside the message (needs an `NSTextView`).
+- **MCP:** no tool. Find is a way to look at a payload agents already read
+  whole through `logs_get` (and filter events by text with `logs_query`);
+  the CLAUDE.md MCP rule covers capabilities, not ways of viewing.

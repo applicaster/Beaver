@@ -33,6 +33,12 @@ When releasing:
   deleting starts a day later, or at once when you pick a period in the
   menu. `beaver_status` reports the setting
   (`retentionDays`) and the store's size (`storeBytes`).
+- **Find in the event detail pane:** ⌥⌘F (or the magnifier next to the
+  level) opens a find bar over the selected event. It matches the message
+  and the keys and values of DATA and CONTEXT, highlights every hit, shows
+  "n of N", and Return / ⇧Return step through them, opening collapsed rows
+  and "Show more" pages to scroll each one into view. `.*` for regex, Esc
+  closes. ⌘F still filters the feed.
 - Drop a session file (`.json`) or HAR anywhere on the window to import
   it, the same as Import. A file Beaver can't open now says so instead of
   doing nothing.
