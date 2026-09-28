@@ -130,6 +130,7 @@ or a release):
 | `ui_state` | What Beaver's window shows: tab, session, filters, selection, whether it is in front |
 | `ui_show` | Point the window at a tab, session, filter or row — in the background unless `reveal: true` |
 | `scheme_build` | Build a deep link into a Zapp app (Scheme Generator): open, present, web page, layout, X-Ray, native and plugin hosts, with the app's scheme from its storage; fill the form on screen, copy it, save its QR code |
+| `app_info` | What app and device a session is: app/SDK/QuickBrick versions, Zapp ids, screens, cell styles, plugins, device model/OS/language/country/advertising id — each value with its source (storage, CMS with the user's Zapp token, config files, logs). |
 | `beaver_guide` | These recipes, by topic |
 
 Conventions: omitting `sessionId` means the live session (with several
@@ -176,6 +177,12 @@ takes focus, unless you pass `reveal: true`.
 2. `network_get(id: <id>)` — headers and bodies.
 3. `network_copy(id: <id>, format: "curl")` — to replay it; the result says
    which headers were redacted and whether the body was cut.
+
+### app-info — what app and device is this
+
+1. `app_info(sessionId)` — versions, Zapp ids, the layout's screens and plugins, the device and its advertising id, each with where it came from.
+2. No CMS fields? The user can set a Zapp token: app menu → Zapp Access Token….
+3. `ui_show(tab: "info")` to show it to the user.
 
 ### storage — read and change what the app has stored
 

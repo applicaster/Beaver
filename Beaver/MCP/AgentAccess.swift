@@ -250,6 +250,12 @@ public actor AgentAccess {
             example: "Use beaver: build a myapp link to the movie screen for id 42 and show it in the Scheme Generator.",
             tools: ["scheme_build"]),
         Capability(
+            icon: "info.circle",
+            title: "Tell what app and device this is",
+            note: "App and SDK versions, Zapp ids, screens, plugins, the device and its advertising id — each value with where it came from.",
+            example: "Use beaver: which app version, SDK and plugins is this session running?",
+            tools: ["app_info"]),
+        Capability(
             icon: "hand.point.up.left",
             title: "Show you what it found",
             note: "Point Beaver's window at a tab, filter or row without taking focus, and leave notes here with clickable links.",

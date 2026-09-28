@@ -217,6 +217,8 @@ struct MainWindow: View {
                 .tag(UITab.storages)
             Label("Network",   systemImage: "network")
                 .tag(UITab.network)
+            Label("Info",      systemImage: "info.circle")
+                .tag(UITab.info)
             Label("Sessions",  systemImage: "clock.arrow.circlepath")
                 .tag(UITab.sessions)
             // Tools that don't depend on a session, apart like in zapp-support.
@@ -271,6 +273,12 @@ struct MainWindow: View {
                         pendingLogFeedJump = Date(timeIntervalSince1970: Double(entry.startMillis) / 1000)
                         env.selectedTab = .logs
                     })
+                } else {
+                    ConnectionPlaceholder(state: env.serverState)
+                }
+            case .info:
+                if let sid = env.viewingSessionId {
+                    InfoView(sessionId: sid).id(sid)
                 } else {
                     ConnectionPlaceholder(state: env.serverState)
                 }
@@ -665,11 +673,11 @@ private struct ToolbarDeviceBadge: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .help(Self.fingerprint(session))
+        .help(session.contextLine)
         .contextMenu {
             Button("Copy device fingerprint") {
                 NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(Self.fingerprint(session), forType: .string)
+                NSPasteboard.general.setString(session.fingerprint(capturedAt: Date()), forType: .string)
                 toasts.success("Copied device fingerprint")
             }
         }
@@ -686,16 +694,6 @@ private struct ToolbarDeviceBadge: View {
     static func subtitle(_ s: Session) -> String {
         var parts: [String] = []
         if let v = s.appVersion { parts.append(v) }
-        if let d = s.deviceModel { parts.append(d) }
-        if let os = s.osVersion { parts.append((s.platform ?? "OS") + " " + os) }
-        return parts.joined(separator: " · ")
-    }
-
-    /// One-line string used by both the help tooltip and the
-    /// right-click copy action.
-    static func fingerprint(_ s: Session) -> String {
-        var parts: [String] = []
-        if let n = s.appName { parts.append(n + (s.appVersion.map { " \($0)" } ?? "")) }
         if let d = s.deviceModel { parts.append(d) }
         if let os = s.osVersion { parts.append((s.platform ?? "OS") + " " + os) }
         return parts.joined(separator: " · ")

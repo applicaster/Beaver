@@ -1304,6 +1304,20 @@ public actor LogStore {
         )
     }
 
+    /// The payloads of the logs App Info reads visited screens from
+    /// (D79): Google Analytics screen views and the Navigator's.
+    public func screenLogPayloads(sessionId: Int64) async throws -> [(subsystem: String, dataJSON: String)] {
+        try await dbQueue.read { db in
+            // ponytail: scans the session's GA/Navigator rows each time; add a cap if sessions get huge.
+            try Row.fetchAll(db, sql: """
+                SELECT subsystem, data_json FROM event
+                WHERE session_id = ? AND data_json IS NOT NULL
+                  AND (subsystem LIKE '%google-analytics%' OR subsystem LIKE '%/Navigator')
+                ORDER BY id
+            """, arguments: [sessionId]).map { (subsystem: $0["subsystem"], dataJSON: $0["data_json"]) }
+        }
+    }
+
     public func latestStorageSnapshot(
         sessionId: Int64,
         namespace: StorageSnapshot.Namespace
