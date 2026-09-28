@@ -25,9 +25,11 @@ public protocol AgentUI: Sendable {
 
 public struct HostSnapshot: Sendable, Equatable {
     public var serverState: String
-    public var deviceConnected: Bool
-    public var liveSessionId: Int64?
-    public var commands: [CommandHint]
+    /// One per connected device, oldest first (D73). A device's MCP
+    /// `deviceId` is its live session id.
+    public var liveSessionIds: [Int64]
+    /// Each live app's `cmdlist` answer.
+    public var commandsBySession: [Int64: [CommandHint]]
     public var deviceURL: String?
     public var beaverVersion: String
     public var mcpPort: UInt16
@@ -38,6 +40,8 @@ public struct HostSnapshot: Sendable, Equatable {
     /// Beaver is the active app.
     public var frontmost: Bool
 
+    public var deviceConnected: Bool { !liveSessionIds.isEmpty }
+
     /// The session the window shows.
     public var viewingSessionId: Int64? {
         get { ui.sessionId }
@@ -45,15 +49,16 @@ public struct HostSnapshot: Sendable, Equatable {
     }
     public var notifications: AgentNotifications.State
 
-    public init(serverState: String = "listening", deviceConnected: Bool = false,
-                liveSessionId: Int64? = nil, viewingSessionId: Int64? = nil,
-                commands: [CommandHint] = [], deviceURL: String? = "ws://192.168.1.5:9080",
+    public init(serverState: String = "listening", liveSessionIds: [Int64] = [],
+                viewingSessionId: Int64? = nil, commandsBySession: [Int64: [CommandHint]] = [:],
+                deviceURL: String? = "ws://192.168.1.5:9080",
                 beaverVersion: String = "dev", mcpPort: UInt16 = 9081,
                 ui: UIState = UIState(), windowOpen: Bool = true, frontmost: Bool = false,
                 notifications: AgentNotifications.State = .allowed) {
-        self.serverState = serverState; self.deviceConnected = deviceConnected
-        self.liveSessionId = liveSessionId
-        self.commands = commands; self.deviceURL = deviceURL
+        self.serverState = serverState
+        self.liveSessionIds = liveSessionIds
+        self.commandsBySession = commandsBySession
+        self.deviceURL = deviceURL
         self.beaverVersion = beaverVersion; self.mcpPort = mcpPort
         self.ui = ui; self.windowOpen = windowOpen; self.frontmost = frontmost
         if let viewingSessionId { self.ui.sessionId = viewingSessionId }
@@ -61,10 +66,11 @@ public struct HostSnapshot: Sendable, Equatable {
     }
 }
 
-/// How tools reach the connected app (design M15, D57). `WSServer` is the
-/// live one; tests use a fake.
+/// How tools reach the connected apps (design M15, D57, D73). The app
+/// environment routes to the right connection; tests use a fake.
 public protocol DeviceLink: Sendable {
-    func send(command: String) async
+    /// Sends to the device whose live session is `sessionId`; no-op once it's gone.
+    func send(command: String, to sessionId: Int64) async
 }
 
 

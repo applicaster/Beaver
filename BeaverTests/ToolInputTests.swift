@@ -52,7 +52,7 @@ struct ToolInputTests {
         let live = try await store.createSession(source: .live)
         #expect(try await makeContext(store).resolveSession(ToolArguments()).id == live.id)
         #expect(try await makeContext(store).resolveSession(ToolArguments()).how == .latest)
-        #expect(try await makeContext(store, ui: HostSnapshot(liveSessionId: live.id))
+        #expect(try await makeContext(store, ui: HostSnapshot(liveSessionIds: [live.id]))
             .resolveSession(ToolArguments()).how == .live)
         #expect(try await makeContext(store, ui: HostSnapshot(viewingSessionId: old.id))
             .resolveSession(ToolArguments()).id == old.id)
@@ -74,7 +74,7 @@ struct ToolInputTests {
         #expect(try await makeContext(store)
             .resolveSession(ToolArguments(["sessionId": .number(Double(imported.id))])).label == "#\(imported.id) (imported)")
         // .live / .viewed report how the session was picked, not its source.
-        #expect(try await makeContext(store, ui: HostSnapshot(liveSessionId: live.id))
+        #expect(try await makeContext(store, ui: HostSnapshot(liveSessionIds: [live.id]))
             .resolveSession(ToolArguments()).label == "#\(live.id) (live)")
         #expect(try await makeContext(store, ui: HostSnapshot(viewingSessionId: imported.id))
             .resolveSession(ToolArguments()).label == "#\(imported.id) (viewed)")

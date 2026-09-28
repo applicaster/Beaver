@@ -65,7 +65,7 @@ extension ToolContext {
                               timeout: Duration, untilFirst: Bool) async throws -> WaitResult {
         let follows = start.how != .given
         var segments = [WaitSegment(sessionId: start.id, afterId: afterId)]
-        var lastLive = await ui.snapshot().liveSessionId
+        var lastLive = await ui.snapshot().liveSessionIds.last
         let pinnedWasLive = !follows && lastLive == start.id
         var result = WaitResult(sessionId: start.id)
         let deadline = ContinuousClock.now + timeout
@@ -80,7 +80,7 @@ extension ToolContext {
                 return result
             }
             try? await Task.sleep(for: Self.pollInterval)
-            let live = await ui.snapshot().liveSessionId
+            let live = await ui.snapshot().liveSessionIds.last
             guard live != lastLive else { continue }
             lastLive = live
             if follows {
@@ -113,20 +113,34 @@ extension ToolContext {
         return (events, total)
     }
 
-    /// Design M25: tools that talk to the device take an optional deviceId;
-    /// today there is one device, "current".
+    /// Design M25 / D73: tools that talk to a device take an optional
+    /// deviceId — the device's live session id, as beaver_status lists it.
+    /// With one device it may be omitted; with several it may not.
     public func requireDevice(_ args: ToolArguments, doing what: String) async throws
         -> (host: HostSnapshot, liveSessionId: Int64) {
         let host = await ui.snapshot()
-        if let id = try args.string("deviceId"), id != "current" {
-            throw ToolError("No device \"\(id)\". Connected: \(host.deviceConnected ? "\"current\"" : "none"). "
-                + "Example: omit deviceId — Beaver has one device at a time.")
-        }
-        guard host.deviceConnected, let live = host.liveSessionId else {
+        let live = host.liveSessionIds
+        guard !live.isEmpty else {
             throw ToolError("No device is connected, so Beaver can't \(what). Ask the user to open the app with "
                 + "remote assistance pointed at \(host.deviceURL ?? "Beaver"), then call beaver_status().")
         }
-        return (host, live)
+        let wanted = try args.string("deviceId")
+        // args.string turns a number into text; accept "12", 12 and 12.0.
+        if let wanted, let id = Int64(wanted) ?? Double(wanted).flatMap({ Int64(exactly: $0) }),
+           live.contains(id) { return (host, id) }
+        if wanted == nil, live.count == 1 { return (host, live[0]) }
+        let list = try await describeDevices(live)
+        let lead = wanted.map { "No connected device \"\($0)\"." }
+            ?? "\(live.count) devices are connected; say which one with deviceId."
+        throw ToolError("\(lead) Connected: \(list). Example: deviceId: \"\(live[0])\".")
+    }
+
+    /// `"12" (Alpha 1.0 · iPhone 15, iOS 18.0), "14" (…)`.
+    public func describeDevices(_ ids: [Int64]) async throws -> String {
+        let sessions = try await store.sessions()
+        return ids.map { id in
+            "\"\(id)\"" + (sessions.first { $0.id == id }.map { " (\(StatusTools.describeDevice($0)))" } ?? "")
+        }.joined(separator: ", ")
     }
 
     /// Design §7.2: when the device drops within `window` after an agent's
@@ -140,13 +154,13 @@ extension ToolContext {
             while ContinuousClock.now < dropDeadline {
                 try? await Task.sleep(for: Self.pollInterval)
                 guard !Task.isCancelled else { return }
-                guard await ui.snapshot().liveSessionId != sessionId else { continue }
+                guard await ui.snapshot().liveSessionIds.last != sessionId else { continue }
                 let backDeadline = ContinuousClock.now + window
-                var back = await ui.snapshot().liveSessionId
+                var back = await ui.snapshot().liveSessionIds.last
                 while back == nil, ContinuousClock.now < backDeadline {
                     try? await Task.sleep(for: Self.pollInterval)
                     guard !Task.isCancelled else { return }
-                    back = await ui.snapshot().liveSessionId
+                    back = await ui.snapshot().liveSessionIds.last
                 }
                 guard !Task.isCancelled else { return }
                 let outcome = back.map { " → session #\($0)" } ?? "; not back after \(window.components.seconds) s"

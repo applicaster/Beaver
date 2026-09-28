@@ -46,15 +46,16 @@ final class FakeUI: AgentUI {
 /// The app on the other end of the WebSocket. `onSend` plays its part:
 /// log a line, answer storage.list.
 final class FakeDevice: DeviceLink {
-    private let log = Mutex<[String]>([])
+    private let log = Mutex<[(command: String, sessionId: Int64)]>([])
     private let onSend: @Sendable (String) async -> Void
 
     init(onSend: @escaping @Sendable (String) async -> Void = { _ in }) { self.onSend = onSend }
 
-    var sent: [String] { log.withLock { $0 } }
+    var sent: [String] { log.withLock { $0.map(\.command) } }
+    var targets: [Int64] { log.withLock { $0.map(\.sessionId) } }
 
-    func send(command: String) async {
-        log.withLock { $0.append(command) }
+    func send(command: String, to sessionId: Int64) async {
+        log.withLock { $0.append((command, sessionId)) }
         await onSend(command)
     }
 }

@@ -159,7 +159,7 @@ extension ToolContext {
                 try? await Task.sleep(for: Self.watchPollInterval)
                 guard let current = await watches.get(w.name), current.startedAt == w.startedAt,
                       current.firedAt == nil else { return }
-                if w.follows, let live = await ui.snapshot().liveSessionId, live > w.sessionId,
+                if w.follows, let live = await ui.snapshot().liveSessionIds.last, live > w.sessionId,
                    !segments.contains(where: { $0.sessionId == live }) {
                     segments.append(WaitSegment(sessionId: live, afterId: 0))
                 }

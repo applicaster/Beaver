@@ -26,15 +26,15 @@ enum CommandTools {
         guard let command = try args.string("command").flatMap(ToolContext.trimmedNonEmpty) else {
             throw ToolError("command is required. Example: commands_send(command: \"storage.list\") — commands_list() shows what the app accepts.")
         }
-        _ = try await ctx.requireDevice(args, doing: "send a command")
-        let session = try await ctx.resolveSession(ToolArguments())
+        let (_, live) = try await ctx.requireDevice(args, doing: "send a command")
+        let session = try await ctx.liveSession(live)
         let collect = min(maxCollectMillis, max(0, try args.int("collectLogsMs") ?? 0))
         let limit = try args.limit(default: 100, max: 500)
         let filter = collect > 0 ? try await ctx.resolveFilter(args, sessionId: session.id)
                                  : ResolvedFilter(filter: .none, notes: [])
         let before = try await ctx.store.latestEventId(sessionId: session.id) ?? 0
 
-        await ctx.device.send(command: command)
+        await ctx.device.send(command: command, to: live)
         await ctx.ui.didSendCommand(command)
         await ctx.watchForDisconnect(after: command, sessionId: session.id)
 

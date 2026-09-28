@@ -23,6 +23,10 @@ public actor WSServer {
         case failed(reason: String)
     }
 
+    /// A client's frames, bracketed by its connect and disconnect, in
+    /// order. One stream so the consumer opens the session before it
+    /// sees the first frame and ends it after the last one — `state`
+    /// is a separate stream and gives no ordering against frames.
     /// Every item says which connection it came from (D73).
     public enum Inbound: Sendable, Equatable {
         case connected(UUID)
@@ -231,8 +235,12 @@ public actor WSServer {
             ready.insert(id)
             stateContinuation.yield(.clientConnected(count: ready.count))
             inboundContinuation.yield(.connected(id))
+            // Read only after `.connected` is out: a frame the client
+            // sends at once would otherwise be yielded first.
             receive(on: connection, id: id)
         case .failed(let error):
+            // A failed connection holds its resources — and this handler,
+            // which holds it — until cancelled.
             connection.cancel()
             drop(id, reason: error.localizedDescription)
         case .cancelled:
@@ -255,6 +263,13 @@ public actor WSServer {
         inboundContinuation.yield(.disconnected(id))
     }
 
+    /// Yields straight from the callback: a `Task` per frame gives no
+    /// ordering guarantee, and an older storage snapshot overtaking a
+    /// newer one would win as "latest".
+    ///
+    /// Control frames (ping, pong, close) are delivered here too, even
+    /// with `autoReplyPing` answering the ping. They carry no protocol
+    /// frame, so only data messages go on to the decoder (PROTOCOL.md §1).
     private nonisolated func receive(on connection: NWConnection, id: UUID) {
         connection.receiveMessage { [weak self] data, context, _, error in
             guard let self else { return }
@@ -269,7 +284,9 @@ public actor WSServer {
         }
     }
 
-    /// No-op when that connection is gone.
+    // MARK: - Outbound
+
+    /// Send a command frame to one client. No-op when that connection is gone.
     public func send(command: String, to connection: UUID) {
         guard let target = connections[connection],
               let payload = try? ProtocolEncoder.encodeCommand(command) else { return }

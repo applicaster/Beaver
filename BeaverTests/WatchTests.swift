@@ -9,7 +9,7 @@ struct WatchTests {
         let store = try LogStore(source: .inMemory)
         let s = try await store.createSession(source: .live)
         try await seed(store, session: s.id, [(.error, "player.core", "", "old error")])
-        let ui = FakeUI(value: HostSnapshot(deviceConnected: true, liveSessionId: s.id))
+        let ui = FakeUI(value: HostSnapshot(liveSessionIds: [s.id]))
         return (store, s, ui, makeContext(store, fakeUI: ui))
     }
 
@@ -64,7 +64,7 @@ struct WatchTests {
         _ = try await WatchTools.start.run(ToolArguments(["name": "pinned", "filter": ["search": "hit"],
                                                           "sessionId": JSON(a.id)]), ctx)
         let b = try await store.createSession(source: .live)
-        ui.update { $0.liveSessionId = b.id }
+        ui.update { $0.liveSessionIds = [b.id] }
         try await seed(store, session: b.id, [(.info, "a", "", "hit")])
         let status = try await WatchTools.status.run(ToolArguments(), ctx)
         let byName = Dictionary(uniqueKeysWithValues: (status.structured["watches"]?.array ?? [])
@@ -83,7 +83,7 @@ struct WatchTests {
         let firstId = try #require(try await store.latestEventId(sessionId: a.id))
         try await Task.sleep(for: .milliseconds(700))
         let b = try await store.createSession(source: .live)
-        ui.update { $0.liveSessionId = b.id }
+        ui.update { $0.liveSessionIds = [b.id] }
         try await seed(store, session: b.id, [(.info, "a", "", "noise"), (.error, "a", "", "after restart")])
         var notes: [AgentActivity] = []
         for _ in 0..<50 where notes.isEmpty {

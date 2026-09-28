@@ -61,7 +61,7 @@ enum StorageTools {
         }
         let found = out.count
         let host = await ctx.ui.snapshot()
-        let isLive = host.deviceConnected && host.liveSessionId == s.id
+        let isLive = host.liveSessionIds.contains(s.id)
         return ToolResult(
             summary: found == 0
                 ? "No storage snapshot in session \(s.label) yet.\(refreshNote)"
@@ -82,9 +82,9 @@ enum StorageTools {
                               layers: [StorageSnapshot.Namespace], _ ctx: ToolContext) async throws -> String {
         guard try args.bool("refresh") ?? true else { return " Stored snapshot (refresh: false)." }
         let host = await ctx.ui.snapshot()
-        guard host.deviceConnected, host.liveSessionId == s.id else {
+        guard host.liveSessionIds.contains(s.id) else {
             return host.deviceConnected
-                ? " Not refreshed: session #\(s.id) isn't the live one."
+                ? " Not refreshed: session #\(s.id) isn't live."
                 : " Not refreshed: no device is connected; this is the last stored snapshot."
         }
         let timeout = min(30_000, max(0, try args.int("timeoutMs") ?? 5_000))
@@ -176,7 +176,7 @@ enum StorageTools {
     static func edit(_ action: StorageCommand.Action, layer: StorageSnapshot.Namespace, key: String,
                      value: String?, parent: String?, _ args: ToolArguments, _ ctx: ToolContext) async throws -> ToolResult {
         let (host, live) = try await ctx.requireDevice(args, doing: "change its storage")
-        guard StorageCommand.isSupported(action, in: layer, by: host.commands.map(\.name)) else {
+        guard StorageCommand.isSupported(action, in: layer, by: (host.commandsBySession[live] ?? []).map(\.name)) else {
             throw ToolError("This app doesn't accept \(StorageCommand.name(action, in: layer)) (it isn't in commands_list()), "
                 + "so Beaver can't \(action.rawValue) \(layer.wireKey) keys. storage_snapshot() still reads them.")
         }
