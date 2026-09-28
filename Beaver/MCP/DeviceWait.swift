@@ -57,8 +57,9 @@ struct WaitSegment: Sendable {
 /// a new live session continues the device when its fingerprint matches;
 /// when either fingerprint is still unknown, only if it is the one session
 /// that came up since the last look.
-// ponytail: fingerprint heuristic — two identical builds on two simulators
-// look alike. A stable device id from the SDK would replace it.
+// ponytail: the fingerprint heuristic is now the fallback for SDKs without a
+// client handshake (D77). A session whose handshake lands after the 250 ms
+// poll that sees it appear is judged by fingerprint on that poll.
 struct DeviceFollower: Sendable {
     enum Step: Equatable { case same, moved(Int64), gone }
 
@@ -97,7 +98,13 @@ struct DeviceFollower: Sendable {
     }
 
     static func successor(of ended: Session, live: [Session], appeared: Set<Int64>) -> Int64? {
-        let newer = live.filter { $0.id > ended.id }
+        // D77: a known device id decides; a different known one is another device.
+        let newer = live.filter {
+            $0.id > ended.id && (ended.deviceUID == nil || $0.deviceUID == nil || $0.deviceUID == ended.deviceUID)
+        }
+        if let uid = ended.deviceUID, let same = newer.filter({ $0.deviceUID == uid }).map(\.id).max() {
+            return same
+        }
         if let print = ended.fingerprint,
            let same = newer.filter({ $0.fingerprint == print }).map(\.id).max() {
             return same
