@@ -9,18 +9,17 @@ import Foundation
 extension AppEnvironment: AgentUI {
     nonisolated public func snapshot() async -> HostSnapshot {
         await MainActor.run {
-            let (connected, state): (Bool, String) = switch serverState {
-            case .stopped: (false, "stopped")
-            case .listening: (false, "listening")
-            case .clientConnected: (true, "clientConnected")
-            case .clientDisconnected(let reason): (false, "clientDisconnected: \(reason)")
-            case .failed(let reason): (false, "failed: \(reason)")
+            let state: String = switch serverState {
+            case .stopped: "stopped"
+            case .listening: "listening"
+            case .clientConnected: "clientConnected"
+            case .clientDisconnected(let reason): "clientDisconnected: \(reason)"
+            case .failed(let reason): "failed: \(reason)"
             }
             return HostSnapshot(
                 serverState: state,
-                deviceConnected: connected,
-                liveSessionId: currentSessionId,
-                commands: availableCommands,
+                liveSessionIds: live.sessionIds,
+                commandsBySession: live.commands,
                 deviceURL: NetworkInterface.bestAddress().map { "ws://\($0):9080" },
                 beaverVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev",
                 mcpPort: agentAccessPort ?? 0,
@@ -94,7 +93,7 @@ extension AppEnvironment: AgentUI {
     /// Toast "Show", a notification click and a journal link all end here
     /// (MainWindow, `.beaverShowAgentLink`).
     func open(_ link: JournalLink, reveal: Bool) async throws {
-        _ = try await UITools.open(link, reveal: reveal, ToolContext(store: store, ui: self, device: server))
+        _ = try await UITools.open(link, reveal: reveal, ToolContext(store: store, ui: self, device: self))
     }
 
     nonisolated public func didSendCommand(_ command: String) async {

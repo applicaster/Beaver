@@ -155,13 +155,15 @@ extension ToolContext {
             var segments = [WaitSegment(sessionId: w.sessionId, afterId: w.startId)]
             var total = 0
             var first: EventRecord?
+            var device = DeviceFollower(start: w.sessionId, live: await ui.snapshot().liveSessionIds)
             while !Task.isCancelled {
                 try? await Task.sleep(for: Self.watchPollInterval)
                 guard let current = await watches.get(w.name), current.startedAt == w.startedAt,
                       current.firedAt == nil else { return }
-                if w.follows, let live = await ui.snapshot().liveSessionId, live > w.sessionId,
-                   !segments.contains(where: { $0.sessionId == live }) {
-                    segments.append(WaitSegment(sessionId: live, afterId: 0))
+                if w.follows,
+                   case .moved(let next)? = await device.step(live: await ui.snapshot().liveSessionIds, store: store),
+                   !segments.contains(where: { $0.sessionId == next }) {
+                    segments.append(WaitSegment(sessionId: next, afterId: 0))
                 }
                 for (i, s) in segments.enumerated() {
                     // The newest match after the cursor, and how many there are.

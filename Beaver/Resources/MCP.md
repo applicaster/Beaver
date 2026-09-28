@@ -69,14 +69,16 @@ or a release):
    **request #…**): the popover closes and Beaver shows it.
 9. Turn **Agent Access (MCP)** off in the app menu: the `curl` above now fails
    to connect.
-10. Report problems with the Beaver version (Beaver → About) and the Agent
+10. Connect two apps (two simulators, or a simulator and a phone): both
+   appear in the menu behind the toolbar's Connected pill, and `beaver_status` lists both.
+11. Report problems with the Beaver version (Beaver → About) and the Agent
    panel's **Copy** output.
 
 ## Tools
 
 | Tool | What it does |
 |---|---|
-| `beaver_status` | Device, live and viewed session, latest event id, where the device connects |
+| `beaver_status` | Every connected device (its `id` is the `deviceId` other tools take), live and viewed session, latest event id, where the device connects |
 | `sessions_list` | Stored sessions, newest first, with app, device and counts |
 | `sessions_import` | Open a Beaver / zapp-support JSON or a HAR file as a new session |
 | `sessions_export` | Write a session (or a filtered part) as JSON, or its requests as HAR |
@@ -92,7 +94,8 @@ or a release):
 | `storage_snapshot` | Session / local / keychain storage, fresh from the app when connected |
 | `storage_set` | Set a storage key; Beaver re-reads storage and says whether the app applied it |
 | `storage_delete` | Delete a storage key, with the same check |
-| `commands_list` | Commands the connected app accepts |
+| `commands_list` | Commands a connected app accepts (`deviceId` when several are connected) |
+| `devices_disconnect` | Close a connected app's connection (the Disconnect button); its session ends |
 | `commands_send` | Send a command to the app; optionally collect the logs it causes, following a restart |
 | `bookmarks_list` | Events and requests the user bookmarked |
 | `bookmarks_set` | Bookmark an event or request, or remove the bookmark |
@@ -108,7 +111,8 @@ or a release):
 | `scheme_build` | Build a deep link into a Zapp app (Scheme Generator), fill its form on screen, copy it, save its QR code |
 | `beaver_guide` | These recipes, by topic |
 
-Conventions: omitting `sessionId` means the live session, else the viewed one,
+Conventions: omitting `sessionId` means the live session (with several
+devices, the viewed one if it is live, else the newest), else the viewed one,
 else the most recent — and during a wait it follows the device into its new
 session if the app restarts (`sessionChanged`); a given `sessionId` stays put
 (`sessionEnded`). Subsystem and category values accept `*` globs, name
@@ -189,6 +193,14 @@ takes focus, unless you pass `reveal: true`.
    on one session (you get `sessionEnded: true` when it ends).
 3. `deviceDisconnected: true`: the app hasn't come back — ask the user to
    open it.
+
+### devices — two apps connected at once
+
+1. `beaver_status()` — `devices` lists both, e.g. `"12"` (Alpha on iPhone) and `"14"` (Beta on Pixel).
+2. `commands_list(deviceId: "14")` — Beta's commands.
+3. `commands_send(deviceId: "14", command: "<command>", collectLogsMs: 5000)`.
+4. `logs_query(sessionId: 12, since: "5m")` — reads take a sessionId; a device's live session id is its deviceId.
+5. `devices_disconnect(deviceId: "12")` — only when the user asks to drop Alpha; an app that reconnects on its own comes back in a new session.
 
 ### organise — bookmarks, saved filters, a clean screen
 

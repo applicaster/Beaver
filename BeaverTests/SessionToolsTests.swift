@@ -161,7 +161,7 @@ struct SessionToolsTests {
     func deleteRefusesLive() async throws {
         let store = try LogStore(source: .inMemory)
         let live = try await store.createSession(source: .live)
-        let ctx = makeContext(store, fakeUI: FakeUI(value: HostSnapshot(deviceConnected: true, liveSessionId: live.id)))
+        let ctx = makeContext(store, fakeUI: FakeUI(value: HostSnapshot(liveSessionIds: [live.id])))
         do {
             _ = try await SessionTools.delete.run(ToolArguments(["sessionId": JSON(live.id)]), ctx)
             Issue.record("expected an error")

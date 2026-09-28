@@ -360,70 +360,6 @@ final class StoragesViewModel {
         !snapshots.isEmpty
     }
 
-    /// Snapshot of "what device + app am I looking at" pulled from
-    /// the SDK's well-known metadata namespace. Surfaced as a slim
-    /// header at the top of the Storages view so the user can tell
-    /// at a glance which build of which app is on the wire.
-    ///
-    /// All fields are optional — apps that don't write the standard
-    /// `applicaster.v2` namespace just don't get a header. Both
-    /// camelCase and snake_case variants of the device keys are
-    /// checked because the SDK has historically written both.
-    struct AppContext: Equatable, Sendable {
-        let appName: String?
-        let appVersion: String?
-        let deviceModel: String?
-        let platform: String?
-        let osVersion: String?
-
-        /// True if there's anything worth rendering — keeps the
-        /// header from showing as an empty bar when the standard
-        /// metadata namespace is missing.
-        var isNonEmpty: Bool {
-            appName != nil || deviceModel != nil ||
-                platform != nil || osVersion != nil
-        }
-    }
-
-    var appContext: AppContext? {
-        // Live SDK convention: `applicaster.v2` lives in session
-        // storage. If a future SDK moves it, fall back to local or
-        // keychain so we still show *something*.
-        let order: [StorageSnapshot.Namespace] = [.session, .local, .keychain]
-        for layer in order {
-            if let ctx = appContext(in: layer), ctx.isNonEmpty {
-                return ctx
-            }
-        }
-        return nil
-    }
-
-    private func appContext(in layer: StorageSnapshot.Namespace) -> AppContext? {
-        guard let v2 = records(in: layer).first(where: { $0.key == "applicaster.v2" }),
-              let children = v2.children else { return nil }
-
-        // Tiny closure that resolves a key inside applicaster.v2 to
-        // its `valueText`, with multi-key fallback for the device
-        // family (camelCase + snake_case).
-        func value(_ keys: String...) -> String? {
-            for k in keys {
-                if let v = children.first(where: { $0.key == k })?.valueText,
-                   !v.isEmpty {
-                    return v
-                }
-            }
-            return nil
-        }
-
-        return AppContext(
-            appName:     value("app_name"),
-            appVersion:  value("version_name"),
-            deviceModel: value("deviceModel", "device_model", "deviceName"),
-            platform:    value("platform"),
-            osVersion:   value("osVersion")
-        )
-    }
-
     // MARK: - Actions
 
     /// One write to the device's storage: `value == nil` deletes the key.
@@ -467,7 +403,7 @@ final class StoragesViewModel {
 
     /// Send an edit and read it back through `StorageCommand.sendAndVerify`,
     /// the same path `storage_set` / `storage_delete` take (D58).
-    func apply(_ edit: Edit, via server: WSServer) async -> EditResult {
+    func apply(_ edit: Edit, via device: any DeviceLink) async -> EditResult {
         let previous = StorageCommand.storedValue(
             in: records(in: edit.namespace), parent: edit.parent, key: edit.key
         )
@@ -482,7 +418,7 @@ final class StoragesViewModel {
 
         let outcome = await StorageCommand.sendAndVerify(
             edit.command, layer: edit.namespace, parent: edit.parent, key: edit.key,
-            expected: edit.value, sessionId: sessionId, store: store, device: server)
+            expected: edit.value, sessionId: sessionId, store: store, device: device)
         await reloadFromStore()
         switch outcome {
         case .applied: return .applied(undo: undo)
@@ -494,11 +430,11 @@ final class StoragesViewModel {
     /// Send `storage.list` to the device. The response comes back as a
     /// `storage` message and refreshes `snapshots` via the change
     /// subscription; the delayed reload below covers a broadcast that
-    /// lands before the subscription Task has woken up. No-op if no
-    /// client is connected (WSServer.send silently drops).
-    func requestRefresh(via server: WSServer) {
-        Task { [weak self] in
-            await server.send(command: "storage.list")
+    /// lands before the subscription Task has woken up. No-op if this
+    /// session's device isn't connected (the send silently drops).
+    func requestRefresh(via device: any DeviceLink) {
+        Task { [weak self, sessionId = self.sessionId] in
+            await device.send(command: "storage.list", to: sessionId)
             // 400 ms is a typical SDK round-trip for storage.list;
             // small enough that the user doesn't see staleness, big
             // enough that the SDK has almost certainly answered.

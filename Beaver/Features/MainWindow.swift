@@ -25,6 +25,9 @@ struct MainWindow: View {
     /// A request's start time waiting for the Log feed to mount, from
     /// Network's "Show in Log feed". See `detail`.
     @State private var pendingLogFeedJump: Date?
+    /// Every session row, newest first: the toolbar's device badge and
+    /// device menu read it.
+    @State private var sessions: [Session] = []
 
     /// Per-session view-models, owned here so their state (filter,
     /// sort, exclude, expanded namespaces, search term, etc.)
@@ -88,6 +91,18 @@ struct MainWindow: View {
             // Initial fetch so toolbar disabled state is correct on
             // first appearance.
             await env.refreshViewingEventCount()
+        }
+        // Session rows for the device badge and the device menu (D73).
+        .task {
+            sessions = (try? await env.store.sessions()) ?? []
+            for await change in await env.store.changes() {
+                switch change {
+                case .sessionStarted, .sessionEnded, .sessionDeleted, .sessionUpdated, .sessionsCleared:
+                    sessions = (try? await env.store.sessions()) ?? []
+                default:
+                    break
+                }
+            }
         }
         // Background bookmark subscription. Listens to
         // .bookmarksChanged broadcasts for the active session and
@@ -153,11 +168,11 @@ struct MainWindow: View {
                 fresh.searchTerm = env.storageSearch
                 // Auto-fetch the first storage snapshot so the user
                 // doesn't have to click Reload to see anything.
-                // No-op if no client is connected; safe to call
+                // No-op if its device isn't connected; safe to call
                 // regardless of which tab the user is currently
                 // viewing — the snapshot lands in the store and
                 // both this VM and any future visit pick it up.
-                fresh.requestRefresh(via: env.server)
+                fresh.requestRefresh(via: env)
             }
             if networkVM?.sessionId != sid {
                 let fresh = NetworkViewModel(store: env.store, sessionId: sid, filter: env.networkFilter)
@@ -276,14 +291,13 @@ struct MainWindow: View {
 
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
-        // Leading edge: device / app context. Hidden entirely
-        // until the SDK has reported its applicaster.v2 metadata.
-        // Sits at the same vertical height as the right-side
+        // Leading edge: the viewed device / app. Hidden until there is
+        // one. Sits at the same vertical height as the right-side
         // toolbar buttons so the toolbar reads as one consistent
         // strip rather than left-padded space.
         ToolbarItem(placement: .navigation) {
-            if let ctx = storagesVM?.appContext, ctx.isNonEmpty {
-                ToolbarDeviceBadge(context: ctx)
+            if let viewed = sessions.first(where: { $0.id == env.viewingSessionId }) {
+                ToolbarDeviceBadge(session: viewed, isLive: env.isLive(viewed.id))
             }
         }
         ToolbarItem(placement: .primaryAction) {
@@ -430,12 +444,13 @@ struct MainWindow: View {
                     }
             }
         }
-        // Centered Connected pill. `.principal` keeps it anchored
-        // in the middle of the title bar so the device badge can
-        // sit on the leading edge and the action buttons on the
-        // trailing edge — three groups, three positions.
+        // Centered Connected pill, a menu of devices (D73).
+        // `.principal` keeps it anchored in the middle of the title
+        // bar so the device badge can sit on the leading edge and the
+        // action buttons on the trailing edge — three groups, three
+        // positions.
         ToolbarItem(placement: .principal) {
-            ConnectionIndicator(state: env.serverState)
+            DeviceSwitcher(sessions: sessions)
         }
     }
 
@@ -559,91 +574,166 @@ struct MainWindow: View {
 
 // MARK: - Subviews
 
-/// Icon + small caption rendered as a toolbar item. Matches the layout
-/// of the old Logger app where each toolbar button shows its purpose
-/// underneath the symbol. Optional `tint` lets destructive actions
-/// (e.g., Clear) render in red so the danger is visible at a glance.
-/// Compact "what device + app am I looking at" badge that lives
-/// on the leading edge of the main toolbar (placement
-/// `.navigation`). Reads from `StoragesViewModel.AppContext`
-/// (populated as soon as the first `storage.list` response comes
-/// back from the SDK) and renders as two stacked lines, vertically
+/// Compact "what device + app am I looking at" badge on the leading
+/// edge of the main toolbar (placement `.navigation`). Reads the
+/// viewed session's row, whose fingerprint the SDK's applicaster.v2
+/// storage fills (D34), and renders as two stacked lines, vertically
 /// matching the right-side toolbar buttons:
 ///
-///     [icon] Miami Heat
+///     [icon] ● Miami Heat
 ///            11.0.1 · iPhone 15 Pro Max · iOS 26.4.2
 ///
 /// Right-click → "Copy device fingerprint" pastes the same info
 /// as a single line into the clipboard for bug reports.
 private struct ToolbarDeviceBadge: View {
-    let context: StoragesViewModel.AppContext
+    let session: Session
+    let isLive: Bool
     @Environment(ToastCenter.self) private var toasts
-
-    /// Single muted subtitle line: `<version> · <device> · <OS> <ver>`.
-    /// Each piece is skipped if missing, so e.g. an SDK that doesn't
-    /// report a device model still produces a clean subtitle.
-    private var subtitle: String {
-        var parts: [String] = []
-        if let v = context.appVersion { parts.append(v) }
-        if let d = context.deviceModel { parts.append(d) }
-        if let os = context.osVersion {
-            parts.append((context.platform ?? "OS") + " " + os)
-        }
-        return parts.joined(separator: " · ")
-    }
 
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "iphone.gen3")
                 .font(.system(size: 14))
                 .foregroundStyle(.secondary)
-
             VStack(alignment: .leading, spacing: 1) {
-                Text(context.appName ?? "—")
-                    .font(.system(size: 12, weight: .semibold))
-                    .lineLimit(1)
-                Text(subtitle)
+                HStack(spacing: 4) {
+                    if isLive {
+                        Circle().fill(.green).frame(width: 6, height: 6)
+                    }
+                    Text(Self.title(session))
+                        .font(.system(size: 12, weight: .semibold))
+                        .lineLimit(1)
+                }
+                Text(Self.subtitle(session))
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.tail)
             }
         }
-        // Matches ConnectionIndicator's chrome — same padding,
-        // same solid background, same border weight — so the
-        // two toolbar clouds read as siblings at different ends
-        // of the bar.
+        // Matches ConnectionIndicator's chrome — same padding, same
+        // solid background — so the two toolbar clouds read as
+        // siblings at different ends of the bar.
         .padding(.horizontal, 14)
         .padding(.vertical, 5)
-        .background(
-            Capsule().fill(Color(.controlBackgroundColor))
-        )
+        .background(Capsule().fill(Color(.controlBackgroundColor)))
         .contentShape(Capsule())
-        .help(fingerprint)
+        .help(Self.fingerprint(session))
         .contextMenu {
             Button("Copy device fingerprint") {
                 NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(fingerprint, forType: .string)
+                NSPasteboard.general.setString(Self.fingerprint(session), forType: .string)
                 toasts.success("Copied device fingerprint")
             }
         }
     }
 
+    static func title(_ s: Session) -> String {
+        s.appName ?? s.clientLabel ?? (s.source == .imported ? "Imported #\(s.id)" : "Device #\(s.id)")
+    }
+
+    /// `<version> · <device> · <OS> <ver>`, each piece skipped if missing.
+    static func subtitle(_ s: Session) -> String {
+        var parts: [String] = []
+        if let v = s.appVersion { parts.append(v) }
+        if let d = s.deviceModel { parts.append(d) }
+        if let os = s.osVersion { parts.append((s.platform ?? "OS") + " " + os) }
+        return parts.joined(separator: " · ")
+    }
+
     /// One-line string used by both the help tooltip and the
     /// right-click copy action.
-    private var fingerprint: String {
+    static func fingerprint(_ s: Session) -> String {
         var parts: [String] = []
-        if let n = context.appName {
-            parts.append(n + (context.appVersion.map { " \($0)" } ?? ""))
-        }
-        if let d = context.deviceModel { parts.append(d) }
-        if let os = context.osVersion {
-            parts.append((context.platform ?? "OS") + " " + os)
-        }
+        if let n = s.appName { parts.append(n + (s.appVersion.map { " \($0)" } ?? "")) }
+        if let d = s.deviceModel { parts.append(d) }
+        if let os = s.osVersion { parts.append((s.platform ?? "OS") + " " + os) }
         return parts.joined(separator: " · ")
     }
 }
 
+/// The Connected pill, and the device switcher behind it (D73): the
+/// connected devices, the recent ones, and a way to all sessions.
+/// Choosing one sets `viewingSessionId`.
+private struct DeviceSwitcher: View {
+    let sessions: [Session]
+    @Environment(AppEnvironment.self) private var env
+
+    private var sections: (connected: [Session], recent: [Session]) {
+        DeviceMenu.sections(sessions: sessions, live: env.live.sessionIds)
+    }
+    /// Plain buttons, not an inline Picker: a Picker bound to the
+    /// selection wrote to it by itself when a device joined the list,
+    /// switching the window away from the viewed device.
+    @ViewBuilder
+    private func choice(_ s: Session, _ text: String) -> some View {
+        Button {
+            env.viewingSessionId = s.id
+        } label: {
+            if s.id == env.viewingSessionId {
+                Label(text, systemImage: "checkmark")
+            } else {
+                Text(text)
+            }
+        }
+    }
+
+    var body: some View {
+        Menu {
+            Section("Connected") {
+                if sections.connected.isEmpty {
+                    Text("No device connected")
+                } else {
+                    ForEach(sections.connected) { s in
+                        choice(s, Self.item(s, suffix: Self.detail(s)))
+                    }
+                }
+            }
+            if !sections.recent.isEmpty {
+                Section("Recent") {
+                    ForEach(sections.recent) { s in
+                        choice(s, Self.item(s, suffix: Self.ended(s)))
+                    }
+                }
+            }
+            Divider()
+            if let viewed = sections.connected.first(where: { $0.id == env.viewingSessionId }) {
+                Button("Disconnect \(ToolbarDeviceBadge.title(viewed))") {
+                    Task { await env.disconnect(viewed.id) }
+                }
+            }
+            Button("All Sessions…") { env.selectedTab = .sessions }
+        } label: {
+            ConnectionIndicator(state: env.serverState, liveCount: env.live.sessionIds.count, showsChevron: true)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Switch device")
+    }
+
+    private static func item(_ s: Session, suffix: String) -> String {
+        ToolbarDeviceBadge.title(s) + suffix
+    }
+
+    private static func detail(_ s: Session) -> String {
+        let sub = ToolbarDeviceBadge.subtitle(s)
+        return sub.isEmpty ? "" : " — " + sub
+    }
+
+    /// When it ended, else when it started: a session Beaver never saw
+    /// end (it quit first) has no end time, and a bare repeated name
+    /// wouldn't tell sessions apart.
+    private static func ended(_ s: Session) -> String {
+        s.endedAt.map { " — ended " + $0.formatted(date: .abbreviated, time: .shortened) }
+            ?? " — started " + s.startedAt.formatted(date: .abbreviated, time: .shortened)
+    }
+}
+
+/// Icon + small caption rendered as a toolbar item. Matches the layout
+/// of the old Logger app where each toolbar button shows its purpose
+/// underneath the symbol. Optional `tint` lets destructive actions
+/// (e.g., Clear) render in red so the danger is visible at a glance.
 struct ToolbarButtonLabel: View {
     let systemImage: String
     let title: String
@@ -723,6 +813,11 @@ private struct ConnectionPlaceholder: View {
 
 private struct ConnectionIndicator: View {
     let state: WSServer.State
+    /// Connected devices (D73). While any is connected the pill says so,
+    /// whatever the last server-state update was: that one value is shared
+    /// by every connection, and one of them `.waiting` would read "Error".
+    var liveCount = 0
+    var showsChevron = false
 
     var body: some View {
         HStack(spacing: 8) {
@@ -730,6 +825,11 @@ private struct ConnectionIndicator: View {
                 .fill(color)
                 .frame(width: 8, height: 8)
             Text(label).font(.caption)
+            if showsChevron {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 5)
@@ -744,7 +844,8 @@ private struct ConnectionIndicator: View {
     }
 
     private var color: Color {
-        switch state {
+        if liveCount > 0 { return .green }
+        return switch state {
         case .clientConnected:       .green
         case .listening:             .yellow
         case .clientDisconnected:    .orange
@@ -754,8 +855,9 @@ private struct ConnectionIndicator: View {
     }
 
     private var label: String {
-        switch state {
-        case .clientConnected:       "Connected"
+        if liveCount > 0 { return liveCount > 1 ? "Connected · \(liveCount)" : "Connected" }
+        return switch state {
+        case .clientConnected(let count): count > 1 ? "Connected · \(count)" : "Connected"
         case .listening:             "Listening"
         case .clientDisconnected:    "Disconnected"
         case .failed:                "Error"

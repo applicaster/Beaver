@@ -15,11 +15,13 @@ public struct MCPServer: Sendable {
     /// Shown to the model by every mainstream client (design §8). Keep it
     /// short; the full flows live in MCP.md, served by beaver_guide.
     public static let instructions = """
-        Beaver is a macOS log viewer. One mobile app connects to it over WebSocket, and Beaver \
+        Beaver is a macOS log viewer. Mobile apps connect to it over WebSocket, several at once, and Beaver \
         stores everything the app sends: logs, network requests, storage snapshots. \
-        Start with beaver_status. If no device is connected you can still read past sessions \
+        Start with beaver_status. With more than one device connected, pass deviceId (from beaver_status) \
+        to commands_send, commands_list and storage changes. If no device is connected you can still read past sessions \
         (sessions_list) and log files the user has (sessions_import). Omitting sessionId means the \
-        live session, else the one the user is viewing, else the most recent. Before filtering by \
+        live session (with several, the viewed one if live, else the newest), else the one the user \
+        is viewing, else the most recent. Before filtering by \
         subsystem or category call logs_facets: names are namespaced and you will not guess them \
         (globs like "*auth*" and name fragments work, and results say what they matched). Use \
         since: "5m" or afterId to look at recent events. To see what an action causes, send it with \

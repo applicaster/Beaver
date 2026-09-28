@@ -354,19 +354,18 @@ elapsed time, not a start timestamp.
 ## 6. Connection lifecycle
 
 1. Client opens WebSocket connection to `ws://<desktop-ip>:9080`.
-2. Beaver (per D2: single-client) either:
-   - Accepts: sends `handshake` immediately, opens a new session in the
-     store, and starts forwarding inbound `event` / `storage` / `network`
-     frames.
-   - Rejects: closes with WebSocket close code **1008 (policy violation)**
-     and reason text `"another client is already connected"`. The
-     rejected client should not retry rapidly.
+2. Beaver accepts every client (D73; D2's single-client rule is gone):
+   sends `handshake` immediately, opens a new session in the store for
+   that connection, and starts forwarding its inbound `event` /
+   `storage` / `network` frames. Several clients can be connected at
+   once, each in its own session.
 3. The connection remains open indefinitely. Either side may close at
-   any time.
-4. On unexpected close (network failure, client crash), Beaver marks
-   the current session's `ended_at` and writes a synthetic event with
-   subsystem `loggernext.transport`, level `info`, message
-   `"connection closed (reason: …)"`.
+   any time; Beaver closes one when the user (or an agent) disconnects
+   that device.
+4. When a connection closes (network failure, client crash, or a
+   Disconnect in Beaver), Beaver sets that connection's session
+   `ended_at`; other connections are unaffected. A half-open connection
+   is noticed by TCP keepalive within ~20 s.
 5. New connections after a close start a new session.
 
 ---

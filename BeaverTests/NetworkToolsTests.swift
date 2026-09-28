@@ -17,7 +17,7 @@ struct NetworkToolsTests {
             try await store.recordNetworkEntry(try #require(NetworkCapture(p, fallbackMillis: 0)), sessionId: s.id)
         }
         let ids = try await store.networkEntries(sessionId: s.id).map(\.id)
-        return (makeContext(store, ui: HostSnapshot(liveSessionId: s.id)), ids)
+        return (makeContext(store, ui: HostSnapshot(liveSessionIds: [s.id])), ids)
     }
 
     @Test("Query by status, method, host, search")
@@ -61,7 +61,7 @@ struct NetworkToolsTests {
             + big + #""}"#
         try await store.recordNetworkEntry(try #require(NetworkCapture(payload, fallbackMillis: 0)), sessionId: s.id)
         let id = try #require(try await store.networkEntries(sessionId: s.id).first?.id)
-        let ctx = makeContext(store, ui: HostSnapshot(liveSessionId: s.id))
+        let ctx = makeContext(store, ui: HostSnapshot(liveSessionIds: [s.id]))
         let r = try await NetworkTools.get.run(ToolArguments(["id": .number(Double(id))]), ctx)
         #expect(r.structured["bodiesTruncated"] == true)
         let structuredBody = try #require(r.structured["responseBody"]?.string)
@@ -86,7 +86,7 @@ struct NetworkToolsTests {
             + big + #""}"#
         try await store.recordNetworkEntry(try #require(NetworkCapture(payload, fallbackMillis: 0)), sessionId: s.id)
         let id = try #require(try await store.networkEntries(sessionId: s.id).first?.id)
-        let ctx = makeContext(store, ui: HostSnapshot(liveSessionId: s.id))
+        let ctx = makeContext(store, ui: HostSnapshot(liveSessionIds: [s.id]))
         let r = try await NetworkTools.copy.run(ToolArguments(["id": .number(Double(id)), "format": "curl"]), ctx)
         #expect(r.body.utf8.count <= ToolText.payloadCap)
         #expect(r.summary.contains("(cut at 256 KB)"))

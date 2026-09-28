@@ -15,6 +15,18 @@ When releasing:
 ## [Unreleased]
 
 ### Added
+- Several devices can be connected at once. Click the Connected pill in
+  the middle of the toolbar to switch between them or open a recent
+  session. A device that connects doesn't take the window while you're
+  looking at another live one.
+- **Disconnect** a device: the red Disconnect button on a live session in
+  Sessions, or Disconnect in the Connected pill's menu. An app that
+  reconnects on its own comes back in a new session.
+- Agents: `beaver_status` lists every connected device; with more than one,
+  `commands_send`, `commands_list` and storage changes take `deviceId`.
+  New tool `devices_disconnect`. A device's id is now its live session id
+  (`"12"`); `deviceId: "current"` still works while one device is
+  connected.
 - **Scheme Generator.** A new "Tools" section in the sidebar builds deep
   links into a Zapp app, as zapp-support's Scheme Generator does: mobile
   (`myapp://open?…`, `myapp://present?…`) or web (`index.html?…`), with
@@ -22,8 +34,9 @@ When releasing:
   optional state and title, Copy and a QR code to scan with the device.
 - Agents: new tool `scheme_build` builds the same links, fills the Scheme
   Generator form on screen (`show: true`, in the background), copies it to
-  the clipboard (`copy: true`) and saves a QR code (`qrFile`). `ui_show(tab: "schemes")` opens the tab and
-  `ui_state` returns the form and its URL.
+  the clipboard (`copy: true`) and saves a QR code (`qrFile`).
+  `ui_show(tab: "schemes")` opens the tab and `ui_state` returns the form
+  and its URL.
 
 ### Fixed
 - A device that connects is shown at once, even if a past or imported
