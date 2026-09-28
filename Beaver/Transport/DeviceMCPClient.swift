@@ -5,6 +5,9 @@
 //  D75: JSON-RPC to one connected app's MCP server over the same WebSocket
 //  as its logs (PROTOCOL.md §3.3, §4.5). One per connection; the envelope
 //  is {"type":"mcp","payload":…} and replies are matched by JSON-RPC id.
+//  The SDKs handle one MCP message at a time, so requests queue here (FIFO)
+//  and each is sent only after the previous one finished; its timeout
+//  counts from its own send.
 
 import Foundation
 
@@ -26,7 +29,7 @@ public actor DeviceMCPClient {
     /// The device gives up on a React tool after 15 s; this leaves it room to say so.
     public static let callTimeout: Duration = .seconds(20)
 
-    private enum Setup { case idle, running(Task<Void, Error>), ready, unsupported }
+    private enum Setup { case idle, ready, unsupported }
 
     private let sendFrame: @Sendable (Data) async -> Void
     private let setupTimeout: Duration
@@ -35,15 +38,21 @@ public actor DeviceMCPClient {
     private var waiters: [Int: CheckedContinuation<JSON, Error>] = [:]
     private var closed = false
     private var native = false
+    /// A request holds the line from before `initialize` until its reply.
+    private var busy = false
+    private var queue: [CheckedContinuation<Void, Error>] = []
 
     public init(setupTimeout: Duration = .seconds(5), send: @escaping @Sendable (Data) async -> Void) {
         self.setupTimeout = setupTimeout
         self.sendFrame = send
     }
 
-    /// Initializes the session first, once per connection.
+    /// Waits for the requests before it, then initializes the session
+    /// first, once per connection.
     public func request(_ method: String, params: JSON = [:], timeout: Duration) async throws -> JSON {
         guard !closed else { throw DeviceMCPError.disconnected }
+        try await takeTurn()
+        defer { endTurn() }
         try await ensureInitialized()
         return try await call(method, params: params, timeout: timeout)
     }
@@ -69,26 +78,35 @@ public actor DeviceMCPClient {
         if case .unsupported = setup { setup = .idle }
     }
 
-    /// The connection closed: every waiting call fails with `.disconnected`.
+    /// The connection closed: every waiting and queued call fails with `.disconnected`.
     public func close() {
         closed = true
         let pending = waiters
         waiters = [:]
         for waiter in pending.values { waiter.resume(throwing: DeviceMCPError.disconnected) }
+        let queued = queue
+        queue = []
+        for turn in queued { turn.resume(throwing: DeviceMCPError.disconnected) }
+    }
+
+    private func takeTurn() async throws {
+        guard busy else { busy = true; return }
+        // `endTurn` hands the line over: `busy` stays true.
+        try await withCheckedThrowingContinuation { queue.append($0) }
+    }
+
+    private func endTurn() {
+        if queue.isEmpty { busy = false } else { queue.removeFirst().resume() }
     }
 
     private func ensureInitialized() async throws {
-        let task: Task<Void, Error>
         switch setup {
         case .ready: return
         case .unsupported: throw DeviceMCPError.unsupported
-        case .running(let running): task = running
-        case .idle:
-            task = Task { try await self.initialize() }
-            setup = .running(task)
+        case .idle: break
         }
         do {
-            try await task.value
+            try await initialize()
             setup = .ready
         } catch DeviceMCPError.timeout where !native {
             // Silence from a sink that never sent a handshake: the JS-only

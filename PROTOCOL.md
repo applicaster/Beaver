@@ -185,10 +185,12 @@ same socket as `handshake` and `command`, through `DeviceMCPClient`.
   Beaver correlates the reply by the `id` inside `payload`.
 - Before its first request on a connection, Beaver sends `initialize` once,
   lazily (5 s timeout), then the `notifications/initialized` notification.
-  If the app never replies to `initialize`, Beaver treats it as having no
-  toolboxes until it reconnects.
+  If an app that sent no `handshake` (§4.4) never replies to `initialize`,
+  Beaver treats it as having no toolboxes until it reconnects or sends one.
+  After a handshake, a failed `initialize` is retried on the next request.
 - Methods Beaver sends: `initialize`, `tools/list` (5 s timeout), `tools/call`
   (20 s timeout — the device's own React tools time out at 15 s).
+- Beaver sends one request at a time per app; each timeout counts from sending.
 
 ---
 
