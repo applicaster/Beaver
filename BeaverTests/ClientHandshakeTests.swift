@@ -70,6 +70,25 @@ struct ClientHandshakeTests {
         #expect(row.osVersion == "18.6")
     }
 
+    @Test("A handshake landing after applicaster.v2 keeps the harvested model, version and platform")
+    func handshakeAfterHarvest() async throws {
+        let store = try LogStore(source: .inMemory)
+        let s = try await store.createSession(source: .live)
+        try await store.recordStorageSnapshot(
+            sessionId: s.id, namespace: .session,
+            dataJSON: #"{"applicaster.v2":{"app_name":"Miami Heat","deviceModel":"iPhone 15 Pro","version_name":"11.0.2","platform":"ios","osVersion":"18.7"}}"#)
+        try await store.applyHandshake(ClientHandshake(deviceId: "UID-1", model: "iPhone15,2", platform: "iOS 18.6",
+                                                       appPackage: "com.example.app", version: "11.0.1"), to: s.id)
+        let row = try #require(try await store.sessions().first { $0.id == s.id })
+        #expect(row.deviceUID == "UID-1")
+        #expect(row.appPackage == "com.example.app")
+        #expect(row.appName == "Miami Heat")
+        #expect(row.deviceModel == "iPhone 15 Pro")
+        #expect(row.appVersion == "11.0.2")
+        #expect(row.platform == "ios")
+        #expect(row.osVersion == "18.7")
+    }
+
     @Test("Review focus: LiveDevices keeps a connection's handshake across a deleted session, drops it on disconnect")
     func liveDevicesKeepHandshake() {
         var live = LiveDevices()
