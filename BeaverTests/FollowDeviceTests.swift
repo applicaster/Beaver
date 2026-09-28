@@ -189,5 +189,21 @@ struct FollowDeviceTests {
         #expect(r.structured["sessionId"] == JSON(b.id))
         #expect(r.structured["deviceDisconnected"] == false)
     }
-}
 
+    @Test("Twins: a device connected alongside A is never A's restart, even with the same fingerprint")
+    func twinsAreNotRestarts() async throws {
+        let store = try LogStore(source: .inMemory)
+        let a = try await store.createSession(source: .live)
+        let b = try await store.createSession(source: .live)
+        for id in [a.id, b.id] {
+            try await store.setSessionDeviceInfo(id: id, appName: "Alpha", appVersion: nil, deviceModel: "iPhone",
+                                                 platform: "iOS", osVersion: nil)
+        }
+        var follower = DeviceFollower(start: a.id, live: [a.id, b.id])
+        let dropped = await follower.step(live: [b.id], store: store)
+        #expect(dropped == .gone)
+        let a2 = try await store.createSession(source: .live)
+        let back = await follower.step(live: [b.id, a2.id], store: store)
+        #expect(back == .moved(a2.id))
+    }
+}

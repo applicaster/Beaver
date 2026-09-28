@@ -154,11 +154,15 @@ struct BeaverApp: App {
                     guard let session = try? await env.store.createSession(source: .live) else { continue }
                     env.didConnect(connection, session: session.id)
                     // Ask the SDK for its command list so the command-bar
-                    // help popover has something to show. Brief delay so
-                    // the SDK has finished registering its handlers.
+                    // help popover has something to show, and for its
+                    // storage, whose applicaster.v2 names the device in the
+                    // device menu and beaver_status even while another one
+                    // is viewed (D73). Brief delay so the SDK has finished
+                    // registering its handlers.
                     Task {
                         try? await Task.sleep(for: .milliseconds(500))
                         await env.send(command: "cmdlist", to: session.id)
+                        await env.send(command: "storage.list", to: session.id)
                     }
                 case .frame(let connection, let frame):
                     guard let sessionId = env.live.session(for: connection) else { continue }

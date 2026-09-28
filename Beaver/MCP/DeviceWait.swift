@@ -64,10 +64,14 @@ struct DeviceFollower: Sendable {
 
     private(set) var current: Int64
     private var lastLive: Set<Int64>
+    /// Sessions live at the same time as `current`: another device, so
+    /// never its restart — not even a twin with the same fingerprint.
+    private var alongside: Set<Int64>
 
     init(start: Int64, live: [Int64]) {
         current = start
         lastLive = Set(live)
+        alongside = Set(live)
     }
 
     /// nil while the set of live sessions hasn't changed since the last call.
@@ -76,13 +80,17 @@ struct DeviceFollower: Sendable {
         guard now != lastLive else { return nil }
         let appeared = now.subtracting(lastLive)
         lastLive = now
-        if now.contains(current) { return .same }
+        if now.contains(current) {
+            alongside.formUnion(now)
+            return .same
+        }
         let sessions = (try? await store.sessions()) ?? []
+        let candidates = sessions.filter { now.contains($0.id) && !alongside.contains($0.id) }
         guard let ended = sessions.first(where: { $0.id == current }),
-              let next = Self.successor(of: ended, live: sessions.filter { now.contains($0.id) },
-                                        appeared: appeared)
+              let next = Self.successor(of: ended, live: candidates, appeared: appeared)
         else { return .gone }
         current = next
+        alongside = now
         return .moved(next)
     }
 

@@ -262,13 +262,15 @@ private struct SessionRow: View {
             // A live session can't be deleted, but its device can be
             // disconnected (D73): always shown, so it's easy to find.
             if isLive {
-                Button {
+                Button(role: .destructive) {
                     onDisconnect()
                 } label: {
-                    Image(systemName: "eject")
-                        .font(.caption)
+                    Label("Disconnect", systemImage: "eject")
+                        .font(.caption.weight(.semibold))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.borderedProminent)
+                .tint(.red)
+                .controlSize(.small)
                 .help("Disconnect this device")
             }
 
