@@ -27,7 +27,7 @@ struct InfoView: View {
                 if let report { content(report) } else if loading { ProgressView() }
             }
             .padding(20)
-            .frame(maxWidth: 960, alignment: .leading)
+            .frame(maxWidth: 1600, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .task(id: sessionId) {
@@ -77,23 +77,45 @@ struct InfoView: View {
             Text("No storage snapshot yet — App Info reads the app's storage. It arrives while the app is connected.")
                 .foregroundStyle(.secondary)
         }
-        InfoCard(title: "Identity & versions", rows: r.identity)
-        cmsLine(r.cms)
-        TableCard(title: "Screens (\(r.screens.count), \(r.screensSource))",
-                  rows: r.screens.map { [$0.name, $0.id, $0.type ?? ""] },
-                  empty: "No screens found: the full list needs rivers.json or layout.json, and no visits were logged.")
-        TableCard(title: "Plugins (\(r.plugins.count), \(r.pluginsSource))",
-                  rows: r.plugins.map { [$0.id, $0.version ?? ""] }, empty: "No plugins found.")
-        TableCard(title: "Cell styles (\(r.cellStyles.count), \(r.cellStylesSource))",
-                  rows: r.cellStyles.map { [$0.plugin, $0.id] }, empty: "No cell styles found.")
-        InfoCard(title: "Device", rows: r.device.identity + r.device.hardware)
-        InfoCard(title: "Advertising", rows: r.device.advertising, empty: r.device.advertisingNote)
-        if !r.device.userAgent.isEmpty { InfoCard(title: "User agent", rows: r.device.userAgent) }
-        TableCard(title: "Config files",
-                  rows: AppInfo.ConfigKind.allCases.compactMap { kind in
-                      r.configs[kind].map { [kind.rawValue, $0.url, $0.error.map { "couldn't load: " + $0 } ?? $0.found] }
-                  },
-                  empty: "No config file URL found in storage or captured requests.")
+        // Side by side when the window is wide, one column when it isn't:
+        // a single column capped at 960 left a hole on the right.
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top, spacing: 20) {
+                appColumn(r).frame(minWidth: 560, maxWidth: .infinity, alignment: .topLeading)
+                deviceColumn(r).frame(minWidth: 380, maxWidth: 560, alignment: .topLeading)
+            }
+            VStack(alignment: .leading, spacing: 16) {
+                appColumn(r)
+                deviceColumn(r)
+            }
+        }
+    }
+
+    private func appColumn(_ r: AppInfoReport) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            InfoCard(title: "Identity & versions", rows: r.identity)
+            cmsLine(r.cms)
+            TableCard(title: "Screens (\(r.screens.count), \(r.screensSource))",
+                      rows: r.screens.map { [$0.name, $0.id, $0.type ?? ""] },
+                      empty: "No screens found: the full list needs rivers.json or layout.json, and no visits were logged.")
+            TableCard(title: "Plugins (\(r.plugins.count), \(r.pluginsSource))",
+                      rows: r.plugins.map { [$0.id, $0.version ?? ""] }, empty: "No plugins found.")
+            TableCard(title: "Cell styles (\(r.cellStyles.count), \(r.cellStylesSource))",
+                      rows: r.cellStyles.map { [$0.plugin, $0.id] }, empty: "No cell styles found.")
+            TableCard(title: "Config files",
+                      rows: AppInfo.ConfigKind.allCases.compactMap { kind in
+                          r.configs[kind].map { [kind.rawValue, $0.url, $0.error.map { "couldn't load: " + $0 } ?? $0.found] }
+                      },
+                      empty: "No config file URL found in storage or captured requests.")
+        }
+    }
+
+    private func deviceColumn(_ r: AppInfoReport) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            InfoCard(title: "Device", rows: r.device.identity + r.device.hardware)
+            InfoCard(title: "Advertising", rows: r.device.advertising, empty: r.device.advertisingNote)
+            if !r.device.userAgent.isEmpty { InfoCard(title: "User agent", rows: r.device.userAgent) }
+        }
     }
 
     @ViewBuilder
