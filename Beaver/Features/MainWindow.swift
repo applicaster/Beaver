@@ -232,7 +232,7 @@ struct MainWindow: View {
             Label("Issues", systemImage: "exclamationmark.triangle")
                 .badge(issuesVM?.report.errors ?? 0)
                 .tag(UITab.issues)
-                .help("Errors and warnings grouped by signature; the badge counts error issues")
+                .help("The session's problems once each: errors and warnings the app logged, the same error with different numbers or ids counted together. The badge counts distinct errors.")
             Label("Storages",  systemImage: "externaldrive")
                 .tag(UITab.storages)
             Label("Network",   systemImage: "network")

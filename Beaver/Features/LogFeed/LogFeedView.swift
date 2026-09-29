@@ -219,7 +219,7 @@ private struct LogFeedFilterBar: View {
                 }
                 .buttonStyle(.plain)
                 .fixedSize()
-                .help("\(issues.report.errors) error and \(issues.report.warnings) warning issues — open Issues")
+                .help("\(issues.report.errors) distinct errors and \(issues.report.warnings) distinct warnings in this session, each counted once however often it repeats — open Issues")
             }
 
             // Nothing was deleted, so say so and offer the way back.

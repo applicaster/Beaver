@@ -13,10 +13,28 @@ struct IssuesView: View {
     @Bindable var vm: IssuesViewModel
     @Environment(AppEnvironment.self) private var env
     @Environment(ToastCenter.self) private var toasts
+    @State private var showingHelp = false
+
+    /// What the tab does, said plainly (the user asked "how is this different
+    /// from filtering errors?"): shown in ⓘ and, short, under the bar.
+    static let help = """
+        Issues lists the session's problems once each, not every occurrence.
+
+        • What counts: lines the app itself logged at level error (and warning, unless "Errors only"). Beaver doesn't guess from the text — an app that logs a failure as info won't show here. Failed network requests are in the Network tab.
+        • One row per problem: lines of the same subsystem whose text differs only in numbers, ids, UUIDs, times or URL query values are one issue — "Token refresh failed (attempt 1)" and "(attempt 3)" count together. The same rule as Compare.
+        • Why not just filter errors: a filter shows every line, so 400 copies of one error hide the one new problem. Here that's one row "×400", and the rare one is its own row with when it started.
+        • Each row: how many times, first and last time, and a timeline across the session. Click it to see exactly those lines in the Log feed, starting at the first.
+        • Ignore hides known noise for this app, in this and future sessions (Show ignored brings it back).
+        • Agents get the same list with issues_list.
+        """
 
     var body: some View {
         VStack(spacing: 0) {
             bar
+            Text("Each row is one problem the app logged, however many times — the same error with different numbers or ids counts once.")
+                .font(.caption).foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 12).padding(.bottom, 8)
             Divider()
             if !vm.loaded {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -70,6 +88,18 @@ struct IssuesView: View {
             Spacer()
             Text("\(vm.report.errors) errors · \(vm.report.warnings) warnings")
                 .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+            Button { showingHelp.toggle() } label: { Image(systemName: "info.circle") }
+                .buttonStyle(.borderless)
+                .help("What Issues does")
+                .accessibilityLabel("What Issues does")
+                .popover(isPresented: $showingHelp, arrowEdge: .bottom) {
+                    Text(Self.help)
+                        .font(.callout)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(width: 380, alignment: .leading)
+                        .padding(14)
+                        .textSelection(.enabled)
+                }
         }
         .padding(.horizontal, 12)
         .frame(height: 48)
