@@ -21,7 +21,8 @@ public struct MCPServer: Sendable {
         to commands_send, commands_list and storage changes. Or set a default with devices_set_default. Apps built with quick-brick-xray's \
         native sink also offer toolboxes (storage, app, debugfeatures, React ones): list them with \
         toolboxes_list and run one with tools_call; deviceId "beaver" reaches Beaver's own tools the same way. \
-        If no device is connected you can still read past sessions \
+        A smart TV has no SDK: connect it with devices_connect_tv (its IP and DevTools port); it only \
+        sends logs. If no device is connected you can still read past sessions \
         (sessions_list) and log files the user has (sessions_import). When it works in one session and \
         not in another (app versions, devices), sessions_compare(a: <works>, b: <fails>). Omitting sessionId means the \
         live session (with several, the viewed one if live, else the newest), else the one the user \

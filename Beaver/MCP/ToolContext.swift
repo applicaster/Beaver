@@ -91,6 +91,10 @@ public protocol DeviceLink: Sendable {
     /// once the request's frame is out, before the reply is returned.
     func mcp(_ method: String, params: JSON, to sessionId: Int64, timeout: Duration,
              onSent: (@Sendable () async -> Void)?) async throws -> JSON
+    /// Starts reading a smart TV over the Chrome DevTools Protocol (D94) and
+    /// returns its live session id; an already connected TV returns its own.
+    /// Throws `TVBridgeError`.
+    func connectTV(host: String, port: Int, name: String?) async throws -> Int64
 }
 
 extension DeviceLink {

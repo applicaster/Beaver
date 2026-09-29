@@ -208,7 +208,8 @@ same socket as `handshake` and `command`, through `DeviceMCPClient`.
 ## 4. Direction: client → server
 
 The SDK sends `event`, `storage`, `network`, `handshake` and `mcp`;
-zapp-support's TV bridge sends `register` and `event` (§4.6).
+zapp-support's TV bridge, and Beaver's own (Connect a TV…), send
+`register` and `event` (§4.6).
 
 ### 4.1 `event`
 
@@ -465,6 +466,22 @@ page, and after every reconnect.
   `console`, `exception` or `log:<source>`, a millisecond `timestamp`
   (fractional for `log:*`), and levels `info` / `warning` / `error` /
   `debug`. An exception's `message` is V8's description, stack included.
+- **Beaver's own bridge (D94, Beaver 4.17.0 or later).** Connect a TV… and
+  `devices_connect_tv` run the same bridge inside Beaver
+  (`Beaver/Transport/TVBridge.swift`): it connects to ws://127.0.0.1:9080
+  as a client and sends exactly these frames — same `deviceId`
+  (`cdp-<host:port>`), same name rule (the typed name, else `"<page title>
+  @ <host:port>"`), same `event` fields — so the TV is the same device
+  whichever bridge connects it, and one already connected by the script is
+  not connected twice. Differences: the `timestamp` is CDP's own
+  (`Runtime.consoleAPICalled` / `exceptionThrown` `timestamp`,
+  `Log.entryAdded` `entry.timestamp`, all ms since 1970) when it is within a
+  day of Beaver's clock, else Beaver's; and the bridge reports its own state
+  as events with `category: "bridge"` (attached, page closed, unreachable,
+  a failed CDP command), once per change. When Beaver closes the connection
+  (Disconnect, `devices_disconnect`) the bridge stops and lets go of the
+  TV; while connected it re-reads the TV's page every 3 s after the page
+  goes and re-registers when it finds it.
 
 ---
 

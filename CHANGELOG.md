@@ -12,6 +12,18 @@ does the same for a manual release.
 
 ## [Unreleased]
 
+### Added
+- **Connect a TV…**: read a smart TV app's logs (Vizio, Vidaa, other TVs
+  with remote debugging on) from Beaver itself — no Node, no zapp-support
+  checkout. Open it from the Connected pill's menu, the "waiting for a
+  device" screen, or the Beaver menu; type the TV's IP address and DevTools
+  port (Vizio 9555, Vidaa 9226, others usually 9222) and an optional name.
+  The TV shows up like a phone that only sends logs: console lines,
+  exceptions and log entries, with the TV's own timestamps. Connection
+  problems say what to check (wrong address, no DevTools on that port, a
+  DevTools window already attached). The last five TVs are one click away.
+  Disconnect stops reading it. Agents: `devices_connect_tv`.
+
 ### Fixed
 - The command bar is off while a TV (through the TV bridge) is viewed and
   says why: the TV sends logs only, so a typed command used to be dropped

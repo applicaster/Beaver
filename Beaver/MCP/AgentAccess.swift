@@ -223,9 +223,9 @@ public actor AgentAccess {
         Capability(
             icon: "terminal",
             title: "Drive the app",
-            note: "Send the app's commands and collect the logs they cause — even across a restart — or wait for a log to show up. Disconnect an app when asked.",
+            note: "Send the app's commands and collect the logs they cause — even across a restart — or wait for a log to show up. Disconnect an app, or connect a smart TV by its IP address, when asked.",
             example: "Use beaver: send cmdlist to the app and show me what it logged.",
-            tools: ["commands_list", "commands_send", "logs_wait", "devices_disconnect"]),
+            tools: ["commands_list", "commands_send", "logs_wait", "devices_disconnect", "devices_connect_tv"]),
         Capability(
             icon: "shippingbox",
             title: "Use the app's toolboxes",

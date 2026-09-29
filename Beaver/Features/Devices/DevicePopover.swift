@@ -63,7 +63,7 @@ struct DevicePopover: View {
                 }
                 Divider()
                 if logsOnly {
-                    Text("A TV through zapp-support's TV bridge: it sends logs only, so it has no commands, storage or toolboxes.")
+                    Text("A smart TV read over DevTools: it sends logs only, so it has no commands, storage or toolboxes.")
                         .font(.caption).foregroundStyle(.secondary)
                 } else if showsToolboxes {
                     toolboxes

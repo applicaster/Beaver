@@ -94,13 +94,23 @@ port, notifications), Zapp (token), About (version, What's New, updates).
    "Deleted N old sessions, freed …". Picking a period in Settings deletes
    right away, no waiting day (try 7 Days). Bookmarked and imported
    sessions stay, and so does a connected device's session.
-14. Smart TVs (Beaver 4.15.0 or later): in a zapp-support checkout run
-   `node scripts/tv-bridge.mjs <tv-ip>:<devtools-port> --server ws://127.0.0.1:9080 --name "Living room Vizio"`
-   (Node 22+; the TV's DevTools port: Vizio 9555, Vidaa 9226, else often
-   9222). The TV appears like a phone, named "Living room Vizio", model
+14. Smart TVs (Beaver 4.17.0 or later; nothing to install): turn on the TV's
+   developer mode, then **Connect a TV…** — in the menu behind the toolbar's
+   Connected pill, on the empty "Waiting for a client" screen (**TV? Connect
+   a TV…**), or Beaver → Connect a TV…. Type the TV's IP, its DevTools port
+   (Vizio 9555, Vidaa 9226, else often 9222) and a name such as "Living room
+   Vizio", then **Connect**. The TV appears like a phone, model
    "TV (DevTools)"; its console lines and exceptions stream in under subsystem
    `tv-cdp`. `beaver_status` lists it with `platform: "tv-cdp"`;
-   `commands_send` to it fails with "only sends logs".
+   `commands_send` to it fails with "only sends logs". Try the errors: a wrong
+   IP ("Can't reach"), a wrong port ("no DevTools on that port"), Chrome's
+   chrome://inspect attached to the TV ("page is busy"). Reload the app on
+   the TV: a `bridge` line says the page closed, then the logs carry on in
+   the same session. The sheet lists the TV under Recent next time.
+   Disconnect (pill menu) stops it. Agents: ask "connect the TV at
+   192.168.1.40 port 9555" → `devices_connect_tv`. zapp-support's
+   `node scripts/tv-bridge.mjs <tv-ip>:<port> --server ws://127.0.0.1:9080`
+   (Beaver 4.15.0 or later) still works and makes the same device.
 15. Zapp token: Settings → **Zapp** says whether a token is set (never shows
    it); paste one and **Save**, then **Test** says whether Zapp accepted it.
    The Info tab's **Set Zapp Token…** opens this tab. **Remove** deletes it.
@@ -133,6 +143,7 @@ port, notifications), Zapp (token), About (version, What's New, updates).
 | `storage_delete` | Delete a storage key, with the same check |
 | `commands_list` | Commands a connected app accepts (`deviceId` when several are connected) |
 | `devices_disconnect` | Close a connected app's connection (the Disconnect button); its session ends. With several apps, `deviceId` is required: the default doesn't count |
+| `devices_connect_tv` | Read a smart TV app (Vizio, Vidaa, …) over DevTools from its IP and port, like Connect a TV…; it becomes a device that only sends logs. `devices_disconnect` stops it |
 | `devices_set_default` | Make one connected app the default for device tools (follows it across restarts); `null` clears |
 | `toolboxes_list` | An app's toolboxes, or one toolbox's tools with their arguments; `deviceId: "beaver"` for Beaver's own |
 | `tools_call` | Run one tool from `toolboxes_list` on the app (or on Beaver) and get its answer; it is marked destructive, so clients that honor destructiveHint ask the user to confirm (app tools can delete data or restart the app) |
@@ -163,10 +174,12 @@ is a query in the Log feed's syntax, the same as zapp-support's web logger
 instead. `since: "5m"` works wherever ids do. File paths are absolute or start with `~`. Every result ends
 with `Next:` suggestions.
 
-A device with `platform: "tv-cdp"` is a smart TV connected through
+A device with `platform: "tv-cdp"` is a smart TV, connected by Beaver
+(`devices_connect_tv`, Connect a TV…, Beaver 4.17.0 or later) or by
 zapp-support's TV bridge: it only sends logs (subsystem `tv-cdp`, categories
-`console`, `exception`, `log:*`). Commands, storage changes and toolboxes are
-refused for it; read its logs instead.
+`console`, `exception`, `log:*`; Beaver's own bridge adds `bridge` lines when
+the TV's page closes or it can't reach the TV). Commands, storage changes and
+toolboxes are refused for it; read its logs instead.
 
 UI tools work in the background: the window changes where it is and nothing
 takes focus, unless you pass `reveal: true`.
@@ -295,6 +308,25 @@ and in zapp-support's web logger (Beaver 4.14.0 or later). Case never matters.
 3. `commands_send(deviceId: "14", command: "<command>", collectLogsMs: 5000)`.
 4. `logs_query(sessionId: 12, since: "5m")` — reads take a sessionId; a device's live session id is its deviceId.
 5. `devices_disconnect(deviceId: "12")` — only when the user asks to drop Alpha; an app that reconnects on its own comes back in a new session. With several apps it always needs `deviceId`, even with a default set.
+
+### tv — logs from a smart TV
+
+A TV app (Vizio, Vidaa, other web TVs) has no Beaver SDK: Beaver reads it
+over the Chrome DevTools Protocol. The TV's developer mode must be on.
+
+1. Ask the user for the TV's IP address, and the DevTools port if it isn't
+   the usual one: Vizio 9555, Vidaa 9226, others 9222.
+2. `devices_connect_tv(host: "192.168.1.40", port: 9555, name: "Living room Vizio")`
+   — returns its `deviceId`. An error says what to check: the address, the
+   port, an app open on the TV, or another DevTools window attached (close
+   it). A TV already connected returns its device.
+3. `logs_query(sessionId: <deviceId>, since: "5m")` — console lines,
+   exceptions (`exception`, with the stack) and log entries; `logs_wait`
+   for what comes next. Lines in category `bridge` are Beaver's own: the
+   page closed (the app reloaded), the TV can't be reached. The device
+   stays connected meanwhile and picks the page up again.
+4. Commands, storage and toolboxes don't reach a TV.
+   `devices_disconnect(deviceId: "<deviceId>")` stops reading it.
 
 ### toolboxes — use what the app offers beyond commands
 

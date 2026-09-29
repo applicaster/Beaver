@@ -89,7 +89,7 @@ enum StorageTools {
                 : " Not refreshed: no device is connected; this is the last stored snapshot."
         }
         guard !host.logsOnly.contains(s.id) else {
-            return " Not refreshed: this device only sends logs (zapp-support's TV bridge), so it has no storage to send."
+            return " Not refreshed: this device only sends logs (a smart TV read over DevTools), so it has no storage to send."
         }
         let timeout = min(30_000, max(0, try args.int("timeoutMs") ?? 5_000))
         let fresh = await StorageCommand.refresh(layers, sessionId: s.id, timeout: .milliseconds(timeout),

@@ -3148,3 +3148,51 @@ the step order of D90.
   changelog needs bullets and inline styles only); download release notes
   from GitHub (needs the network, and shows notes for versions not
   installed).
+
+---
+
+## D94. Beaver connects a smart TV itself
+
+**Status:** Accepted (2026-09-29). Amends D89 ("no Beaver-side CDP client").
+
+- **Why now:** D89 let a TV reach Beaver only through zapp-support's
+  `scripts/tv-bridge.mjs`: Node 22, a zapp-support checkout and a command
+  line with `--server ws://127.0.0.1:9080`. Testers and support people
+  have Beaver, not those.
+- **Decision:** **Connect a TV…** — in the Connected pill's device menu,
+  on the "waiting for a device" screen ("TV? Connect a TV…") and in the
+  Beaver menu next to Copy WebSocket Address (an action, so it belongs
+  there under D92) — opens one sheet: IP address, port (Vizio 9555, Vidaa
+  9226, others 9222; `host:port` in the address field works too), optional
+  name. Connect shows progress, then the TV or an error that says what to
+  check: unreachable, nothing on that port / not DevTools, no app page,
+  page busy (another DevTools client attached). The last five TVs
+  (`UserDefaults` `recentTVs`) reconnect in one click. Agents:
+  `devices_connect_tv(host, port?, name?)` (a `.change` tool; it takes no
+  focus), `devices_disconnect` to stop.
+- **How:** `TVBridge` (`Beaver/Transport/TVBridge.swift`, in BeaverCore)
+  ports the script: `GET /json/list` (else `/json`), the first `page` with
+  a `webSocketDebuggerUrl`, `Runtime.enable` + `Log.enable` over
+  `URLSessionWebSocketTask`, `toEvent`'s mapping (levels, `console` /
+  `exception` / `log:<source>`, argument texts), re-discovery every 3 s
+  after the page goes, and a new `register` each time it finds it. It
+  prefers CDP's own timestamps (the script used its clock), unless they
+  are more than a day from Beaver's (an unset TV clock). It reports its own
+  state as `category: "bridge"` events, once per change, which the script
+  printed to its terminal.
+- **One code path:** the bridge is a WebSocket client of Beaver's own
+  server on 127.0.0.1:9080 and sends the script's `register` and `event`
+  frames. So the TV is the device D89 describes — its session, logs-only
+  handling, naming, `cdp-<host:port>` device id followed across reconnects,
+  Disconnect — with nothing new in the inbound loop, `LiveDevices` or the
+  tools, and a TV the script already connected is found by its device id
+  and not connected twice. Disconnect closes the bridge's socket, and a
+  closed socket stops the bridge: nothing keeps a TV Beaver dropped.
+- **Info.plist:** `NSLocalNetworkUsageDescription` (macOS asks before an
+  app talks to the local network) and ATS `NSAllowsLocalNetworking` (the TV
+  speaks plain http/ws).
+- **Alternatives:** feed the store directly (a synthetic connection id in
+  `LiveDevices`, the session, handshake and disconnect wiring done a
+  second time beside the inbound loop, and Disconnect needing its own
+  route to the bridge); bundle and run the Node script (Node isn't on
+  testers' Macs); keep D89 only.

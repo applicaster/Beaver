@@ -206,8 +206,8 @@ extension ToolContext {
         let (host, id) = try await pickDevice(args, doing: what, call: call, useDefault: useDefault)
         guard logsOnlyOK || !host.logsOnly.contains(id) else {
             let name = try await store.sessions().first { $0.id == id }.map(StatusTools.describeDevice) ?? "It"
-            throw ToolError("Device \"\(id)\" (\(name)) only sends logs: it is connected through zapp-support's "
-                + "TV bridge, so Beaver can't \(what). Its logs are all there is. "
+            throw ToolError("Device \"\(id)\" (\(name)) only sends logs: it is a smart TV read over "
+                + "DevTools, so Beaver can't \(what). Its logs are all there is. "
                 + "Example: logs_query(sessionId: \(id), since: \"10m\").")
         }
         return (host, id)
