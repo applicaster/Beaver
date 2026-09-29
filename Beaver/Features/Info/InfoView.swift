@@ -174,9 +174,9 @@ private struct InfoGridRow: View {
                     NSPasteboard.general.setString(row.value, forType: .string)
                     toasts.success("Copied \(row.label)")
                 } label: {
-                    Image(systemName: "doc.on.doc").font(.caption)
+                    Image(systemName: "doc.on.doc").font(.caption).foregroundStyle(.secondary)
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(.plain)
                 .help("Copy \(row.label)")
                 .accessibilityLabel("Copy \(row.label)")
                 .opacity(hovered ? 1 : 0)
@@ -230,8 +230,8 @@ private struct TableCardRow: View {
                             NSPasteboard.general.clearContents()
                             NSPasteboard.general.setString(cells[c], forType: .string)
                             toasts.success("Copied \(cells[c])")
-                        } label: { Image(systemName: "doc.on.doc").font(.caption) }
-                            .buttonStyle(.borderless)
+                        } label: { Image(systemName: "doc.on.doc").font(.caption).foregroundStyle(.secondary) }
+                            .buttonStyle(.plain)
                             .help("Copy \(cells[c])")
                             .accessibilityLabel("Copy \(cells[c])")
                             .opacity(hovered ? 1 : 0)
