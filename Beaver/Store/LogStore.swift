@@ -272,21 +272,24 @@ public actor LogStore {
     /// applicaster.v2 harvest wins the display columns (model, version,
     /// platform, OS) whichever lands first, so the handshake only fills
     /// them while empty; it is the source of the device id and package.
+    /// A `register` (D89) is the only source, so a repeated one overwrites.
     public func applyHandshake(_ h: ClientHandshake, to sessionId: Int64) async throws {
         let platform = h.platformParts
+        let fill = ["app_version", "device_model", "platform", "os_version"]
+            .map { h.logsOnly ? "\($0) = COALESCE(?, \($0))" : "\($0) = COALESCE(\($0), ?)" }
+            .joined(separator: ", ")
         let updated: Session? = try await dbQueue.write { db in
             try db.execute(
                 sql: """
                     UPDATE session SET
-                        app_version  = COALESCE(app_version, ?),
-                        device_model = COALESCE(device_model, ?),
-                        platform     = COALESCE(platform, ?),
-                        os_version   = COALESCE(os_version, ?),
+                        \(fill),
+                        app_name     = COALESCE(?, app_name),
                         device_uid   = COALESCE(?, device_uid),
                         app_package  = COALESCE(?, app_package)
                     WHERE id = ?
                 """,
-                arguments: [h.version, h.model, platform.name, platform.version, h.deviceId, h.appPackage, sessionId]
+                arguments: [h.version, h.model, platform.name, platform.version, h.appName, h.deviceId,
+                            h.appPackage, sessionId]
             )
             return try Self.fetchSession(id: sessionId, db: db)
         }

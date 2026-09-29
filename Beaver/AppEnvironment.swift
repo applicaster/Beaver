@@ -167,9 +167,13 @@ public final class AppEnvironment {
 }
 
 extension AppEnvironment: DeviceLink {
-    /// Sends to the connection that writes `sessionId`; no-op once it's gone.
+    /// Sends to the connection that writes `sessionId`; no-op once it's gone,
+    /// and for a logs-only client (D89), which reads nothing: every command —
+    /// on connect, from the Storages tab, the command bar, an agent — ends here.
     nonisolated public func send(command: String, to sessionId: Int64) async {
-        guard let connection = await MainActor.run(body: { self.live.connection(for: sessionId) }) else { return }
+        guard let connection = await MainActor.run(body: {
+            self.live.logsOnlySessions.contains(sessionId) ? nil : self.live.connection(for: sessionId)
+        }) else { return }
         await server.send(command: command, to: connection)
     }
 

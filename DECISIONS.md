@@ -3017,3 +3017,30 @@ and `sessions_compare` both do; the menus and pickers only offer them.
   missing `[Unreleased]` only warns — a changelog problem never stops a
   release.
 
+## D89. zapp-support's TV bridge connects to Beaver as a logs-only device
+
+**Status:** Accepted (2026-09-28).
+
+- **Decision:** Beaver decodes zapp-support's `register` frame (PROTOCOL.md
+  §4.6) into the D77 handshake, so a smart TV that `scripts/tv-bridge.mjs`
+  reads over the Chrome DevTools Protocol (Vizio, Vidaa, …) is a device like
+  a phone: its own live session, `deviceId` → `device_uid` (followed across
+  reconnects), `appName` → the session's name, platform `tv-cdp` with model
+  "TV (DevTools)". A repeated `register` overwrites those fields — it is
+  their only source. The console's `warn` and `log` level names decode as
+  `warning` and `info`.
+- **Logs only:** a `register` client reads nothing Beaver sends. Beaver
+  sends it no commands — `AppEnvironment.send` drops them, so the
+  `cmdlist` / `storage.list` on connect, the Storages tab's auto-refresh and
+  the command bar all stop there — fails its MCP at once
+  (`DeviceMCPClient.markLogsOnly`, never `markNative`), hides its toolboxes
+  in the device popover, and refuses agents' commands, storage changes and
+  toolboxes for it (`requireDevice`, except Disconnect and the default).
+- **Why:** TV apps' logs only reached zapp.support; the bridge takes
+  `--server`, so pointing it at Beaver is all it needs — no Beaver-side
+  CDP client.
+- **Alternatives:** a CDP client inside Beaver (a second transport to keep;
+  the bridge already exists and is shared with zapp.support); treating
+  `register` as an unknown frame and the TV as an anonymous device (no name,
+  no restart following, 5-second MCP timeouts, commands that silently go
+  nowhere).

@@ -38,7 +38,8 @@ enum ToolboxTools {
         if try ToolContext.isBeaver(args) {
             throw ToolError("The default is for apps; Beaver is always deviceId \"beaver\". Example: devices_set_default(deviceId: \"12\") with an id from beaver_status().")
         }
-        let (_, id) = try await ctx.requireDevice(args, doing: "make it the default", call: "devices_set_default()")
+        let (_, id) = try await ctx.requireDevice(args, doing: "make it the default", call: "devices_set_default()",
+                                                logsOnlyOK: true)
         guard let session = try await ctx.store.sessions().first(where: { $0.id == id }) else {
             throw ToolError("Session #\(id) is gone. Example: beaver_status(), then devices_set_default(deviceId: …).")
         }

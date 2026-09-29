@@ -46,7 +46,7 @@ the decoder.
 ```jsonc
 // Generic envelope:
 {
-  "type": "<one of: handshake | event | storage | network | command | mcp>",
+  "type": "<one of: handshake | event | storage | network | command | mcp | register>",
   ...                                 // type-specific fields
 }
 ```
@@ -207,7 +207,8 @@ same socket as `handshake` and `command`, through `DeviceMCPClient`.
 
 ## 4. Direction: client → server
 
-The SDK sends three message types.
+The SDK sends `event`, `storage`, `network`, `handshake` and `mcp`;
+zapp-support's TV bridge sends `register` and `event` (§4.6).
 
 ### 4.1 `event`
 
@@ -242,7 +243,8 @@ This is preserved as-is for compatibility.
 ```
 
 **Level encoding (heterogeneous).** The SDK sends `level` as either a
-string or an integer. The desktop app accepts both. Mapping:
+string or an integer. The desktop app accepts both. Mapping (Beaver also
+takes the browser console's `warn` as `warning` and `log` as `info`, D89):
 
 | String      | Integer | Severity |
 |-------------|---------|----------|
@@ -422,6 +424,48 @@ in `payload`:
   message carrying its own `method`) — Beaver doesn't answer it.
 - The device drops frames over 5 MB.
 
+### 4.6 `register` (client → server, D89)
+
+zapp-support's emitter self-identification, sent by its **TV bridge**
+(`scripts/tv-bridge.mjs` in `applicaster/zapp-support`): a Node script that
+attaches to a smart TV's Chrome DevTools Protocol endpoint (Vizio, Vidaa, …)
+and forwards the page's console and exceptions as `event` frames. It sends
+`register` as its first frame, again whenever it (re)attaches to the TV's
+page, and after every reconnect.
+
+```json
+{"type": "register", "id": "<uuid>",
+ "event": "{\"deviceId\":\"cdp-192.168.1.40:9555\",\"appName\":\"Living room Vizio\",\"deviceName\":\"Living room Vizio\",\"platform\":\"tv-cdp\"}"}
+```
+
+- The fields are in `event`, a JSON string (as in §4.1); zapp-support's
+  server also reads them from a `data` object, and so does Beaver. All are
+  optional: `deviceId`, `appName`, `deviceName`, `deviceModel`, `platform`,
+  `osVersion`, `versionName`. A payload that doesn't parse still registers,
+  with nothing known.
+- Beaver decodes it to the §4.4 handshake: `deviceId` → `device_uid` (the
+  bridge's `cdp-<tv-host:port>` is stable, so a TV that comes back is
+  followed like a restarted phone, D77), `appName` (else `deviceName`) →
+  `app_name`, `deviceModel` → `device_model`, `platform` + `osVersion` →
+  `platform` / `os_version`, `versionName` → `app_version`. A `tv-cdp`
+  register with no `deviceModel` shows as model **TV (DevTools)**.
+- It is the only source of those fields (no `applicaster.v2` storage
+  follows), so a repeated `register` on the same connection overwrites
+  them — the bridge re-registers with `"<page title> @ <host:port>"` once it
+  finds the app's page, unless `--name` was given.
+- **A register client sends logs only.** It doesn't read what Beaver sends
+  (the bridge ignores every inbound frame), so Beaver sends it no `command`
+  frames at all (not even `cmdlist` / `storage.list` on connect) — only its
+  own §3.1 `handshake` — and never marks it as serving MCP: toolboxes
+  fail at once instead of waiting out `initialize`. Agents' commands,
+  storage changes and toolboxes are refused for it with an error that says
+  so; `storage_snapshot` doesn't ask it. zapp-support's server treats it
+  the same way (`client.toolbox = isDeviceHandshake`).
+- Event frames from the bridge carry `subsystem: "tv-cdp"`, `category`
+  `console`, `exception` or `log:<source>`, a millisecond `timestamp`
+  (fractional for `log:*`), and levels `info` / `warning` / `error` /
+  `debug`. An exception's `message` is V8's description, stack included.
+
 ---
 
 ## 5. Encoding rules
@@ -452,6 +496,8 @@ in `payload`:
    connections are unaffected. A half-open connection
    is noticed by TCP keepalive within ~20 s.
 5. New connections after a close start a new session.
+   A client may identify itself with `handshake` (§4.4, the SDK) or
+   `register` (§4.6, zapp-support's TV bridge).
 6. **Reconnect behavior is not symmetric across platforms.** iOS/tvOS's
    sink reconnects on its own, backing off from 1 s to 30 s, forever. **The
    Android sink does not reconnect at all** (`WebSocketSink.kt`: `// todo:

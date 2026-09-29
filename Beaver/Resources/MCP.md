@@ -89,6 +89,13 @@ or a release):
    "Deleted N old sessions, freed …". Picking a period in the menu deletes
    right away, no waiting day (try 7 Days). Bookmarked and imported
    sessions stay, and so does a connected device's session.
+14. Smart TVs (Beaver 4.15.0 or later): in a zapp-support checkout run
+   `node scripts/tv-bridge.mjs <tv-ip>:<devtools-port> --server ws://127.0.0.1:9080 --name "Living room Vizio"`
+   (Node 22+; the TV's DevTools port: Vizio 9555, Vidaa 9226, else often
+   9222). The TV appears like a phone, named "Living room Vizio", model
+   "TV (DevTools)"; its console lines and exceptions stream in under subsystem
+   `tv-cdp`. `beaver_status` lists it with `platform: "tv-cdp"`;
+   `commands_send` to it fails with "only sends logs".
 
 ## Tools
 
@@ -143,6 +150,11 @@ is a query in the Log feed's syntax, the same as zapp-support's web logger
 (recipe `query`); `searchIsRegex: true` takes it as one regular expression
 instead. `since: "5m"` works wherever ids do. File paths are absolute or start with `~`. Every result ends
 with `Next:` suggestions.
+
+A device with `platform: "tv-cdp"` is a smart TV connected through
+zapp-support's TV bridge: it only sends logs (subsystem `tv-cdp`, categories
+`console`, `exception`, `log:*`). Commands, storage changes and toolboxes are
+refused for it; read its logs instead.
 
 UI tools work in the background: the window changes where it is and nothing
 takes focus, unless you pass `reveal: true`.
