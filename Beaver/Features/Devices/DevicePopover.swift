@@ -182,7 +182,7 @@ struct DevicePopover: View {
             ForEach(boxes, id: \.name) { box in
                 DisclosureGroup(isExpanded: Binding(
                     get: { openToolbox == box.name },
-                    set: { openToolbox = $0 ? box.name : nil }
+                    set: { open in withAnimation(.easeInOut(duration: 0.2)) { openToolbox = open ? box.name : nil } }
                 )) {
                     // Full width, leading: a toolbox with short descriptions
                     // was centred, so open lists looked different.
