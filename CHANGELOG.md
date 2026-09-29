@@ -12,6 +12,8 @@ does the same for a manual release.
 
 ## [Unreleased]
 
+## [4.14.2] - 2026-09-29
+
 ### Fixed
 - Text in Beaver's panels can be selected and copied: Info, Storages,
   Network (and its expanded sheet), the event detail pane, Sessions
@@ -677,7 +679,7 @@ end-to-end. No code-visible changes versus 1.0.0.
 
 Initial Beaver release. See `DECISIONS.md` D1–D20 for the design history.
 
-[Unreleased]: https://github.com/applicaster/Beaver/compare/4.14.1...HEAD
+[Unreleased]: https://github.com/applicaster/Beaver/compare/4.14.2...HEAD
 [2.0.1]: https://github.com/applicaster/Beaver/releases/tag/2.0.1
 [2.0.0]: https://github.com/applicaster/Beaver/releases/tag/2.0.0
 [1.0.2]: https://github.com/applicaster/Beaver/releases/tag/1.0.2
