@@ -209,13 +209,17 @@ jobs:
             REMOTE="https://x-access-token:${GITHUB_TOKEN}@github.com/applicaster/Beaver.git"
             PBXPROJ="Beaver.xcodeproj/project.pbxproj"
 
-            # 1. Commit the pbxproj bump if the file is dirty.
-            if ! git diff --quiet "$PBXPROJ"; then
-              git add "$PBXPROJ"
+            # 1. Date the changelog: [Unreleased] → [X.Y.Z] - today (D90).
+            #    Idempotent; only warns if CHANGELOG.md has no [Unreleased].
+            ./scripts/changelog-release.sh "${BEAVER_VERSION}"
+
+            # Commit the pbxproj bump and the changelog if either changed.
+            if ! git diff --quiet -- "$PBXPROJ" CHANGELOG.md; then
+              git add "$PBXPROJ" CHANGELOG.md
               git commit -m "version ${BEAVER_VERSION} [skip ci]"
               git push "$REMOTE" HEAD:main
             else
-              echo "ℹ️  pbxproj clean — no bump commit to push."
+              echo "ℹ️  pbxproj and CHANGELOG.md clean — no bump commit to push."
             fi
 
             # 2. Tag the (now possibly bump-) commit if not already tagged.
@@ -224,20 +228,13 @@ jobs:
               git push "$REMOTE" "${BEAVER_VERSION}"
             fi
 
-            # 3. Extract release notes — try a versioned section first
-            #    (## [X.Y.Z]), fall back to [Unreleased].
+            # 3. Release notes: the version's section (## [X.Y.Z]) that
+            #    step 1 wrote.
             NOTES=$(awk -v ver="${BEAVER_VERSION}" '
               $0 ~ "^## \\[" ver "\\]"   { capturing = 1; next }
               capturing && /^## /        { capturing = 0 }
               capturing
             ' CHANGELOG.md | sed '/./,$!d')
-            if [ -z "${NOTES}" ]; then
-              NOTES=$(awk '
-                /^## \[Unreleased\]/   { capturing = 1; next }
-                /^## /                 { capturing = 0 }
-                capturing
-              ' CHANGELOG.md | sed '/./,$!d')
-            fi
             if [ -z "${NOTES}" ]; then
               NOTES="Auto-released from $(git rev-parse --short HEAD)."
             fi

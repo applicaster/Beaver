@@ -4,15 +4,20 @@ All notable user-facing changes to Beaver go here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely, and
 versions track [Semantic Versioning](https://semver.org/) (`MAJOR.MINOR.PATCH`).
 
-When releasing:
-
-1. Move items from `[Unreleased]` into a new dated section.
-2. `make bump VERSION=X.Y.Z` (commits + tags).
-3. `git push && git push --tags`.
-4. CI builds, signs, notarizes, and publishes the GitHub Release
-   plus a new `<item>` in the Sparkle appcast.
+Add your change under `[Unreleased]`. Releasing is automatic: every merge
+to `main` releases (D23), and CI's `version X.Y.Z [skip ci]` commit moves
+the `[Unreleased]` items into `## [X.Y.Z] - YYYY-MM-DD`, which becomes the
+GitHub Release notes (`scripts/changelog-release.sh`, D90). `make bump`
+does the same for a manual release.
 
 ## [Unreleased]
+
+### Added
+- Network: the request detail shows the SDK's **Request ID** (with a copy
+  button), to find the request in the app's own logs. Agents:
+  `network_get` returns it as `requestId`.
+
+## [4.14.0] - 2026-09-29
 
 ### Added
 - **The Log feed's Filter field understands the web logger's query
@@ -28,9 +33,19 @@ When releasing:
   `ui_show` and the other filter tools takes the same syntax
   (`beaver_guide(topic: "query")`).
 
+## [4.13.0] - 2026-09-29
+
 ### Changed
 - Compare also compares **storage** (each layer's latest snapshot, key by key, with the fields inside JSON values) and **App Info** (versions, Zapp ids, device, plugin versions), in the sheet and in `sessions_compare` (default: all four sections).
 - Compare works only on sessions of the same app (same bundle id, else app name); the menus offer only those, and `sessions_compare` says why it refuses two different apps.
+
+### Fixed
+- The Agent button's count no longer hides under the window's rounded
+  corner.
+- The Info tab uses the window's width: app and device side by side when
+  there's room.
+
+## [4.12.0] - 2026-09-29
 
 ### Added
 - **Sessions: click a session to see its details** on the right — times,
@@ -38,14 +53,55 @@ When releasing:
   agents** (ⓘ explains it) and the app's toolboxes, which open with a short
   animation. **Open**, a double-click or Return opens it in the Log feed;
   a click no longer does.
-- **⌘1…⌘9 apply your saved filters** — the 1st…9th in the ★ popover,
-  which shows each one's shortcut. From another tab, they switch to the
-  Log feed.
-- **A default saved filter.** Click the pin next to a saved filter in the
-  ★ popover: Beaver starts from it at launch and whenever a device
-  connects, instead of the last filter used. Agents: `filters_list` shows
-  the default and the shortcuts; `filters_save(name:, default: true)`
-  sets it.
+
+## [4.11.0] - 2026-09-28
+
+### Added
+- **Info tab**: App & Device Info for the viewed session, as in zapp-support — app, SDK and QuickBrick versions, Zapp ids, the layout's screens, cell styles and plugins (from the app's config files on Zapp's bucket), the device, language, country and advertising id. Every value says where it came from; click to copy. **Copy Fingerprint** now also gives the device id, bundle id, session and time. App menu → **Zapp Access Token…** adds the Zapp CMS's build parameters (your own token, kept in the keychain). Agents: `app_info`, `ui_show(tab: "info")`.
+
+### Fixed
+- Sessions left open by quitting Beaver (or a crash) while a device was
+  connected no longer stay "Live" for ever: they end at their last event
+  when Beaver starts.
+- The row separator under a live session in Sessions runs the full width
+  again.
+
+## [4.10.1] - 2026-09-28
+
+### Fixed
+- **Events a device sends just before it disconnects are no longer lost.**
+  When the connection closed, Beaver could stop reading while the last
+  few frames were still waiting, or show them after the session ended.
+  It now reads every frame that arrived, then ends the session.
+
+## [4.10.0] - 2026-09-28
+
+### Added
+- **Compare two sessions** — "it works on 4.5, not on 4.6", "works on
+  device A, not on B". Sessions → right-click a session → **Compare with**
+  → pick the other. A sheet lists log lines only in one of them (numbers,
+  ids, times and URL query values don't count, so `Loaded 42 items in
+  118ms` matches `Loaded 7 items in 95ms`), warnings and errors per
+  subsystem A vs B, requests only in one (ids in the path don't count),
+  and requests whose status class or median duration changed. Click a
+  line to open that event or request. Storage and App Info comparisons
+  come later. Agents: new tool `sessions_compare(a, b, sections?)`.
+
+## [4.9.0] - 2026-09-28
+
+### Added
+- **Storage changes.** Storages → **Changes** compares the layer on screen
+  with an earlier snapshot of the session (pick its time): keys added,
+  removed and changed with old → new, and for a JSON value the fields that
+  changed inside it. Works on past and imported sessions; an imported one
+  usually has a single snapshot, so there is nothing to compare. Agents:
+  new tool `storage_diff` (earliest → latest by default; `since`,
+  `beforeEventId`, or `fromId` / `toId`), and a `storage-changes` recipe —
+  "what changed in storage after login".
+
+## [4.8.0] - 2026-09-28
+
+### Added
 - **Old sessions are deleted automatically.** Beaver menu → **Delete
   Sessions Older Than** 7 / 30 / 90 Days / Never (default 30 days); the
   menu also shows how much disk the sessions use. Checked a few seconds
@@ -62,24 +118,22 @@ When releasing:
   "n of N", and Return / ⇧Return step through them, opening collapsed rows
   and "Show more" pages to scroll each one into view. `.*` for regex, Esc
   closes. ⌘F still filters the feed.
-- **Storage changes.** Storages → **Changes** compares the layer on screen
-  with an earlier snapshot of the session (pick its time): keys added,
-  removed and changed with old → new, and for a JSON value the fields that
-  changed inside it. Works on past and imported sessions; an imported one
-  usually has a single snapshot, so there is nothing to compare. Agents:
-  new tool `storage_diff` (earliest → latest by default; `since`,
-  `beforeEventId`, or `fromId` / `toId`), and a `storage-changes` recipe —
-  "what changed in storage after login".
-- **Compare two sessions** — "it works on 4.5, not on 4.6", "works on
-  device A, not on B". Sessions → right-click a session → **Compare with**
-  → pick the other. A sheet lists log lines only in one of them (numbers,
-  ids, times and URL query values don't count, so `Loaded 42 items in
-  118ms` matches `Loaded 7 items in 95ms`), warnings and errors per
-  subsystem A vs B, requests only in one (ids in the path don't count),
-  and requests whose status class or median duration changed. Click a
-  line to open that event or request. Storage and App Info comparisons
-  come later. Agents: new tool `sessions_compare(a, b, sections?)`.
-- **Info tab**: App & Device Info for the viewed session, as in zapp-support — app, SDK and QuickBrick versions, Zapp ids, the layout's screens, cell styles and plugins (from the app's config files on Zapp's bucket), the device, language, country and advertising id. Every value says where it came from; click to copy. **Copy Fingerprint** now also gives the device id, bundle id, session and time. App menu → **Zapp Access Token…** adds the Zapp CMS's build parameters (your own token, kept in the keychain). Agents: `app_info`, `ui_show(tab: "info")`.
+
+## [4.7.0] - 2026-09-28
+
+### Added
+- **⌘1…⌘9 apply your saved filters** — the 1st…9th in the ★ popover,
+  which shows each one's shortcut. From another tab, they switch to the
+  Log feed.
+- **A default saved filter.** Click the pin next to a saved filter in the
+  ★ popover: Beaver starts from it at launch and whenever a device
+  connects, instead of the last filter used. Agents: `filters_list` shows
+  the default and the shortcuts; `filters_save(name:, default: true)`
+  sets it.
+
+## [4.6.0] - 2026-09-28
+
+### Added
 - Drop a session file (`.json`) or HAR anywhere on the window to import
   it, the same as Import. A file Beaver can't open now says so instead of
   doing nothing.
@@ -87,80 +141,28 @@ When releasing:
   newest 50).
 - The Log feed shows a banner with Retry when it can't read the session,
   instead of silently showing stale rows.
-- **Updates install themselves.** Beaver checks for a new version on every
-  launch and downloads it in the background. When it's ready, choose
-  **Restart Now** or **Later**; Later installs it when you quit Beaver.
-- Scheme Generator: under the template picker, a line says what a link of
-  that template does in the app. Agents get the same text: `scheme_build`
-  lists it for every template and returns it as `does`.
-- Several devices can be connected at once. Click the Connected pill in
-  the middle of the toolbar to switch between them or open a recent
-  session. A device that connects doesn't take the window while you're
-  looking at another live one.
-- **Disconnect** a device: the red Disconnect button on a live session in
-  Sessions, or Disconnect in the Connected pill's menu. An app that
-  reconnects on its own comes back in a new session.
-- Agents: `beaver_status` lists every connected device; with more than one,
-  `commands_send`, `commands_list` and storage changes take `deviceId`.
-  New tool `devices_disconnect`. A device's id is now its live session id
-  (`"12"`); `deviceId: "current"` still works while one device is
-  connected.
-- **Scheme Generator.** A new "Tools" section in the sidebar builds deep
-  links into a Zapp app: open a screen or a feed entry, present a feed, a
-  web page or another layout, X-Ray (open the logger, connect the device
-  to this Beaver, a remote assistance PIN, share or export logs, logger
-  settings), reset the device ID, external account, or any plugin host —
-  with extra parameters, Copy and a QR code to scan with the device. The
-  app's own scheme comes from the active session's storage.
-- Agents: new tool `scheme_build` builds the same links — with the
-  connected app's own scheme, read from its storage, unless given — fills the Scheme
-  Generator form on screen (`show: true`, in the background), copies it to
-  the clipboard (`copy: true`) and saves a QR code (`qrFile`).
-  `ui_show(tab: "schemes")` opens the tab and `ui_state` returns the form
-  and its URL.
-- Click the device badge on the left of the toolbar: the app's name, bundle id,
-  device and device id, a Disconnect button, "Default for agents", and the
-  app's toolboxes with each tool's arguments (apps built with quick-brick-xray's
-  native WebSocket sink).
-- Agents: `toolboxes_list` and `tools_call` reach a connected app's toolboxes
-  (and Beaver's own tools as `deviceId: "beaver"`, its destructive tools left
-  out — call those directly instead); `devices_set_default` picks the app
-  device tools use when `deviceId` is omitted — it follows the app across
-  restarts. `beaver_status.devices` gains `default`, `uid`, `appPackage`.
-  An app tool that deletes, removes, clears, kills or resets shows the
-  destructive toast in the Agent panel.
-- The Agent panel's "What an agent can do" covers several connected apps,
-  the default app and each app's toolboxes.
 
 ### Changed
 - The reply to the `cmdlist` Beaver sends on connect no longer shows up in
   the Log feed; a `cmdlist` you or an agent send still does.
-- An app that restarts is recognised by its device id, so two identical builds
-  on two simulators are no longer confused.
+
+## [4.5.2] - 2026-09-28
+
+### Fixed
+- A toolbox request stuck behind a slow one gives up after its own timeout
+  and says the app is busy (nothing ran), instead of waiting indefinitely.
+- Agents: `tools_call` on a restart, kill or launch tool watches for the app
+  dropping only once the call is sent, and stops watching when the app
+  answers with an error, so a later unrelated drop isn't pinned on it.
+
+## [4.5.1] - 2026-09-28
+
+### Changed
 - Agents: `tools_call(deviceId: "beaver")` returns Beaver's result under
   `structuredContent`; on an app, `tools_call` returns `structuredContent`
   when the app sent one and `text` otherwise.
 
 ### Fixed
-- Sessions left open by quitting Beaver (or a crash) while a device was
-  connected no longer stay "Live" for ever: they end at their last event
-  when Beaver starts.
-- The row separator under a live session in Sessions runs the full width
-  again, and the Agent button's count no longer hides under the window's
-  rounded corner.
-- The Info tab uses the window's width: app and device side by side when
-  there's room.
-- **Events a device sends just before it disconnects are no longer lost.**
-  When the connection closed, Beaver could stop reading while the last
-  few frames were still waiting, or show them after the session ended.
-  It now reads every frame that arrived, then ends the session.
-- A device that connects is shown at once, even if a past or imported
-  session was open — before, you had to pick it in Sessions by hand.
-- Double-clicking empty space in the toolbar zooms the window again —
-  before, only the strip above the sidebar did.
-- A device whose app closes its socket is disconnected at once. Before, if
-  the socket closed cleanly (no reset), Beaver never noticed, and the
-  device and its session stayed live until you disconnected it by hand.
 - Agents: `tools_call` is marked destructive, so clients that honor
   destructiveHint ask you to confirm, since an app tool can delete data or
   restart the app. Restart, kill, launch and
@@ -179,11 +181,6 @@ When releasing:
   reconnects.
 - Requests to a connected app's toolboxes go one at a time, so a slow tool
   call no longer makes an unrelated request to the same app time out.
-- A toolbox request stuck behind a slow one gives up after its own timeout
-  and says the app is busy (nothing ran), instead of waiting indefinitely.
-- Agents: `tools_call` on a restart, kill or launch tool watches for the app
-  dropping only once the call is sent, and stops watching when the app
-  answers with an error, so a later unrelated drop isn't pinned on it.
 - Agents: a `tools_call` that never reached the app — it didn't answer
   `initialize`, or disconnected while the call waited its turn — says
   nothing ran and gives the same call to try again, instead of "it may
@@ -201,6 +198,97 @@ When releasing:
 - PROTOCOL.md, the design plan and DECISIONS.md corrected against the real
   SDK behavior found in the bug hunt (frame encoding, Android's handshake
   order and lack of reconnect, and more).
+
+## [4.5.0] - 2026-09-28
+
+### Added
+- **Updates install themselves.** Beaver checks for a new version on every
+  launch and downloads it in the background. When it's ready, choose
+  **Restart Now** or **Later**; Later installs it when you quit Beaver.
+- Scheme Generator: under the template picker, a line says what a link of
+  that template does in the app. Agents get the same text: `scheme_build`
+  lists it for every template and returns it as `does`.
+
+## [4.4.2] - 2026-09-28
+
+### Fixed
+- A device whose app closes its socket is disconnected at once. Before, if
+  the socket closed cleanly (no reset), Beaver never noticed, and the
+  device and its session stayed live until you disconnected it by hand.
+
+## [4.4.1] - 2026-09-28
+
+No user-facing changes.
+
+## [4.4.0] - 2026-09-28
+
+### Added
+- Click the device badge on the left of the toolbar: the app's name, bundle id,
+  device and device id, a Disconnect button, "Default for agents", and the
+  app's toolboxes with each tool's arguments (apps built with quick-brick-xray's
+  native WebSocket sink).
+- Agents: `toolboxes_list` and `tools_call` reach a connected app's toolboxes
+  (and Beaver's own tools as `deviceId: "beaver"`, its destructive tools left
+  out — call those directly instead); `devices_set_default` picks the app
+  device tools use when `deviceId` is omitted — it follows the app across
+  restarts. `beaver_status.devices` gains `default`, `uid`, `appPackage`.
+  An app tool that deletes, removes, clears, kills or resets shows the
+  destructive toast in the Agent panel.
+- The Agent panel's "What an agent can do" covers several connected apps,
+  the default app and each app's toolboxes.
+
+### Changed
+- An app that restarts is recognised by its device id, so two identical builds
+  on two simulators are no longer confused.
+
+## [4.3.0] - 2026-09-28
+
+### Added
+- **Scheme Generator.** A new "Tools" section in the sidebar builds deep
+  links into a Zapp app: open a screen or a feed entry, present a feed, a
+  web page or another layout, X-Ray (open the logger, connect the device
+  to this Beaver, a remote assistance PIN, share or export logs, logger
+  settings), reset the device ID, external account, or any plugin host —
+  with extra parameters, Copy and a QR code to scan with the device. The
+  app's own scheme comes from the active session's storage.
+- Agents: new tool `scheme_build` builds the same links — with the
+  connected app's own scheme, read from its storage, unless given — fills the Scheme
+  Generator form on screen (`show: true`, in the background), copies it to
+  the clipboard (`copy: true`) and saves a QR code (`qrFile`).
+  `ui_show(tab: "schemes")` opens the tab and `ui_state` returns the form
+  and its URL.
+
+## [4.2.0] - 2026-09-28
+
+### Added
+- Several devices can be connected at once. Click the Connected pill in
+  the middle of the toolbar to switch between them or open a recent
+  session. A device that connects doesn't take the window while you're
+  looking at another live one.
+- **Disconnect** a device: the red Disconnect button on a live session in
+  Sessions, or Disconnect in the Connected pill's menu. An app that
+  reconnects on its own comes back in a new session.
+- Agents: `beaver_status` lists every connected device; with more than one,
+  `commands_send`, `commands_list` and storage changes take `deviceId`.
+  New tool `devices_disconnect`. A device's id is now its live session id
+  (`"12"`); `deviceId: "current"` still works while one device is
+  connected.
+
+## [4.1.2] - 2026-09-25
+
+### Fixed
+- A device that connects is shown at once, even if a past or imported
+  session was open — before, you had to pick it in Sessions by hand.
+
+## [4.1.1] - 2026-09-25
+
+### Fixed
+- Double-clicking empty space in the toolbar zooms the window again —
+  before, only the strip above the sidebar did.
+
+## [4.1.0] - 2026-09-24
+
+### Added
 
 ## [4.0.1] - 2026-09-24
 
@@ -578,7 +666,7 @@ end-to-end. No code-visible changes versus 1.0.0.
 
 Initial Beaver release. See `DECISIONS.md` D1–D20 for the design history.
 
-[Unreleased]: https://github.com/applicaster/Beaver/compare/2.0.1...HEAD
+[Unreleased]: https://github.com/applicaster/Beaver/compare/4.14.0...HEAD
 [2.0.1]: https://github.com/applicaster/Beaver/releases/tag/2.0.1
 [2.0.0]: https://github.com/applicaster/Beaver/releases/tag/2.0.0
 [1.0.2]: https://github.com/applicaster/Beaver/releases/tag/1.0.2

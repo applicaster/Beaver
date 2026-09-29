@@ -231,6 +231,20 @@ private struct NetworkDetailContent: View {
     private var metadata: some View {
         Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 4) {
             row("Host", entry.host.isEmpty ? "—" : entry.host)
+            // The SDK's own id (PROTOCOL.md §4.3), to find the request in its logs.
+            if !entry.requestId.isEmpty {
+                GridRow {
+                    Text("Request ID")
+                        .foregroundStyle(.secondary)
+                        .frame(width: 96, alignment: .leading)
+                    HStack(spacing: 6) {
+                        Text(entry.requestId)
+                            .font(.system(size: 11, design: .monospaced))
+                            .textSelection(.enabled)
+                        copyIcon(help: "Copy request ID") { toasts.copy(entry.requestId, "Copied request ID") }
+                    }
+                }
+            }
             row("Method", entry.method)
             row("Duration", duration)
             row("Started", NetworkView.time(entry.startMillis))

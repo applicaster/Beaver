@@ -2994,3 +2994,26 @@ and `sessions_compare` both do; the menus and pickers only offer them.
 - **Alternatives:** a separate `query` field beside `search` (two text
   semantics on one filter, a migration for saved filters); filtering the
   parsed query in Swift (feeds reach 1M rows); FTS5 (D40 removed it).
+## D90. The release commit dates the changelog
+
+**Status:** Accepted (2026-09-29).
+
+- **Decision:** CI's release job runs `scripts/changelog-release.sh X.Y.Z`
+  before the `version X.Y.Z [skip ci]` commit: everything under
+  `[Unreleased]` moves into `## [X.Y.Z] - YYYY-MM-DD` (UTC), `[Unreleased]`
+  stays as an empty heading, and the commit carries `CHANGELOG.md` with the
+  pbxproj. The GitHub Release notes are that section. A release with
+  nothing under `[Unreleased]` gets "No user-facing changes." `make bump`
+  runs the same script; `make test` runs its `--check`.
+- **Why:** since D23 nobody releases by hand, and the manual "move
+  `[Unreleased]` into a dated section" step never ran — 4.1.0 to 4.13.0
+  piled up under `[Unreleased]` and every GitHub Release got the whole
+  pile as its notes. Those entries were placed under their versions once,
+  from the commits that added them.
+- **Alternatives:** a person moves the entries in each PR (merges pick the
+  version, so the PR can't know it); notes from commit subjects (they're
+  for developers, the changelog is for users).
+- Idempotent: a file that already has `## [X.Y.Z]` is left alone, and a
+  missing `[Unreleased]` only warns — a changelog problem never stops a
+  release.
+

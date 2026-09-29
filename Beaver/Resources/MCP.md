@@ -106,7 +106,7 @@ or a release):
 | `logs_wait` | Wait up to 60 s for a matching event |
 | `logs_clear` | Hide the viewed Log feed's events up to now, like Clear (⌘K); deletes nothing |
 | `network_query` | Requests by status, method, host, text |
-| `network_get` | One request with headers and bodies |
+| `network_get` | One request with the SDK's `requestId`, headers and bodies |
 | `network_copy` | A request as cURL, fetch() or JSON, with replay warnings |
 | `storage_snapshot` | Session / local / keychain storage, fresh from the app when connected |
 | `storage_diff` | What changed in storage between two snapshots of the session: keys added, removed, changed (old → new), fields inside JSON values; default earliest → latest |

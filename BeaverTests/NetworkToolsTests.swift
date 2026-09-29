@@ -10,7 +10,7 @@ struct NetworkToolsTests {
         let s = try await store.createSession(source: .live)
         let payloads = [
             #"{"url":"https://api.x.io/feed","method":"GET","status":200,"timing":{"startTime":1,"duration":80},"responseBody":"[]"}"#,
-            #"{"url":"https://api.x.io/oauth/token","method":"POST","status":401,"timing":{"startTime":2,"duration":120},"requestHeaders":{"Authorization":"[REDACTED]"},"requestBody":"grant=refresh"}"#,
+            #"{"requestId":"R7","url":"https://api.x.io/oauth/token","method":"POST","status":401,"timing":{"startTime":2,"duration":120},"requestHeaders":{"Authorization":"[REDACTED]"},"requestBody":"grant=refresh"}"#,
             #"{"url":"https://cdn.y.io/a.png","method":"GET","error":"timed out","timing":{"startTime":3}}"#,
         ]
         for p in payloads {
@@ -50,6 +50,17 @@ struct NetworkToolsTests {
         #expect(r.body.contains("Authorization: [REDACTED]"))
         #expect(r.body.contains("grant=refresh"))
         #expect(r.structured["status"] == 401)
+    }
+
+    @Test("Get shows the SDK's requestId, and null when the SDK sent none")
+    func getRequestId() async throws {
+        let (ctx, allIds) = try await fixture()
+        let r = try await NetworkTools.get.run(ToolArguments(["id": .number(Double(allIds[1]))]), ctx)
+        #expect(r.body.contains("Request ID: R7"))
+        #expect(r.structured["requestId"] == "R7")
+        let none = try await NetworkTools.get.run(ToolArguments(["id": .number(Double(allIds[0]))]), ctx)
+        #expect(!none.body.contains("Request ID"))
+        #expect(none.structured["requestId"] == .null)
     }
 
     @Test("Get: a >256 KB body is capped in structured too, consistent with bodiesTruncated")
