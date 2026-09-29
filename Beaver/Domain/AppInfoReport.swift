@@ -38,6 +38,13 @@ public struct AppInfoReport: Sendable {
     public var cellStylesSource: String
     /// From layout.json; empty without it.
     public var typeMapping: [AppInfo.TypeMapping]
+    public var navigation: [AppInfo.NavItem]
+    /// From the pipes endpoints file.
+    public var dataSources: [AppInfo.DataSource]
+    /// The storage keys data sources send (login tokens…): stored or not.
+    public var sentKeys: [InfoRow]
+    /// From remote_configurations.
+    public var iconURL: String?
     public var plugins: [AppInfo.Plugin]
     public var pluginsSource: String
     public var configs: [AppInfo.ConfigKind: Config]
@@ -51,12 +58,16 @@ public struct AppInfoReport: Sendable {
         var session: StorageSnapshot?
         var local: StorageSnapshot?
         var leaves: [StorageLeaf]
+        /// Session, local and keychain: only to tell whether a key is stored.
+        var allLeaves: [StorageLeaf]
     }
 
     static func inputs(store: LogStore, sessionId: Int64) async throws -> Inputs {
         let session = try await store.latestStorageSnapshot(sessionId: sessionId, namespace: .session)
         let local = try await store.latestStorageSnapshot(sessionId: sessionId, namespace: .local)
-        return Inputs(session: session, local: local, leaves: AppInfo.leaves(session: session?.dataJSON, local: local?.dataJSON))
+        let keychain = try await store.latestStorageSnapshot(sessionId: sessionId, namespace: .keychain)
+        return Inputs(session: session, local: local, leaves: AppInfo.leaves(session: session?.dataJSON, local: local?.dataJSON),
+                      allLeaves: AppInfo.leaves(session: session?.dataJSON, local: local?.dataJSON, keychain: keychain?.dataJSON))
     }
 
     /// Every config file the session points to, with the bodies of the
@@ -92,7 +103,9 @@ public struct AppInfoReport: Sendable {
             let fetched = await fetch(.remoteConfigurations, remote)
             out.append(fetched)
             let json = fetched.data.flatMap { try? JSONSerialization.jsonObject(with: $0) }
-            for (kind, url) in AppInfo.remoteConfigURLs(json) where files[kind] == nil && AppInfo.isAllowedConfigURL(url) {
+            var named = AppInfo.remoteConfigURLs(json)
+            named[.localization] = AppInfo.localizationURL(fromRemote: json, leaves: inputs.leaves)
+            for (kind, url) in named where files[kind] == nil && AppInfo.isAllowedConfigURL(url) {
                 files[kind] = AppInfo.ConfigFile(url: url, body: nil, found: "remote_configurations.json")
             }
         }
@@ -129,6 +142,10 @@ public struct AppInfoReport: Sendable {
         if let name = json[.layout].flatMap(AppInfo.layoutName) {
             identity.insert(InfoRow(label: "Layout name", value: name, source: "layout.json"), at: 0)
         }
+        let languages = AppInfo.languages(fromRemote: json[.remoteConfigurations])
+        if !languages.isEmpty {
+            identity.append(InfoRow(label: "Languages", value: languages.joined(separator: ", "), source: "remote_configurations.json"))
+        }
         if !identity.contains(where: { $0.label == "Account id" }),
            let account = AppInfo.accountId(fromConfigURLs: configs.values.map(\.url)) {
             identity.append(InfoRow(label: "Account id", value: account, source: "config file URL"))
@@ -140,6 +157,7 @@ public struct AppInfoReport: Sendable {
             ? AppInfo.screens(fromLogs: try await store.screenLogPayloads(sessionId: sessionId)) : []
         let storageCells = AppInfo.cellStylesFromStorage(leaves)
         let pluginList = json[.pluginConfigurations].map(AppInfo.plugins(fromConfigurations:))
+        let dataSources = json[.pipesEndpoints].map(AppInfo.dataSources(fromEndpoints:)) ?? []
 
         return AppInfoReport(
             device: AppInfo.device(leaves),
@@ -150,6 +168,10 @@ public struct AppInfoReport: Sendable {
             cellStyles: json[.layout].map { AppInfo.cellStyles(fromLayout: $0, known: storageCells) } ?? storageCells,
             cellStylesSource: json[.layout] != nil ? "layout.json" : "local storage cache",
             typeMapping: json[.layout].map(AppInfo.typeMapping(fromLayout:)) ?? [],
+            navigation: json[.layout].map(AppInfo.navigation(fromLayout:)) ?? [],
+            dataSources: dataSources,
+            sentKeys: AppInfo.sentKeys(dataSources, leaves: inputs.allLeaves),
+            iconURL: AppInfo.iconURL(fromRemote: json[.remoteConfigurations]),
             plugins: pluginList ?? AppInfo.pluginsFromStorage(leaves),
             // The app's own list is the build's; Zapp's file is today's (or
             // the connect time's, when saved) and may have moved on.

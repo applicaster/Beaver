@@ -12,7 +12,7 @@ enum InfoTools {
     static let appInfo = MCPTool(
         name: "app_info",
         title: "App and device info",
-        description: "Use to learn what app and device a session is: app, SDK and QuickBrick versions, Zapp ids, the layout's screens, type mapping (entry type → screen), cell styles and plugins, and the device's model, OS, language, country and advertising id — each value with where it came from (storage, a config file, logs) — the app's own storage, so the build it runs, not Zapp's latest. Config files come from Zapp's public bucket, at the URLs the app keeps in storage.",
+        description: "Use to learn what app and device a session is: app, SDK and QuickBrick versions, Zapp ids, the layout's screens, type mapping (entry type → screen), navigation (menu items → screens), data sources (feeds and the storage keys they send, with whether each is stored — the login state), languages, cell styles and plugins, and the device's model, OS, language, country and advertising id — each value with where it came from (storage, a config file, logs) — the app's own storage, so the build it runs, not Zapp's latest. Config files come from Zapp's public bucket, at the URLs the app keeps in storage.",
         kind: .read,
         inputSchema: ToolSchema.object([
             "sessionId": ToolSchema.sessionId,
@@ -47,6 +47,12 @@ enum InfoTools {
         var sections: [String?] = [lines("Identity & versions", r.identity)]
         sections.append("Screens (\(r.screens.count), \(r.screensSource)):\n" + screenLines)
         sections.append(r.typeMapping.isEmpty ? nil : "Type mapping — entry type → screen (\(r.typeMapping.count), layout.json):\n" + typeLines)
+        sections.append(r.navigation.isEmpty ? nil : "Navigation — menu item → screen (layout.json):\n"
+            + r.navigation.map { "  \($0.menu): \($0.title) → \($0.screenName ?? "(no such screen)")  \($0.screenId)" }.joined(separator: "\n"))
+        sections.append(r.dataSources.isEmpty ? nil : "Data sources (\(r.dataSources.count), pipes endpoints):\n"
+            + r.dataSources.map { d in "  \(d.method) \(d.url)" + (d.sends.isEmpty ? "" : "  sends " + d.sends.map { "\($0.key) as \($0.as)" }.joined(separator: ", ")) }
+                .joined(separator: "\n"))
+        sections.append(lines("Sign-in — storage keys the data sources send (stored or not; values never shown)", r.sentKeys))
         sections.append("Plugins (\(r.plugins.count), \(r.pluginsSource)):\n" + pluginLines)
         sections.append(r.cellStyles.isEmpty ? nil : "Cell styles (\(r.cellStyles.count), \(r.cellStylesSource)):\n" + cellLines)
         sections.append(lines("Device", r.device.identity + r.device.hardware))
@@ -67,6 +73,15 @@ enum InfoTools {
                 "plugins": .array(r.plugins.map { ["id": .string($0.id), "version": JSON($0.version)] }),
                 "pluginsSource": .string(r.pluginsSource),
                 "cellStyles": .array(r.cellStyles.map { ["id": .string($0.id), "plugin": .string($0.plugin)] }),
+                "navigation": .array(r.navigation.map {
+                    ["menu": .string($0.menu), "title": .string($0.title), "screenId": .string($0.screenId), "screenName": JSON($0.screenName)]
+                }),
+                "dataSources": .array(r.dataSources.map { d in
+                    ["url": .string(d.url), "method": .string(d.method),
+                     "sends": .array(d.sends.map { ["key": .string($0.key), "as": .string($0.as)] })]
+                }),
+                "sentKeys": rows(r.sentKeys),
+                "iconURL": JSON(r.iconURL),
                 "typeMapping": .array(r.typeMapping.map {
                     ["type": .string($0.type), "screenId": .string($0.screenId), "screenName": JSON($0.screenName)]
                 }),

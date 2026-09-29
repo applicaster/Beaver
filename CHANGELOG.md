@@ -33,6 +33,19 @@ does the same for a manual release.
   together; screens, type mapping, plugins, cell styles and config files on
   the right. Ids in the tables have a copy button on hover. Agents get the
   type mapping in `app_info`.
+- **Info shows more of the app**:
+  - **Navigation**: each menu and tab item and the screen it opens.
+  - **Data sources**: the feeds the app requests and the storage keys each
+    one sends.
+  - **Sign-in**: whether those keys, such as the login token, are stored.
+    It shows only "stored" or "not in storage", never a value, and checks
+    the keychain too.
+  - **Languages**, and the app's strings file for the device's language,
+    saved with the other config files.
+  - The app's **icon** in the header.
+  - More from the app's storage: its URL scheme, sessions of this version
+    and in total, country code, region, currency and right-to-left.
+  - Agents get all of this in `app_info`.
 
 ### Fixed
 - **Info shows the versions the app runs, not Zapp's latest build.** With a

@@ -47,6 +47,12 @@ struct InfoView: View {
 
     private var header: some View {
         HStack(alignment: .firstTextBaseline) {
+            if let icon = report?.iconURL.flatMap(URL.init(string:)) {
+                AsyncImage(url: icon) { $0.resizable().scaledToFit() } placeholder: { Color.clear }
+                    .frame(width: 28, height: 28)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 6 }
+            }
             Text("App & Device Info").font(.title2.weight(.semibold))
             if let asOf = report?.storageAsOf {
                 Text("storage as of " + asOf.formatted(date: .omitted, time: .standard))
@@ -99,6 +105,10 @@ struct InfoView: View {
             InfoCard(title: "Identity & versions", rows: r.identity)
             InfoCard(title: "Device", rows: r.device.identity + r.device.hardware)
             if !r.device.userAgent.isEmpty { InfoCard(title: "User agent", rows: r.device.userAgent) }
+            if !r.sentKeys.isEmpty {
+                // What the app's own requests will send: the login state.
+                InfoCard(title: "Sign-in — keys the data sources send", rows: r.sentKeys)
+            }
             InfoCard(title: "Advertising", rows: r.device.advertising, empty: r.device.advertisingNote)
         }
     }
@@ -112,6 +122,17 @@ struct InfoView: View {
                 TableCard(title: "Type mapping — entry type → screen (\(r.typeMapping.count), layout.json)",
                           rows: r.typeMapping.map { [$0.type, $0.screenName ?? "no such screen", $0.screenId] }, copy: [2],
                           empty: "")
+            }
+            if !r.navigation.isEmpty {
+                TableCard(title: "Navigation — menu item → screen (layout.json)",
+                          rows: r.navigation.map { [$0.title, $0.menu, $0.screenName ?? "no such screen", $0.screenId] }, copy: [3],
+                          empty: "")
+            }
+            if !r.dataSources.isEmpty {
+                TableCard(title: "Data sources (\(r.dataSources.count), pipes endpoints)",
+                          rows: r.dataSources.map { d in
+                              [d.method, d.url, d.sends.map { "\($0.key) as \($0.as)" }.joined(separator: ", ")]
+                          }, copy: [1], empty: "")
             }
             TableCard(title: "Plugins (\(r.plugins.count), \(r.pluginsSource))",
                       rows: r.plugins.map { [$0.id, $0.version ?? ""] }, copy: [0], empty: "No plugins found.")

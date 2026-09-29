@@ -117,6 +117,51 @@ struct AppInfoTests {
         #expect(AppInfo.layoutName(layout) == nil)
     }
 
+    @Test("Navigation, data sources and whether the keys they send are stored")
+    func navigationAndDataSources() throws {
+        let layout = try JSONSerialization.jsonObject(with: Data(#"""
+        {"screens":[{"id":"s1","name":"Home"}],
+         "navigations":{"n1":{"name":"Bottom Tabs","category":"menu","nav_items":[
+            {"title":"Listen","position":2,"data":{"target":"gone"}},{"title":"Home","position":1,"data":{"target":"s1"}}]},
+          "n2":{"name":"Navbar","category":"nav_bar","nav_items":[]}}}
+        """#.utf8))
+        #expect(AppInfo.navigation(fromLayout: layout) == [
+            AppInfo.NavItem(menu: "Bottom Tabs (menu)", title: "Home", screenId: "s1", screenName: "Home"),
+            AppInfo.NavItem(menu: "Bottom Tabs (menu)", title: "Listen", screenId: "gone", screenName: nil),
+        ])
+        let endpoints = try JSONSerialization.jsonObject(with: Data(#"""
+        {"endpoints":{"https://api/x":{"method":"post","context_obj":[
+            {"key":"quick-brick-login-flow.access_token","type":"bearerHeader"},{"key":"user_account.profile","type":"header"},
+            {"key":"timeZoneOffset","type":"query"},{"key":"screen/kid_profile","type":"query"}]},
+          "https://api/free":{"method":"get","context_obj":[]}}}
+        """#.utf8))
+        let sources = AppInfo.dataSources(fromEndpoints: endpoints)
+        #expect(sources.map(\.method) == ["GET", "POST"])
+        let leaves = AppInfo.leaves(session: nil, local: nil, keychain: #"{"quick-brick-login-flow":{"access_token":"secret"}}"#)
+        #expect(AppInfo.sentKeys(sources, leaves: leaves) == [
+            InfoRow(label: "quick-brick-login-flow.access_token", value: "stored", source: "storage: keychain/quick-brick-login-flow/access_token"),
+            InfoRow(label: "user_account.profile", value: "not in storage", source: "sent by data sources"),
+        ])
+    }
+
+    @Test("Languages, the device's strings file, the icon; urlScheme arrays and zapp_account_id")
+    func remoteConfigurationBits() throws {
+        let remote = try JSONSerialization.jsonObject(with: Data(#"""
+        {"languages":["en","es"],"localizations":{"en":"https://h/en.json","es":"https://h/es.json"},
+         "assets":{"universal":{"Icon-120":"https://a/120.png","Icon-1024":"https://a/1024.png","splash":"https://a/s.png"}}}
+        """#.utf8))
+        #expect(AppInfo.languages(fromRemote: remote) == ["en", "es"])
+        let es = AppInfo.leaves(session: #"{"applicaster.v2":{"languageCode":"es"}}"#, local: nil)
+        #expect(AppInfo.localizationURL(fromRemote: remote, leaves: es) == "https://h/es.json")
+        #expect(AppInfo.localizationURL(fromRemote: remote, leaves: []) == "https://h/en.json")
+        #expect(AppInfo.iconURL(fromRemote: remote) == "https://a/1024.png")
+        let identity = AppInfo.appIdentity(AppInfo.leaves(
+            session: #"{"applicaster.v2":{"urlScheme":"[\"aio\"]","zapp_account_id":"acct9"}}"#, local: nil))
+        #expect(identity.first { $0.label == "URL scheme" }?.value == "aio")
+        #expect(identity.first { $0.label == "Account id" }?.value == "acct9")
+        #expect(AppInfo.kind(of: "https://x/apps/a/b/c/localizations/en.json") == .localization)
+    }
+
     @Test("Type mapping: content_types by type, with the screen's name when the layout has it")
     func typeMapping() throws {
         let layout = try JSONSerialization.jsonObject(with: Data(#"""
@@ -197,7 +242,9 @@ struct AppInfoTests {
         #expect(r.configs[.cellStyles] == .init(url: layouts + "/cell_styles.json", found: "remote_configurations.json", error: nil))
         #expect(r.configs[.presetsMapping]?.url == layouts + "/presets_mapping.json")
         #expect(r.configs[.tabletCellStyles] == nil)
-        #expect(!fetched.value.contains { ["cell_styles.json", "presets_mapping.json", "endpoints.json"].contains($0) })
+        // Endpoints are read (Data sources); cell styles and presets only listed.
+        #expect(fetched.value.contains("endpoints.json"))
+        #expect(!fetched.value.contains { ["cell_styles.json", "presets_mapping.json"].contains($0) })
         #expect(AppInfo.kind(of: layouts + "/cell_styles.json") == .cellStyles)
         #expect(!AppInfo.isAllowedConfigURL(host + "/app_families/6420"))
     }
