@@ -138,8 +138,10 @@ devices, the viewed one if it is live, else the newest), else the viewed one,
 else the most recent — and during a wait it follows the device into its new
 session if the app restarts (`sessionChanged`); a given `sessionId` stays put
 (`sessionEnded`). Subsystem and category values accept `*` globs, name
-fragments and any case; results say what they matched. `since: "5m"` works
-wherever ids do. File paths are absolute or start with `~`. Every result ends
+fragments and any case; results say what they matched. A filter's `search`
+is a query in the Log feed's syntax, the same as zapp-support's web logger
+(recipe `query`); `searchIsRegex: true` takes it as one regular expression
+instead. `since: "5m"` works wherever ids do. File paths are absolute or start with `~`. Every result ends
 with `Next:` suggestions.
 
 UI tools work in the background: the window changes where it is and nothing
@@ -162,6 +164,32 @@ takes focus, unless you pass `reveal: true`.
 3. `logs_get(ids: [<id>])` — the payload of the line that matters.
 4. `network_query(status: "errors", search: "token")`, then `network_get(id: <id>)`.
 5. Tell the user what you found, with event and request ids.
+
+### query — the search syntax, one line for many conditions
+
+`filter.search` takes the syntax people type in the Log feed's Filter field
+and in zapp-support's web logger (Beaver 4.14.0 or later). Case never matters.
+
+- `timeout player` — both words; a word is found in message, subsystem or
+  category (and the data payload with `searchPayloads: true`).
+- `timeout OR stall` — either; OR binds tighter than the space:
+  `a OR b c` is (a or b) and c.
+- `-heartbeat` excludes; `+word` is the same as `word`.
+- `"token refresh"` — the exact phrase; `/^err\d+/` — a regular expression
+  (ends at a space, so `/var/log` is a path).
+- `level:error` — exactly that level (`warn` = `warning`); `minLevel` is
+  "this and above".
+- `sub:auth`, `cat:net`, `msg:401` — in that field only; `*` globs in `sub:`
+  and `cat:`. Other `word:` prefixes are plain text.
+
+1. `logs_query(filter: {search: "level:error sub:*auth* -heartbeat"}, since: "15m")`
+   — auth errors without the heartbeat noise.
+2. `logs_facets(filter: {search: "timeout OR stall"})` — who logs either.
+3. `ui_show(filter: {search: "level:error sub:*auth* -heartbeat"})` — the
+   user sees the same query in the Filter field.
+4. An unclosed quote or a regex that doesn't compile is an error; fix the
+   query, or pass `searchIsRegex: true` to take the text as one regular
+   expression.
 
 ### wait — see what an action causes
 

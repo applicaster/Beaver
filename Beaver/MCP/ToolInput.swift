@@ -249,6 +249,9 @@ extension ToolContext {
                 throw ToolError("\(key) \"\(term)\" is not a valid regular expression. Drop \(key)IsRegex to search for the text as is.")
             }
         }
+        if !f.searchIsRegex, let search = f.search, let problem = LogQuery.problem(in: search) {
+            throw ToolError("search \"\(search)\": \(problem). Example: search: \"level:error sub:*auth* -heartbeat\"; searchIsRegex: true takes the text as one regular expression.")
+        }
 
         var notes: [String] = []
         let facets: [(String, Filter.Facet, WritableKeyPath<Filter, Set<String>>, Bool)] = [

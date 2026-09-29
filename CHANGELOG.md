@@ -14,6 +14,20 @@ When releasing:
 
 ## [Unreleased]
 
+### Added
+- **The Log feed's Filter field understands the web logger's query
+  syntax**, so one query works in Beaver and zapp-support:
+  `level:error sub:*auth* -heartbeat`. Words must all match; `OR` joins
+  alternatives, `-word` excludes, `"a phrase"`, `/regex/`, and `level:`
+  (exactly that level), `sub:`, `cat:` (`*` globs), `msg:` search one
+  field. The **?** in the field lists the syntax; an unclosed quote or a
+  broken regex outlines the field in red. With `.*` on, the whole text is
+  still one regular expression. Several words now match wherever they are
+  in the row (before, only side by side): quote them for the old
+  behaviour. Agents: `filter.search` in `logs_query`, `logs_facets`,
+  `ui_show` and the other filter tools takes the same syntax
+  (`beaver_guide(topic: "query")`).
+
 ### Changed
 - Compare also compares **storage** (each layer's latest snapshot, key by key, with the fields inside JSON values) and **App Info** (versions, Zapp ids, device, plugin versions), in the sheet and in `sessions_compare` (default: all four sections).
 - Compare works only on sessions of the same app (same bundle id, else app name); the menus offer only those, and `sessions_compare` says why it refuses two different apps.

@@ -1640,10 +1640,12 @@ public actor LogStore {
         }
 
         // Search / exclude. A regex that doesn't compile constrains
-        // nothing; the UI flags the field.
+        // nothing; the UI flags the field. Search is a query (D88) unless
+        // the regex toggle makes the whole text one pattern.
         if let search = filter.search,
-           let (match, matchArgs) = textMatch(search, isRegex: filter.searchIsRegex,
-                                              payloads: filter.searchPayloads) {
+           let (match, matchArgs) = filter.searchIsRegex
+               ? textMatch(search, isRegex: true, payloads: filter.searchPayloads)
+               : queryMatch(search, payloads: filter.searchPayloads) {
             clauses.append(match)
             args.append(contentsOf: matchArgs)
         }
@@ -1700,18 +1702,52 @@ public actor LogStore {
         -> (String, [any DatabaseValueConvertible])? {
         var columns = ["message", "subsystem", "category"]
         if payloads { columns.append("COALESCE(data_json, '')") }
-        let test: String
-        let argument: String
         if isRegex {
             guard Filter.isValidRegex(term) else { return nil }
-            test = "REGEXP ?"
-            argument = Filter.caseInsensitive(term)
-        } else {
-            test = #"LIKE ? ESCAPE '\'"#
-            argument = "%" + likeEscaped(term) + "%"
+            return anyColumn(columns, "REGEXP ?", Filter.caseInsensitive(term))
         }
-        let sql = "(" + columns.map { "\($0) \(test)" }.joined(separator: " OR ") + ")"
-        return (sql, Array(repeating: argument, count: columns.count))
+        return anyColumn(columns, #"LIKE ? ESCAPE '\'"#, "%" + likeEscaped(term) + "%")
+    }
+
+    private static func anyColumn(_ columns: [String], _ test: String, _ argument: String)
+        -> (String, [any DatabaseValueConvertible]) {
+        ("(" + columns.map { "\($0) \(test)" }.joined(separator: " OR ") + ")",
+         Array(repeating: argument, count: columns.count))
+    }
+
+    /// A `LogQuery` as SQL: AND of OR-groups, every value bound. `nil`
+    /// when nothing in it constrains (empty, or only a half-typed regex).
+    static func queryMatch(_ query: String, payloads: Bool) -> (String, [any DatabaseValueConvertible])? {
+        let groups = LogQuery.parse(query)
+        guard !groups.isEmpty else { return nil }
+        var args: [any DatabaseValueConvertible] = []
+        let sql = groups.map { group in
+            "(" + group.map { term in
+                let (test, termArgs) = queryTermMatch(term, payloads: payloads)
+                args += termArgs
+                return term.negated ? "NOT " + test : test
+            }.joined(separator: " OR ") + ")"
+        }.joined(separator: " AND ")
+        return ("(" + sql + ")", args)
+    }
+
+    private static func queryTermMatch(_ t: LogQuery.Term, payloads: Bool)
+        -> (String, [any DatabaseValueConvertible]) {
+        let column: String
+        switch t.field {
+        case .level: return ("level = ?", [LogQuery.normalizedLevel(t.text)])
+        case .any:
+            // Parsing kept only regexes that compile, so this is never nil.
+            return textMatch(t.regex ?? t.text, isRegex: t.regex != nil, payloads: payloads) ?? ("0", [])
+        case .msg: column = "message"
+        case .sub: column = "subsystem"
+        case .cat: column = "category"
+        }
+        if let regex = t.regex { return anyColumn([column], "REGEXP ?", Filter.caseInsensitive(regex)) }
+        var pattern = likeEscaped(t.text)
+        // `*` globs names, like the MCP subsystem/category filters.
+        if t.field != .msg { pattern = pattern.replacingOccurrences(of: "*", with: "%") }
+        return anyColumn([column], #"LIKE ? ESCAPE '\'"#, "%" + pattern + "%")
     }
 
     /// `%` and `_` are wildcards to LIKE; a user typing `100%` means the
