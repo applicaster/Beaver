@@ -18,7 +18,7 @@ help:
 	@echo "  Versioning"
 	@echo "  ──────────"
 	@echo "  make version            Print current MARKETING_VERSION + build"
-	@echo "  make bump VERSION=X.Y.Z Bump version, commit, tag (does NOT push)"
+	@echo "  make bump VERSION=X.Y.Z Bump version, date CHANGELOG, commit, tag (no push)"
 	@echo "  make tag                Re-tag HEAD at the current MARKETING_VERSION"
 	@echo
 	@echo "  Release"
@@ -47,6 +47,7 @@ build:
 # through swift test. `xcodebuild test -scheme Beaver` cannot resolve
 # that module and fails before running anything.
 test:
+	./scripts/changelog-release.sh --check
 	swift test
 
 release:
@@ -87,9 +88,9 @@ endif
 	NEW_BUILD=$$((CURRENT_BUILD + 1)); \
 	echo "▸ Bumping CURRENT_PROJECT_VERSION $$CURRENT_BUILD → $$NEW_BUILD…"; \
 	sed -i.bak "s/CURRENT_PROJECT_VERSION = $$CURRENT_BUILD;/CURRENT_PROJECT_VERSION = $$NEW_BUILD;/g" $(PBXPROJ) && rm $(PBXPROJ).bak
+	@./scripts/changelog-release.sh $(VERSION)
 	@echo "▸ Committing + tagging…"
-	@git add $(PBXPROJ)
-	@if [ -f CHANGELOG.md ]; then git add CHANGELOG.md; fi
+	@git add $(PBXPROJ) CHANGELOG.md
 	@git commit -m "version $(VERSION)"
 	@git tag -a $(VERSION) -m "Beaver $(VERSION)"
 	@echo

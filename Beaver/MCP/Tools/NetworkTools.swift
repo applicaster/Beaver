@@ -116,7 +116,7 @@ enum NetworkTools {
     static let get = MCPTool(
         name: "network_get",
         title: "Get a request",
-        description: "Use to read one request in full: method, URL, status, timing, request and response headers and bodies. Bodies are as the SDK sent them (capped at 100 KB by the SDK, and at 256 KB here).",
+        description: "Use to read one request in full: method, URL, status, timing, the SDK's requestId, request and response headers and bodies. Bodies are as the SDK sent them (capped at 100 KB by the SDK, and at 256 KB here).",
         kind: .read,
         inputSchema: ToolSchema.object([
             "id": ToolSchema.integer("Request id from network_query."),
@@ -145,8 +145,9 @@ enum NetworkTools {
         var lines = ["\(e.method) \(e.url)",
                      e.status.map { "Status: \($0) \(e.statusText ?? "")" } ?? "Failed: \(e.error ?? "no response")",
                      "Started: \(Date(timeIntervalSince1970: Double(e.startMillis) / 1000).ISO8601Format())"
-                        + (e.durationMillis.map { " · \($0) ms" } ?? ""),
-                     "Request headers:", headers(e.requestHeaders)]
+                        + (e.durationMillis.map { " · \($0) ms" } ?? "")]
+        if !e.requestId.isEmpty { lines.append("Request ID: \(e.requestId)") }
+        lines += ["Request headers:", headers(e.requestHeaders)]
         let request = body(e.requestBody, sdkTruncated: e.isRequestBodyTruncated)
         let response = body(e.responseBody, sdkTruncated: e.isResponseBodyTruncated)
         if includeBodies { lines += ["Request body:", request.display] }
@@ -156,7 +157,8 @@ enum NetworkTools {
             summary: "Request #\(id): \(e.method) \(e.host)\(e.path) → \(e.status.map(String.init) ?? "failed").",
             body: lines.joined(separator: "\n"),
             structured: [
-                "id": JSON(id), "method": .string(e.method), "url": .string(e.url),
+                "id": JSON(id), "requestId": e.requestId.isEmpty ? .null : .string(e.requestId),
+                "method": .string(e.method), "url": .string(e.url),
                 "status": JSON(e.status), "statusText": JSON(e.statusText), "error": JSON(e.error),
                 "startMs": JSON(e.startMillis), "durationMs": JSON(e.durationMillis),
                 "requestHeaders": .object(e.requestHeaders.mapValues(JSON.string)),

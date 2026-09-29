@@ -190,8 +190,8 @@ git commit -m "feat: saved filter presets"
 # or:  fix: typo in level menu
 # or:  release: drop macOS 14 support
 
-# 2. (Optional) Add a CHANGELOG note under [Unreleased].
-#    CI extracts this as the GitHub Release body if present.
+# 2. Add a CHANGELOG note under [Unreleased]. The release commit moves
+#    it into "## [X.Y.Z] - date", the GitHub Release body (D90).
 
 # 3. Push.
 git push
@@ -239,24 +239,22 @@ signing identity required.
 **Cutting a release manually**
 
 ```bash
-# 1. Edit CHANGELOG.md — move [Unreleased] items under a new section.
-$EDITOR CHANGELOG.md
-
-# 2. Bump + build + sign + notarize + zip in one command.
+# 1. Bump + date the CHANGELOG + build + sign + notarize + zip.
 make ship VERSION=1.1.0       # ≈ 3–5 min including notarization
 # → build/Beaver-1.1.0.zip
 
-# 3. Push the commit + tag so CI sees consistent state.
+# 2. Push the commit + tag so CI sees consistent state.
 git push && git push --tags
 
-# 4. Publish the GitHub Release with the zip attached.
+# 3. Publish the GitHub Release with the zip attached.
 gh release create 1.1.0 build/Beaver-1.1.0.zip \
     --title "Beaver 1.1.0" \
     --notes-file CHANGELOG.md
 ```
 
 `make ship` is `make bump VERSION=X.Y.Z` (bumps `MARKETING_VERSION` +
-`CURRENT_PROJECT_VERSION`, commits, tags) followed by `make release`
+`CURRENT_PROJECT_VERSION`, moves `[Unreleased]` into `## [X.Y.Z] - date`
+with `scripts/changelog-release.sh`, commits, tags) followed by `make release`
 (builds, signs, notarizes, zips). Each step can also be run on its
 own — see below.
 
