@@ -80,7 +80,9 @@ private struct CommandBarContent: View {
                 TextField(
                     isClientConnected
                         ? "Enter command…"
-                        : "Not connected — connect a device to send commands",
+                        : isLogsOnly
+                            ? "This TV sends logs only — it takes no commands"
+                            : "Not connected — connect a device to send commands",
                     text: $vm.input
                 )
                     .textFieldStyle(.plain)
@@ -136,7 +138,9 @@ private struct CommandBarContent: View {
                 .opacity(isClientConnected ? 1.0 : 0.5)
                 .help(isClientConnected
                       ? "Send command"
-                      : "Connect a client to send commands")
+                      : isLogsOnly
+                          ? "A TV through the TV bridge only sends logs"
+                          : "Connect a client to send commands")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -146,8 +150,14 @@ private struct CommandBarContent: View {
         vm.input.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// A live device that takes commands. A TV through the TV bridge (D89)
+    /// is live but logs-only: what's typed would be dropped silently.
     private var isClientConnected: Bool {
-        env.isLive(env.viewingSessionId)
+        env.isLive(env.viewingSessionId) && !isLogsOnly
+    }
+
+    private var isLogsOnly: Bool {
+        env.viewingSessionId.map { env.live.logsOnlySessions.contains($0) } ?? false
     }
 }
 
