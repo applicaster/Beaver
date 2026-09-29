@@ -36,6 +36,8 @@ public struct AppInfoReport: Sendable {
     public var screensSource: String
     public var cellStyles: [AppInfo.CellStyle]
     public var cellStylesSource: String
+    /// From layout.json; empty without it.
+    public var feedMapping: [AppInfo.FeedType]
     public var plugins: [AppInfo.Plugin]
     public var pluginsSource: String
     public var configs: [AppInfo.ConfigKind: Config]
@@ -147,6 +149,7 @@ public struct AppInfoReport: Sendable {
                 : json[.rivers] != nil ? "rivers.json" : "layout.json",
             cellStyles: json[.layout].map { AppInfo.cellStyles(fromLayout: $0, known: storageCells) } ?? storageCells,
             cellStylesSource: json[.layout] != nil ? "layout.json" : "local storage cache",
+            feedMapping: json[.layout].map(AppInfo.feedMapping(fromLayout:)) ?? [],
             plugins: pluginList ?? AppInfo.pluginsFromStorage(leaves),
             // The app's own list is the build's; Zapp's file is today's (or
             // the connect time's, when saved) and may have moved on.

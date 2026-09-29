@@ -117,6 +117,19 @@ struct AppInfoTests {
         #expect(AppInfo.layoutName(layout) == nil)
     }
 
+    @Test("Feed mapping: content_types by type, with the screen's name when the layout has it")
+    func feedMapping() throws {
+        let layout = try JSONSerialization.jsonObject(with: Data(#"""
+        {"screens":[{"id":"s1","name":"Show"}],
+         "content_types":{"video":{"screen_id":"gone"},"tab-show":{"screen_id":"s1"},"odd":"x"}}
+        """#.utf8))
+        #expect(AppInfo.feedMapping(fromLayout: layout) == [
+            AppInfo.FeedType(type: "tab-show", screenId: "s1", screenName: "Show"),
+            AppInfo.FeedType(type: "video", screenId: "gone", screenName: nil),
+        ])
+        #expect(AppInfo.feedMapping(fromLayout: ["screens": []]) == [])
+    }
+
     @Test("Visited screens from GA and Navigator logs, once each")
     func screensFromLogs() {
         let screens = AppInfo.screens(fromLogs: [

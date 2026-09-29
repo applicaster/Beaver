@@ -80,37 +80,44 @@ struct InfoView: View {
         }
         // Side by side when the window is wide, one column when it isn't:
         // a single column capped at 960 left a hole on the right.
+        // Who it is on the left — app, then device, so every id sits
+        // together; the layout's lists on the right.
         ViewThatFits(in: .horizontal) {
             HStack(alignment: .top, spacing: 20) {
-                appColumn(r).frame(minWidth: 560, maxWidth: .infinity, alignment: .topLeading)
-                deviceColumn(r).frame(minWidth: 380, maxWidth: 560, alignment: .topLeading)
+                identityColumn(r).frame(minWidth: 380, maxWidth: 560, alignment: .topLeading)
+                listsColumn(r).frame(minWidth: 560, maxWidth: .infinity, alignment: .topLeading)
             }
             VStack(alignment: .leading, spacing: 16) {
-                appColumn(r)
-                deviceColumn(r)
+                identityColumn(r)
+                listsColumn(r)
             }
         }
     }
 
-    private func appColumn(_ r: AppInfoReport) -> some View {
+    private func identityColumn(_ r: AppInfoReport) -> some View {
         VStack(alignment: .leading, spacing: 16) {
             InfoCard(title: "Identity & versions", rows: r.identity)
-            TableCard(title: "Screens (\(r.screens.count), \(r.screensSource))",
-                      rows: r.screens.map { [$0.name, $0.id, $0.type ?? ""] },
-                      empty: "No screens found: the full list needs rivers.json or layout.json, and no visits were logged.")
-            TableCard(title: "Plugins (\(r.plugins.count), \(r.pluginsSource))",
-                      rows: r.plugins.map { [$0.id, $0.version ?? ""] }, empty: "No plugins found.")
-            TableCard(title: "Cell styles (\(r.cellStyles.count), \(r.cellStylesSource))",
-                      rows: r.cellStyles.map { [$0.plugin, $0.id] }, empty: "No cell styles found.")
-            ConfigFilesCard(sessionId: sessionId, report: r)
+            InfoCard(title: "Device", rows: r.device.identity + r.device.hardware)
+            if !r.device.userAgent.isEmpty { InfoCard(title: "User agent", rows: r.device.userAgent) }
+            InfoCard(title: "Advertising", rows: r.device.advertising, empty: r.device.advertisingNote)
         }
     }
 
-    private func deviceColumn(_ r: AppInfoReport) -> some View {
+    private func listsColumn(_ r: AppInfoReport) -> some View {
         VStack(alignment: .leading, spacing: 16) {
-            InfoCard(title: "Device", rows: r.device.identity + r.device.hardware)
-            InfoCard(title: "Advertising", rows: r.device.advertising, empty: r.device.advertisingNote)
-            if !r.device.userAgent.isEmpty { InfoCard(title: "User agent", rows: r.device.userAgent) }
+            TableCard(title: "Screens (\(r.screens.count), \(r.screensSource))",
+                      rows: r.screens.map { [$0.name, $0.id, $0.type ?? ""] }, copy: [1],
+                      empty: "No screens found: the full list needs rivers.json or layout.json, and no visits were logged.")
+            if !r.feedMapping.isEmpty {
+                TableCard(title: "Feed mapping — entry type → screen (\(r.feedMapping.count), layout.json)",
+                          rows: r.feedMapping.map { [$0.type, $0.screenName ?? "no such screen", $0.screenId] }, copy: [2],
+                          empty: "")
+            }
+            TableCard(title: "Plugins (\(r.plugins.count), \(r.pluginsSource))",
+                      rows: r.plugins.map { [$0.id, $0.version ?? ""] }, copy: [0], empty: "No plugins found.")
+            TableCard(title: "Cell styles (\(r.cellStyles.count), \(r.cellStylesSource))",
+                      rows: r.cellStyles.map { [$0.plugin, $0.id] }, copy: [1], empty: "No cell styles found.")
+            ConfigFilesCard(sessionId: sessionId, report: r)
         }
     }
 
@@ -181,10 +188,12 @@ private struct InfoGridRow: View {
     }
 }
 
-/// Plain columns of text, selectable.
+/// Plain columns of text, selectable; the `copy` columns (ids) get a copy
+/// button on hover, as Identity's rows do.
 private struct TableCard: View {
     let title: String
     let rows: [[String]]
+    var copy: Set<Int> = []
     let empty: String
 
     var body: some View {
@@ -194,20 +203,43 @@ private struct TableCard: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 3) {
-                    ForEach(rows.indices, id: \.self) { i in
-                        GridRow {
-                            ForEach(rows[i].indices, id: \.self) { c in
-                                Text(rows[i][c])
-                                    .font(c == 0 ? .body : .caption.monospaced())
-                                    .foregroundStyle(c == 0 ? .primary : .secondary)
-                                    .lineLimit(2).truncationMode(.middle).textSelection(.enabled)
-                            }
-                        }
-                    }
+                    ForEach(rows.indices, id: \.self) { i in TableCardRow(cells: rows[i], copy: copy) }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
+    }
+}
+
+private struct TableCardRow: View {
+    let cells: [String]
+    let copy: Set<Int>
+    @Environment(ToastCenter.self) private var toasts
+    @State private var hovered = false
+
+    var body: some View {
+        GridRow {
+            ForEach(cells.indices, id: \.self) { c in
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Text(cells[c])
+                        .font(c == 0 ? .body : .caption.monospaced())
+                        .foregroundStyle(c == 0 ? .primary : .secondary)
+                        .lineLimit(2).truncationMode(.middle).textSelection(.enabled)
+                    if copy.contains(c), !cells[c].isEmpty {
+                        Button {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(cells[c], forType: .string)
+                            toasts.success("Copied \(cells[c])")
+                        } label: { Image(systemName: "doc.on.doc").font(.caption) }
+                            .buttonStyle(.borderless)
+                            .help("Copy \(cells[c])")
+                            .accessibilityLabel("Copy \(cells[c])")
+                            .opacity(hovered ? 1 : 0)
+                    }
+                }
+            }
+        }
+        .onHover { hovered = $0 }
     }
 }
 
