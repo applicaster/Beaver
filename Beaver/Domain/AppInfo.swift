@@ -12,7 +12,7 @@ import Foundation
 public struct InfoRow: Sendable, Equatable {
     public let label: String
     public let value: String
-    /// "storage: session/applicaster.v2/deviceModel", "CMS", "user agent (best-effort)"…
+    /// "storage: session/applicaster.v2/deviceModel", "config file URL", "user agent (best-effort)"…
     public let source: String
 
     public init(label: String, value: String, source: String) {
@@ -39,9 +39,9 @@ public enum AppInfo {
     /// One leaf per namespaced key, session layer first (it wins on lookup).
     /// A namespace may arrive as an object or as a JSON string; the flat
     /// `ns_::_key` shape of web SDKs is split too.
-    public static func leaves(session: String?, local: String?) -> [StorageLeaf] {
+    public static func leaves(session: String?, local: String?, keychain: String? = nil) -> [StorageLeaf] {
         var out: [StorageLeaf] = []
-        for (layer, json) in [("session", session), ("local", local)] {
+        for (layer, json) in [("session", session), ("local", local), ("keychain", keychain)] {
             guard let json, let root = object(json) else { continue }
             for key in root.keys.sorted() {
                 let value = root[key]!
@@ -109,6 +109,10 @@ public enum AppInfo {
             ("Language", ["languageCode", "language_code"], false),
             ("Country", ["countryLocale", "country_locale"], false),
             ("UI language", ["uiLanguage", "ui_language"], false),
+            ("Country code", ["countryCode", "country_code"], false),
+            ("Region", ["regionCode", "region_code"], false),
+            ("Currency", ["currencySymbol", "currency_symbol"], false),
+            ("Right-to-left", ["is_rtl", "isRTL"], false),
         ])
         // Written by the session-storage-idfa plugin (idfa_storing); any namespace.
         let advertising = rows(leaves, [
@@ -161,6 +165,14 @@ public enum AppInfo {
         public let type: String?
     }
 
+    /// Type mapping: an entry's type → the screen that opens it.
+    public struct TypeMapping: Sendable, Equatable {
+        public let type: String
+        public let screenId: String
+        /// Nil when the layout has no screen with that id.
+        public let screenName: String?
+    }
+
     public static func appIdentity(_ leaves: [StorageLeaf]) -> [InfoRow] {
         rows(leaves, [
             ("App name", ["app_name", "appName"], false),
@@ -170,11 +182,18 @@ public enum AppInfo {
             ("SDK version", ["sdk_version", "sdkVersion"], false),
             ("QuickBrick version", ["quickBrickVersion", "quickbrick_version"], false),
             ("Zapp version id", ["version_id"], false),
-            ("Account id", ["accountsAccountId", "account_id", "accounts_account_id"], false),
+            ("Account id", ["accountsAccountId", "account_id", "accounts_account_id", "zapp_account_id"], false),
             ("App family id", ["app_family_id"], false),
             ("Layout id", ["layoutId", "riversConfigurationId", "rivers_configuration_id"], false),
-            ("URL scheme", ["urlSchemePrefix", "url_scheme_prefix"], false),
-        ])
+            ("URL scheme", ["urlSchemePrefix", "url_scheme_prefix", "urlScheme"], false),
+            ("Sessions of this version", ["total_sessions_for_current_version"], false),
+            ("Sessions in total", ["total_session_number"], false),
+        ]).map { row in
+            // urlScheme is a JSON array: ["aio"].
+            guard row.label == "URL scheme", let list = (try? JSONSerialization.jsonObject(with: Data(row.value.utf8))) as? [String]
+            else { return row }
+            return InfoRow(label: row.label, value: list.joined(separator: ", "), source: row.source)
+        }
     }
 
     /// Session-layer namespaces other than applicaster.v2 are plugin configs.
@@ -200,32 +219,61 @@ public enum AppInfo {
 
     // MARK: - Launch-time config files (S3)
 
+    /// The files QuickBrick loads at launch (`runtime_configuration_urls.json`,
+    /// written by zapplicaster-cli), plus the older
+    /// rivers.json and styles.json.
     public enum ConfigKind: String, Sendable, CaseIterable {
-        case layout, rivers, pluginConfigurations
+        case layout, tabletLayout, rivers, pluginConfigurations, remoteConfigurations,
+             cellStyles, tabletCellStyles, presetsMapping, tabletPresetsMapping, pipesEndpoints, styles,
+             /// The strings file of the device's language (remote_configurations' `localizations`).
+             localization
+
+        /// Read by App Info, so always downloaded; the rest are only listed.
+        var isParsed: Bool { [.layout, .rivers, .pluginConfigurations, .remoteConfigurations, .pipesEndpoints].contains(self) }
     }
 
     public struct ConfigFile: Sendable, Equatable {
         public let url: String
         /// A captured response body, when the app's request was recorded.
         public let body: String?
-        /// "CMS", "captured request", "storage", "derived from storage".
+        /// "captured request", "storage: local/applicaster.v2/layout_url", "derived from storage".
         public let found: String
     }
 
     public static let configHost = "assets-secure.applicaster.com"
 
-    /// Only Zapp's public config bucket is ever fetched.
+    /// Only Zapp's public config bucket is ever fetched: an app version's
+    /// files, or its app family's (cell styles, presets, pipes endpoints).
     public static func isAllowedConfigURL(_ raw: String) -> Bool {
         guard let u = URLComponents(string: raw), u.scheme == "https", u.host == configHost,
               u.port == nil, u.user == nil, u.password == nil else { return false }
-        return u.path.range(of: #"^/zapp/accounts/[^/]+/apps/[^/]+/[^/]+/[^/]+/.+\.json$"#,
+        return u.path.range(of: #"^/zapp/accounts/[^/]+/(apps/[^/]+/[^/]+/[^/]+|app_families/[^/]+)/.+\.json$"#,
                             options: .regularExpression) != nil
     }
 
+    /// The app's own record of the URLs it loaded: applicaster.v2 keys, in
+    /// the session and local layers. The key names the kind, tablet ones too.
+    static let storageKeys: [String: ConfigKind] = [
+        "layout_url": .layout, "tablet_layout_url": .tabletLayout, "rivers_url": .rivers,
+        "plugin_configuration_url": .pluginConfigurations, "plugin_configurations_url": .pluginConfigurations,
+        "remote_configuration_url": .remoteConfigurations, "remote_configurations_url": .remoteConfigurations,
+        "cell_styles_url": .cellStyles, "tablet_cell_styles_url": .tabletCellStyles,
+        "presets_mapping_url": .presetsMapping, "tablet_presets_mapping_url": .tabletPresetsMapping,
+        "endpoints_url": .pipesEndpoints, "pipes_endpoints_url": .pipesEndpoints, "styles_url": .styles,
+    ]
+
+    /// Tablet variants can't be told from the URL: they come only from
+    /// storage keys and remote_configurations.
     static func kind(of url: String) -> ConfigKind? {
         let path = url.components(separatedBy: "?")[0]
         let patterns: [(ConfigKind, String)] = [
             (.pluginConfigurations, #"plugin_?configurations?[\w-]*\.json"#),
+            (.remoteConfigurations, #"remote_?configurations?[\w-]*\.json"#),
+            (.cellStyles, #"cell_?styles[\w-]*\.json"#),
+            (.presetsMapping, #"presets_?mapping[\w-]*\.json"#),
+            (.pipesEndpoints, #"/data_source_providers/endpoints\.json|pipes_?endpoints[\w-]*\.json"#),
+            (.styles, #"/styles/styles\.json"#),
+            (.localization, #"/localizations/[\w-]+\.json"#),
             (.rivers, #"rivers[\w-]*\.json"#),
             (.layout, #"layout[\w-]*\.json"#),
         ]
@@ -240,21 +288,18 @@ public enum AppInfo {
     ]
 
     /// Where each config file is, with its body when a captured request has
-    /// it. CMS URLs win, then captured requests, then URLs in storage, then
-    /// the path Zapp builds from account, bundle, store and version.
+    /// it. What the app itself used wins: captured requests, then the URLs
+    /// it keeps in storage; then the path Zapp builds from account, bundle,
+    /// store and version.
     public static func configFiles(
         leaves: [StorageLeaf],
-        network: [(url: String, body: String?)],
-        cms: [ConfigKind: String] = [:]
+        network: [(url: String, body: String?)]
     ) -> [ConfigKind: ConfigFile] {
-        var out: [ConfigKind: ConfigFile] = [:]
-        for (kind, url) in cms where isAllowedConfigURL(url) {
-            out[kind] = ConfigFile(url: url, body: network.first { $0.url == url }?.body, found: "CMS")
-        }
-        var candidates = network.map { ConfigFile(url: $0.url, body: $0.body, found: "captured request") }
+        var candidates: [(kind: ConfigKind?, file: ConfigFile)] =
+            network.map { (nil, ConfigFile(url: $0.url, body: $0.body, found: "captured request")) }
         for leaf in leaves {
             for url in allGroups(#"(https?://[^\s"'\\]+\.json[^\s"'\\]*)"#, in: leaf.text ?? "").map({ $0[0] }) {
-                candidates.append(ConfigFile(url: url, body: nil, found: "storage"))
+                candidates.append((storageKeys[leaf.key], ConfigFile(url: url, body: nil, found: leaf.source)))
             }
         }
         let part = { (keys: [String]) in find(leaves, keys)?.text }
@@ -265,12 +310,22 @@ public enum AppInfo {
             let seg = [account, bundle, store, version]
                 .map { $0.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? $0 }
             let base = "https://\(configHost)/zapp/accounts/\(seg[0])/apps/\(seg[1])/\(seg[2])/\(seg[3])"
-            candidates.append(ConfigFile(url: base + "/rivers/rivers.json", body: nil, found: "derived from storage"))
-            candidates.append(ConfigFile(url: base + "/layouts/layout.json", body: nil, found: "derived from storage"))
+            for file in ["rivers/rivers.json", "layouts/layout.json", "remote_configurations/remote_configurations.json",
+                         "plugin_configurations/plugin_configurations.json"] {
+                candidates.append((nil, ConfigFile(url: base + "/" + file, body: nil, found: "derived from storage")))
+            }
         }
-        for c in candidates where isAllowedConfigURL(c.url) {
-            guard let kind = kind(of: c.url), out[kind]?.found != "CMS" else { continue }
-            if out[kind] == nil || (out[kind]!.body == nil && c.body != nil) { out[kind] = c }
+        if let account = part(["accountsAccountId", "account_id", "accounts_account_id"]),
+           let family = part(["app_family_id"]) {
+            let seg = [account, family].map { $0.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? $0 }
+            candidates.append((nil, ConfigFile(
+                url: "https://\(configHost)/zapp/accounts/\(seg[0])/app_families/\(seg[1])/data_source_providers/endpoints.json",
+                body: nil, found: "derived from storage")))
+        }
+        var out: [ConfigKind: ConfigFile] = [:]
+        for (known, c) in candidates where isAllowedConfigURL(c.url) {
+            guard let kind = known ?? kind(of: c.url) else { continue }
+            if out[kind] == nil { out[kind] = c }
         }
         return out
     }
@@ -315,6 +370,109 @@ public enum AppInfo {
         }
     }
 
+    /// layout.json's `content_types` (Zapp's type mapping), by type.
+    public static func typeMapping(fromLayout json: Any) -> [TypeMapping] {
+        guard let layout = json as? [String: Any], let types = layout["content_types"] as? [String: Any] else { return [] }
+        let names = screenNames(layout)
+        return types.keys.sorted().compactMap { type in
+            guard let id = (types[type] as? [String: Any])?["screen_id"] as? String else { return nil }
+            return TypeMapping(type: type, screenId: id, screenName: names[id])
+        }
+    }
+
+    /// A menu or nav bar entry of layout.json's `navigations`, and the screen it opens.
+    public struct NavItem: Sendable, Equatable {
+        public let menu: String
+        public let title: String
+        public let screenId: String
+        public let screenName: String?
+    }
+
+    public static func navigation(fromLayout json: Any) -> [NavItem] {
+        guard let layout = json as? [String: Any] else { return [] }
+        let names = screenNames(layout)
+        return list(layout["navigations"]).flatMap { nav -> [NavItem] in
+            let menu = "\(nav["name"] as? String ?? "")" + ((nav["category"] as? String).map { " (\($0))" } ?? "")
+            return list(nav["nav_items"])
+                .sorted { ($0["position"] as? Int ?? 0) < ($1["position"] as? Int ?? 0) }
+                .map { item in
+                    let target = (item["data"] as? [String: Any])?["target"] as? String ?? ""
+                    return NavItem(menu: menu, title: item["title"] as? String ?? "", screenId: target, screenName: names[target])
+                }
+        }
+    }
+
+    /// A data source (pipes endpoint): what the app requests, and which
+    /// storage keys it sends with it (`namespace.key`, as header, query…).
+    public struct DataSource: Sendable, Equatable {
+        public let url: String
+        public let method: String
+        public let sends: [(key: String, as: String)]
+
+        public static func == (a: Self, b: Self) -> Bool {
+            a.url == b.url && a.method == b.method && a.sends.map { "\($0.key) \($0.as)" } == b.sends.map { "\($0.key) \($0.as)" }
+        }
+    }
+
+    public static func dataSources(fromEndpoints json: Any) -> [DataSource] {
+        guard let endpoints = (json as? [String: Any])?["endpoints"] as? [String: Any] else { return [] }
+        return endpoints.keys.sorted().map { url in
+            let e = endpoints[url] as? [String: Any] ?? [:]
+            let sends = list(e["context_obj"]).compactMap { c -> (key: String, as: String)? in
+                (c["key"] as? String).map { ($0, c["type"] as? String ?? "") }
+            }
+            return DataSource(url: url, method: (e["method"] as? String ?? "get").uppercased(), sends: sends)
+        }
+    }
+
+    /// Whether the storage keys the data sources send (`namespace.key`) are
+    /// stored — the login state, as the app's own requests see it. Never the
+    /// value. Other context keys (`timeZoneOffset`, `screen/…`) are filled
+    /// at request time, not from storage: left out.
+    public static func sentKeys(_ sources: [DataSource], leaves: [StorageLeaf]) -> [InfoRow] {
+        var seen: [String] = []
+        for s in sources {
+            for k in s.sends where !seen.contains(k.key)
+                && k.key.range(of: #"^[\w-]+\.[\w.-]+$"#, options: .regularExpression) != nil {
+                seen.append(k.key)
+            }
+        }
+        return seen.map { key in
+            let parts = key.split(separator: ".", maxSplits: 1).map(String.init)
+            let leaf = leaves.first { $0.ns == parts[0] && $0.key == parts[1] && !($0.text ?? "").isEmpty }
+            return InfoRow(label: key, value: leaf == nil ? "not in storage" : "stored",
+                           source: leaf?.source ?? "sent by data sources")
+        }
+    }
+
+    /// remote_configurations' languages, and the strings file of the
+    /// device's language (else the first).
+    public static func languages(fromRemote json: Any?) -> [String] {
+        ((json as? [String: Any])?["languages"] as? [String]) ?? []
+    }
+
+    public static func localizationURL(fromRemote json: Any?, leaves: [StorageLeaf]) -> String? {
+        guard let files = (json as? [String: Any])?["localizations"] as? [String: String], !files.isEmpty else { return nil }
+        let device = find(leaves, ["uiLanguage", "ui_language", "languageCode", "language_code"])?.text
+        let lang = [device, device.map { String($0.prefix(2)) }].compactMap { $0 }.first { files[$0] != nil }
+            ?? languages(fromRemote: json).first { files[$0] != nil } ?? files.keys.sorted()[0]
+        return files[lang]
+    }
+
+    /// The app's icon from remote_configurations' assets (Icon-1024 when there).
+    public static func iconURL(fromRemote json: Any?) -> String? {
+        guard let assets = (json as? [String: Any])?["assets"] as? [String: Any] else { return nil }
+        let all = assets.values.compactMap { $0 as? [String: Any] }.flatMap { $0 }
+            .filter { $0.key.hasPrefix("Icon") }.compactMap { kv in (kv.value as? String).map { (kv.key, $0) } }
+        return (all.first { $0.0 == "Icon-1024" } ?? all.sorted { $0.0 < $1.0 }.last)?.1
+    }
+
+    static func screenNames(_ layout: [String: Any]) -> [String: String] {
+        Dictionary(list(layout["screens"]).compactMap { s in
+            (s["id"] as? String).map { ($0, s["name"] as? String ?? "") }
+        }, uniquingKeysWith: { a, _ in a })
+    }
+
     public static func layoutName(_ json: Any) -> String? {
         (json as? [String: Any])?["name"] as? String
     }
@@ -331,33 +489,27 @@ public enum AppInfo {
         }
     }
 
-    // MARK: - CMS build_params
-
-    /// build_params field → App Info label; the CMS wins over storage.
-    static let cmsLabels: [(String, String)] = [
-        ("app_name", "App name"), ("bundle_identifier", "Bundle id"), ("version_name", "App version"),
-        ("build_version", "Build number"), ("sdk_version", "SDK version"),
-        ("quick_brick_version", "QuickBrick version"), ("version_id", "Zapp version id"),
-        ("accounts_account_id", "Account id"), ("app_family_id", "App family id"),
-        ("rivers_configuration_id", "Layout id"), ("device_target", "Device target"), ("store", "Store"),
-    ]
-
-    public static func mergeBuildParams(_ identity: [InfoRow], _ params: [String: Any]?) -> [InfoRow] {
-        guard let params else { return identity }
-        let cms = cmsLabels.compactMap { key, label -> InfoRow? in
-            guard let value = params[key], let t = text(value), !t.isEmpty else { return nil }
-            return InfoRow(label: label, value: t, source: "CMS")
-        }
-        let labels = Set(cms.map(\.label))
-        return cms + identity.filter { !labels.contains($0.label) }
+    /// The account id from a config URL (`/zapp/accounts/<id>/…`), for apps
+    /// whose storage doesn't name it.
+    public static func accountId(fromConfigURLs urls: [String]) -> String? {
+        urls.lazy.compactMap { firstGroup(#"/zapp/accounts/([^/]+)/"#, in: $0) }.first
     }
 
-    /// The config URLs build_params names, by kind.
-    public static func cmsConfigURLs(_ params: [String: Any]?) -> [ConfigKind: String] {
+    // MARK: - Config URLs named inside config files
+
+    /// The URLs remote_configurations.json's general_settings names — how
+    /// cell styles and presets are found when storage doesn't keep them.
+    public static func remoteConfigURLs(_ json: Any?) -> [ConfigKind: String] {
+        urls((json as? [String: Any])?["general_settings"] as? [String: Any], [
+            (.cellStyles, "cell_styles_json_url"), (.tabletCellStyles, "tablet_cell_styles_json_url"),
+            (.presetsMapping, "presets_mapping_json_url"), (.tabletPresetsMapping, "tablet_presets_mapping_json_url"),
+        ])
+    }
+
+    static func urls(_ dict: [String: Any]?, _ keys: [(ConfigKind, String)]) -> [ConfigKind: String] {
         var out: [ConfigKind: String] = [:]
-        for (kind, key) in [(ConfigKind.layout, "layout_url"), (.rivers, "rivers_url"),
-                            (.pluginConfigurations, "plugin_configurations_url")] {
-            if let url = params?[key] as? String, !url.isEmpty { out[kind] = url }
+        for (kind, key) in keys {
+            if let url = dict?[key] as? String, !url.isEmpty { out[kind] = url }
         }
         return out
     }

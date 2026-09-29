@@ -12,7 +12,6 @@ struct InfoView: View {
     let sessionId: Int64
     @Environment(AppEnvironment.self) private var env
     @Environment(ToastCenter.self) private var toasts
-    @Environment(\.openSettings) private var openSettings
     @State private var report: AppInfoReport?
     @State private var session: Session?
     @State private var loading = false
@@ -41,16 +40,19 @@ struct InfoView: View {
                 if case .storageUpdated(let sid, _) = change, sid == sessionId, report?.storageAsOf == nil {
                     await load()
                 }
+                if case .configsSaved(let sid) = change, sid == sessionId { await load() }
             }
-        }
-        // Set, replaced or removed in Settings → Zapp: ask the CMS again.
-        .onReceive(NotificationCenter.default.publisher(for: ZappToken.didChange)) { _ in
-            Task { await load() }
         }
     }
 
     private var header: some View {
         HStack(alignment: .firstTextBaseline) {
+            if let icon = report?.iconURL.flatMap(URL.init(string:)) {
+                AsyncImage(url: icon) { $0.resizable().scaledToFit() } placeholder: { Color.clear }
+                    .frame(width: 28, height: 28)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 6 }
+            }
             Text("App & Device Info").font(.title2.weight(.semibold))
             if let asOf = report?.storageAsOf {
                 Text("storage as of " + asOf.formatted(date: .omitted, time: .standard))
@@ -84,66 +86,60 @@ struct InfoView: View {
         }
         // Side by side when the window is wide, one column when it isn't:
         // a single column capped at 960 left a hole on the right.
+        // Who it is on the left — app, then device, so every id sits
+        // together; the layout's lists on the right.
         ViewThatFits(in: .horizontal) {
             HStack(alignment: .top, spacing: 20) {
-                appColumn(r).frame(minWidth: 560, maxWidth: .infinity, alignment: .topLeading)
-                deviceColumn(r).frame(minWidth: 380, maxWidth: 560, alignment: .topLeading)
+                identityColumn(r).frame(minWidth: 380, maxWidth: 560, alignment: .topLeading)
+                listsColumn(r).frame(minWidth: 560, maxWidth: .infinity, alignment: .topLeading)
             }
             VStack(alignment: .leading, spacing: 16) {
-                appColumn(r)
-                deviceColumn(r)
+                identityColumn(r)
+                listsColumn(r)
             }
         }
     }
 
-    private func appColumn(_ r: AppInfoReport) -> some View {
+    private func identityColumn(_ r: AppInfoReport) -> some View {
         VStack(alignment: .leading, spacing: 16) {
             InfoCard(title: "Identity & versions", rows: r.identity)
-            cmsLine(r.cms)
-            TableCard(title: "Screens (\(r.screens.count), \(r.screensSource))",
-                      rows: r.screens.map { [$0.name, $0.id, $0.type ?? ""] },
-                      empty: "No screens found: the full list needs rivers.json or layout.json, and no visits were logged.")
-            TableCard(title: "Plugins (\(r.plugins.count), \(r.pluginsSource))",
-                      rows: r.plugins.map { [$0.id, $0.version ?? ""] }, empty: "No plugins found.")
-            TableCard(title: "Cell styles (\(r.cellStyles.count), \(r.cellStylesSource))",
-                      rows: r.cellStyles.map { [$0.plugin, $0.id] }, empty: "No cell styles found.")
-            TableCard(title: "Config files",
-                      rows: AppInfo.ConfigKind.allCases.compactMap { kind in
-                          r.configs[kind].map { [kind.rawValue, $0.url, $0.error.map { "couldn't load: " + $0 } ?? $0.found] }
-                      },
-                      empty: "No config file URL found in storage or captured requests.")
-        }
-    }
-
-    private func deviceColumn(_ r: AppInfoReport) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
             InfoCard(title: "Device", rows: r.device.identity + r.device.hardware)
-            InfoCard(title: "Advertising", rows: r.device.advertising, empty: r.device.advertisingNote)
             if !r.device.userAgent.isEmpty { InfoCard(title: "User agent", rows: r.device.userAgent) }
+            if !r.sentKeys.isEmpty {
+                // What the app's own requests will send: the login state.
+                InfoCard(title: "Sign-in — keys the data sources send", rows: r.sentKeys)
+            }
+            InfoCard(title: "Advertising", rows: r.device.advertising, empty: r.device.advertisingNote)
         }
     }
 
-    @ViewBuilder
-    private func cmsLine(_ cms: AppInfoReport.CMS) -> some View {
-        HStack(spacing: 6) {
-            switch cms {
-            case .loaded:
-                Label("Zapp CMS build_params loaded", systemImage: "checkmark.circle").foregroundStyle(.green)
-            case .noToken:
-                Text("Set a Zapp token to add the CMS's versions and the exact config URLs.").foregroundStyle(.secondary)
-            case .noVersionId:
-                Text("Zapp CMS not asked: the app's storage has no version_id.").foregroundStyle(.secondary)
-            case .failed(let why):
-                Label("Zapp CMS: \(why)", systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
+    private func listsColumn(_ r: AppInfoReport) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            TableCard(title: "Screens (\(r.screens.count), \(r.screensSource))",
+                      rows: r.screens.map { [$0.name, $0.id, $0.type ?? ""] }, copy: [1],
+                      empty: "No screens found: the full list needs rivers.json or layout.json, and no visits were logged.")
+            if !r.typeMapping.isEmpty {
+                TableCard(title: "Type mapping — entry type → screen (\(r.typeMapping.count), layout.json)",
+                          rows: r.typeMapping.map { [$0.type, $0.screenName ?? "no such screen", $0.screenId] }, copy: [2],
+                          empty: "")
             }
-            // D92: the token lives in Settings → Zapp.
-            Button(cms == .noToken ? "Set Zapp Token…" : "Change Token…") {
-                UserDefaults.standard.set(SettingsTab.zapp.rawValue, forKey: SettingsTab.key)
-                openSettings()
+            if !r.navigation.isEmpty {
+                TableCard(title: "Navigation — menu item → screen (layout.json)",
+                          rows: r.navigation.map { [$0.title, $0.menu, $0.screenName ?? "no such screen", $0.screenId] }, copy: [3],
+                          empty: "")
             }
-            .buttonStyle(.link)
+            if !r.dataSources.isEmpty {
+                TableCard(title: "Data sources (\(r.dataSources.count), pipes endpoints)",
+                          rows: r.dataSources.map { d in
+                              [d.method, d.url, d.sends.map { "\($0.key) as \($0.as)" }.joined(separator: ", ")]
+                          }, copy: [1], empty: "")
+            }
+            TableCard(title: "Plugins (\(r.plugins.count), \(r.pluginsSource))",
+                      rows: r.plugins.map { [$0.id, $0.version ?? ""] }, copy: [0], empty: "No plugins found.")
+            TableCard(title: "Cell styles (\(r.cellStyles.count), \(r.cellStylesSource))",
+                      rows: r.cellStyles.map { [$0.plugin, $0.id] }, copy: [1], empty: "No cell styles found.")
+            ConfigFilesCard(sessionId: sessionId, report: r)
         }
-        .font(.caption)
     }
 
     private func load() async {
@@ -199,9 +195,9 @@ private struct InfoGridRow: View {
                     NSPasteboard.general.setString(row.value, forType: .string)
                     toasts.success("Copied \(row.label)")
                 } label: {
-                    Image(systemName: "doc.on.doc").font(.caption)
+                    Image(systemName: "doc.on.doc").font(.caption).foregroundStyle(.secondary)
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(.plain)
                 .help("Copy \(row.label)")
                 .accessibilityLabel("Copy \(row.label)")
                 .opacity(hovered ? 1 : 0)
@@ -213,10 +209,12 @@ private struct InfoGridRow: View {
     }
 }
 
-/// Plain columns of text, selectable.
+/// Plain columns of text, selectable; the `copy` columns (ids) get a copy
+/// button on hover, as Identity's rows do.
 private struct TableCard: View {
     let title: String
     let rows: [[String]]
+    var copy: Set<Int> = []
     let empty: String
 
     var body: some View {
@@ -226,18 +224,127 @@ private struct TableCard: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 3) {
-                    ForEach(rows.indices, id: \.self) { i in
+                    ForEach(rows.indices, id: \.self) { i in TableCardRow(cells: rows[i], copy: copy) }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+}
+
+private struct TableCardRow: View {
+    let cells: [String]
+    let copy: Set<Int>
+    @Environment(ToastCenter.self) private var toasts
+    @State private var hovered = false
+
+    var body: some View {
+        GridRow {
+            ForEach(cells.indices, id: \.self) { c in
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Text(cells[c])
+                        .font(c == 0 ? .body : .caption.monospaced())
+                        .foregroundStyle(c == 0 ? .primary : .secondary)
+                        .lineLimit(2).truncationMode(.middle).textSelection(.enabled)
+                    if copy.contains(c), !cells[c].isEmpty {
+                        Button {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(cells[c], forType: .string)
+                            toasts.success("Copied \(cells[c])")
+                        } label: { Image(systemName: "doc.on.doc").font(.caption).foregroundStyle(.secondary) }
+                            .buttonStyle(.plain)
+                            .help("Copy \(cells[c])")
+                            .accessibilityLabel("Copy \(cells[c])")
+                            .opacity(hovered ? 1 : 0)
+                    }
+                }
+            }
+        }
+        .onHover { hovered = $0 }
+    }
+}
+
+/// The app's launch-time config files. Saved with the session when the
+/// device connected (D79): Open shows the file as Zapp had it then. A
+/// session without a saved copy (older, imported) can save Zapp's now.
+private struct ConfigFilesCard: View {
+    let sessionId: Int64
+    let report: AppInfoReport
+    @Environment(AppEnvironment.self) private var env
+    @Environment(ToastCenter.self) private var toasts
+    @State private var saving = false
+
+    var body: some View {
+        GroupBox {
+            let kinds = AppInfo.ConfigKind.allCases.filter { report.configs[$0] != nil }
+            if kinds.isEmpty {
+                Text("No config file URL found in storage or captured requests.").font(.caption).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 3) {
+                    ForEach(kinds, id: \.self) { kind in
+                        let c = report.configs[kind]!
                         GridRow {
-                            ForEach(rows[i].indices, id: \.self) { c in
-                                Text(rows[i][c])
-                                    .font(c == 0 ? .body : .caption.monospaced())
-                                    .foregroundStyle(c == 0 ? .primary : .secondary)
-                                    .lineLimit(2).truncationMode(.middle).textSelection(.enabled)
+                            Text(kind.rawValue)
+                            Text(c.url).font(.caption.monospaced()).foregroundStyle(.secondary)
+                                .lineLimit(2).truncationMode(.middle).textSelection(.enabled)
+                            Text(c.error.map { "couldn't load: " + $0 }
+                                 ?? c.size.map { "\(c.found) · \(ByteCountFormatter.string(fromByteCount: Int64($0), countStyle: .file))" }
+                                 ?? c.found)
+                                .font(.caption).foregroundStyle(c.error == nil ? .secondary : Color.orange).lineLimit(2)
+                            if let sha = c.sha256 {
+                                Button("Open") { open(sha, kind) }
+                                    .buttonStyle(.link).font(.caption)
+                                    .help("Open the saved \(kind.rawValue) file in your JSON viewer")
+                            } else {
+                                Color.clear.frame(width: 1, height: 1)
                             }
                         }
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        } label: {
+            HStack {
+                Text("Config files").font(.headline)
+                if let at = report.configsSavedAt {
+                    Text("saved \(at.formatted(date: .abbreviated, time: .standard)), as Zapp had them")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .help("Downloaded when the device connected and kept with the session. Zapp overwrites these files on every publish, so the session keeps its own copy.")
+                } else {
+                    Text("in Zapp now").font(.caption).foregroundStyle(.secondary)
+                    Button(saving ? "Saving…" : "Save with Session") { save() }
+                        .buttonStyle(.link).font(.caption).disabled(saving || report.configs.isEmpty)
+                        .help("Download every file as Zapp has it now and keep it with this session, so you can open them. Live sessions save theirs when the device connects.")
+                }
+            }
+        }
+    }
+
+    private func open(_ sha: String, _ kind: AppInfo.ConfigKind) {
+        Task {
+            do {
+                guard let data = try await env.store.configData(sha256: sha) else { throw ZappError("the saved file is gone") }
+                let dir = FileManager.default.temporaryDirectory.appendingPathComponent("Beaver Config Files", isDirectory: true)
+                try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                let file = dir.appendingPathComponent("session-\(sessionId)-\(kind.rawValue).json")
+                try data.write(to: file)
+                NSWorkspace.shared.open(file)
+            } catch {
+                toasts.error("Couldn't open \(kind.rawValue): \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func save() {
+        saving = true
+        Task {
+            defer { saving = false }
+            do {
+                let n = try await ConfigSnapshot.capture(store: env.store, sessionId: sessionId, http: .liveUncached)
+                toasts.success("Saved \(n) config files with the session")
+            } catch {
+                toasts.error("Couldn't save the config files: \(error.localizedDescription)")
             }
         }
     }

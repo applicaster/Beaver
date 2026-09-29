@@ -46,6 +46,8 @@ struct BeaverApp: App {
     private let updaterDelegate = BeaverUpdaterDelegate()
 
     init() {
+        // D96: Beaver no longer keeps a Zapp token.
+        LegacyZappToken.remove()
         // Build the environment synchronously on the main actor.
         let store: LogStore
         let ranBefore: Bool
@@ -376,6 +378,14 @@ struct BeaverApp: App {
                     namespace: namespace,
                     dataJSON: json
                 )
+            }
+            // D79: keep the app's config files as Zapp has them now, near
+            // when the app loaded them. Off the inbound loop.
+            let store = env.store
+            Task.detached {
+                await ConfigSnapshot.Gate.shared.run(sessionId) {
+                    (try? await ConfigSnapshot.capture(store: store, sessionId: sessionId, http: .liveUncached)) ?? 0
+                }
             }
         case .success(.network(let capture)):
             try? await env.store.recordNetworkEntry(capture, sessionId: sessionId)

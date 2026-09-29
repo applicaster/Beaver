@@ -111,9 +111,12 @@ port, notifications), Zapp (token), About (version, What's New, updates).
    192.168.1.40 port 9555" → `devices_connect_tv`. zapp-support's
    `node scripts/tv-bridge.mjs <tv-ip>:<port> --server ws://127.0.0.1:9080`
    (Beaver 4.15.0 or later) still works and makes the same device.
-15. Zapp token: Settings → **Zapp** says whether a token is set (never shows
-   it); paste one and **Save**, then **Test** says whether Zapp accepted it.
-   The Info tab's **Set Zapp Token…** opens this tab. **Remove** deletes it.
+15. Config files: connect an app, open **Info** → Config files. The header
+   says "saved <time>, as Zapp had them"; each row names the storage key it
+   came from (`local/applicaster.v2/cell_styles_url`…) and **Open** opens the
+   file. An imported or older session says "in Zapp now" with **Save with
+   Session**. Agents: "what's the layout id in the remote configuration?" →
+   `app_config`. No Zapp token is needed (Beaver 4.19 removed it).
 16. What's New: the first launch of a new version shows "What's New in
    Beaver X.Y.Z" with every version since the last one you ran (nothing on
    a fresh install). Beaver → **What's New…** and Settings → About show it
@@ -162,7 +165,8 @@ port, notifications), Zapp (token), About (version, What's New, updates).
 | `ui_state` | What Beaver's window shows: tab, session, filters, selection, whether it is in front |
 | `ui_show` | Point the window at a tab, session, filter or row — in the background unless `reveal: true` |
 | `scheme_build` | Build a deep link into a Zapp app (Scheme Generator): open, present, web page, layout, X-Ray, native and plugin hosts, with the app's scheme from its storage; fill the form on screen, copy it, save its QR code |
-| `app_info` | What app and device a session is: app/SDK/QuickBrick versions, Zapp ids, screens, cell styles, plugins, device model/OS/language/country/advertising id — each value with its source (storage, CMS with the user's Zapp token, config files, logs). |
+| `app_info` | What app and device a session is: app/SDK/QuickBrick versions, Zapp ids, screens, type mapping (entry type → screen), navigation (menu item → screen), data sources (feeds and the storage keys they send) with sign-in (whether those keys are stored, never their values), languages, cell styles, plugins, device model/OS/language/country/advertising id — each value with its source (the app's storage — the build it runs —, config files, logs); `configs` has the URL of every file the app loads at launch (layout, plugin/remote configurations, cell styles, presets mapping, pipes endpoints) and whether it is saved with the session. |
+| `app_config` | One of those config files as saved with the session when the device connected (Zapp as of then): the JSON at a dot path (`general_settings.layout_id`, `screens.0.name`), keys of objects, counts of arrays; without `kind` the saved files; `download: true` saves Zapp's current ones for a session that has none |
 | `beaver_guide` | These recipes, by topic |
 
 Conventions: omitting `sessionId` means the live session (with several
@@ -248,7 +252,12 @@ and in zapp-support's web logger (Beaver 4.14.0 or later). Case never matters.
 ### app-info — what app and device is this
 
 1. `app_info(sessionId)` — versions, Zapp ids, the layout's screens and plugins, the device and its advertising id, each with where it came from.
-2. No CMS fields? The user can set a Zapp token: Beaver → Settings… → Zapp.
+   Config files: their URLs, and whether they're saved with the session.
+2. Read one: `app_config(kind: "remoteConfigurations", path: "general_settings")`,
+   then walk down (`app_config(kind: "layout", path: "screens.0")`). Saved when the
+   device connected, so as Zapp had them then — a later publish doesn't change
+   them. A debug build runs on the files bundled at build time instead. An older
+   or imported session has none: `app_config(download: true)` saves Zapp's now.
 3. `ui_show(tab: "info")` to show it to the user.
 
 ### storage — read and change what the app has stored

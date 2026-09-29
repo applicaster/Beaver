@@ -5,15 +5,15 @@
 //  D92 (amends D62): Beaver → Settings… (⌘,), also the gear at the bottom
 //  of the sidebar. Everything that used to sit in the app menu as a
 //  setting: session retention, Agent Access and its port, agent
-//  notifications, the Zapp token, and About.
+//  notifications, and About. (The Zapp token tab went with D96.)
 
 import AppKit
 import Sparkle
 import SwiftUI
 
 enum SettingsTab: String {
-    case general, agents, zapp, about
-    /// Written before `openSettings()` to open a given tab (Info's token link).
+    case general, agents, about
+    /// The tab last shown; written before `openSettings()` to open a given one.
     static let key = "settingsTab"
 }
 
@@ -35,9 +35,6 @@ struct SettingsView: View {
             }
             Tab("Agents", systemImage: "sparkles", value: .agents) {
                 AgentSettings(enabled: $agentAccessEnabled, apply: applyAgentAccess)
-            }
-            Tab("Zapp", systemImage: "key", value: .zapp) {
-                ZappSettings()
             }
             Tab("About", systemImage: "info.circle", value: .about) {
                 AboutSettings(updater: updater)
@@ -212,81 +209,6 @@ private struct AgentSettings: View {
         }
         portText = String(port)
         Task { await apply() }
-    }
-}
-
-// MARK: - Zapp
-
-private struct ZappSettings: View {
-    @Environment(AppEnvironment.self) private var env
-    @State private var hasToken = ZappToken.read() != nil
-    @State private var newToken = ""
-    @State private var checking = false
-    @State private var result: (text: String, ok: Bool?)?
-
-    var body: some View {
-        Form {
-            Section {
-                LabeledContent("Token", value: hasToken ? "Set — kept in your login keychain" : "Not set")
-                SecureField(hasToken ? "New token" : "Token", text: $newToken,
-                            prompt: Text(hasToken ? "Paste a new token to replace it" : "Paste the token"))
-                    .onSubmit(save)
-                HStack {
-                    Button(hasToken ? "Replace" : "Save", action: save)
-                        .disabled(newToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    Button("Remove", role: .destructive) {
-                        ZappToken.write(nil)
-                        result = ("Zapp token removed.", true)
-                    }
-                    .disabled(!hasToken)
-                    Spacer()
-                    if checking { ProgressView().controlSize(.small) }
-                    Button("Test", action: test).disabled(!hasToken || checking)
-                        .help("Asks the Zapp CMS for build parameters with the token")
-                }
-                if let result {
-                    Label(result.text, systemImage: result.ok == true ? "checkmark.circle"
-                          : result.ok == false ? "xmark.octagon" : "questionmark.circle")
-                        .foregroundStyle(result.ok == true ? .green : result.ok == false ? .red : .orange)
-                        .textSelection(.enabled)
-                }
-            } header: {
-                Text("Zapp access token")
-            } footer: {
-                Text("With your Zapp token, the Info tab asks the Zapp CMS for the app version's build parameters and exact config URLs, as zapptool does. Create one at accounts.applicaster.com → Users → your user → Access Tokens.")
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: ZappToken.didChange)) { _ in
-            hasToken = ZappToken.read() != nil
-        }
-    }
-
-    private func save() {
-        let token = newToken.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !token.isEmpty else { return }
-        if ZappToken.write(token) {
-            newToken = ""
-            result = ("Zapp token saved. Test it to check Zapp accepts it.", true)
-        } else {
-            result = ("Couldn't save the token to the keychain.", false)
-        }
-    }
-
-    private func test() {
-        guard let token = ZappToken.read() else { return }
-        checking = true
-        Task {
-            let versionId: String? = if let sid = env.viewingSessionId {
-                await AppInfoReport.versionId(store: env.store, sessionId: sid)
-            } else { nil }
-            result = switch await ZappTokenCheck.run(token: token, versionId: versionId) {
-            case .accepted: ("Zapp accepted the token.", true)
-            case .rejected: ("Zapp rejected the token — replace it.", false)
-            case .unknown(let why): ("Couldn't tell: \(why)", nil)
-            }
-            checking = false
-        }
     }
 }
 

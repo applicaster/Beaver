@@ -265,9 +265,9 @@ public actor AgentAccess {
         Capability(
             icon: "info.circle",
             title: "Tell what app and device this is",
-            note: "App and SDK versions, Zapp ids, screens, plugins, the device and its advertising id — each value with where it came from.",
+            note: "App and SDK versions, Zapp ids, screens, plugins, the device and its advertising id — each value with where it came from — and the app's config files as Zapp had them when it connected.",
             example: "Use beaver: which app version, SDK and plugins is this session running?",
-            tools: ["app_info"]),
+            tools: ["app_info", "app_config"]),
         Capability(
             icon: "hand.point.up.left",
             title: "Show you what it found",

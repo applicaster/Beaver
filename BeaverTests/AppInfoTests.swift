@@ -44,7 +44,7 @@ struct AppInfoTests {
         #expect(cells == [AppInfo.CellStyle(id: "0a1b2c3d-1111-2222-3333-444455556666", plugin: "hero")])
     }
 
-    @Test("Config files: CMS, then captured, then derived; only Zapp's bucket")
+    @Test("Config files: captured, then derived; only Zapp's bucket")
     func configFiles() {
         let leaves = AppInfo.leaves(session: session, local: local)
         let base = "https://assets-secure.applicaster.com/zapp/accounts/acct1/apps/com.applicaster.river/apple_store/2.7"
@@ -58,11 +58,34 @@ struct AppInfoTests {
         #expect(files[.rivers]?.body == "[]")
         #expect(files[.layout]?.found == "derived from storage")
 
-        files = AppInfo.configFiles(leaves: leaves, network: [],
-                                    cms: [.pluginConfigurations: base + "/plugin_configurations/plugin_configurations.json"])
-        #expect(files[.pluginConfigurations]?.found == "CMS")
         #expect(!AppInfo.isAllowedConfigURL("http://assets-secure.applicaster.com/zapp/accounts/a/apps/b/c/d/x.json"))
         #expect(!AppInfo.isAllowedConfigURL("https://assets-secure.applicaster.com:444/zapp/accounts/a/apps/b/c/d/x.json"))
+    }
+
+    @Test("The app's own URLs in applicaster.v2 win over the derived path; the key names the kind")
+    func storageURLs() {
+        let host = "https://assets-secure.applicaster.com/zapp/accounts/acct1"
+        let app = host + "/apps/com.app/apple_store/0.0.7-dev"
+        // As a real iOS app keeps them (loggernext_2026-09-23): cell styles only in local.
+        let leaves = AppInfo.leaves(session: #"""
+            {"applicaster.v2":{"accountsAccountId":"acct1","bundleIdentifier":"com.app","store":"apple_store","version_name":"0.0.7-dev",
+              "layout_url":"\#(app)/layouts/layout.json","styles_url":"\#(app)/styles/styles.json",
+              "endpoints_url":"\#(host)/app_families/7/data_source_providers/endpoints.json",
+              "remote_configuration_url":"\#(app)/remote_configurations/remote_configurations.json"}}
+            """#, local: #"""
+            {"applicaster.v2":{"cell_styles_url":"\#(host)/app_families/7/layouts/L1/cell_styles.json",
+              "tablet_layout_url":"\#(app)/layouts/tablet_layout.json"}}
+            """#)
+        let files = AppInfo.configFiles(leaves: leaves, network: [])
+        #expect(files[.cellStyles] == AppInfo.ConfigFile(url: host + "/app_families/7/layouts/L1/cell_styles.json", body: nil,
+                                                         found: "storage: local/applicaster.v2/cell_styles_url"))
+        #expect(files[.tabletLayout]?.url == app + "/layouts/tablet_layout.json")
+        #expect(files[.layout]?.found == "storage: session/applicaster.v2/layout_url")
+        #expect(files[.styles]?.url == app + "/styles/styles.json")
+        #expect(files[.pipesEndpoints]?.found == "storage: session/applicaster.v2/endpoints_url")
+        #expect(files[.presetsMapping] == nil)
+        #expect(files[.rivers]?.found == "derived from storage")
+        #expect(AppInfo.accountId(fromConfigURLs: [app + "/layouts/layout.json"]) == "acct1")
     }
 
     @Test("Screens and cell styles from layout.json, plugins from configurations")
@@ -94,6 +117,64 @@ struct AppInfoTests {
         #expect(AppInfo.layoutName(layout) == nil)
     }
 
+    @Test("Navigation, data sources and whether the keys they send are stored")
+    func navigationAndDataSources() throws {
+        let layout = try JSONSerialization.jsonObject(with: Data(#"""
+        {"screens":[{"id":"s1","name":"Home"}],
+         "navigations":{"n1":{"name":"Bottom Tabs","category":"menu","nav_items":[
+            {"title":"Listen","position":2,"data":{"target":"gone"}},{"title":"Home","position":1,"data":{"target":"s1"}}]},
+          "n2":{"name":"Navbar","category":"nav_bar","nav_items":[]}}}
+        """#.utf8))
+        #expect(AppInfo.navigation(fromLayout: layout) == [
+            AppInfo.NavItem(menu: "Bottom Tabs (menu)", title: "Home", screenId: "s1", screenName: "Home"),
+            AppInfo.NavItem(menu: "Bottom Tabs (menu)", title: "Listen", screenId: "gone", screenName: nil),
+        ])
+        let endpoints = try JSONSerialization.jsonObject(with: Data(#"""
+        {"endpoints":{"https://api/x":{"method":"post","context_obj":[
+            {"key":"quick-brick-login-flow.access_token","type":"bearerHeader"},{"key":"user_account.profile","type":"header"},
+            {"key":"timeZoneOffset","type":"query"},{"key":"screen/kid_profile","type":"query"}]},
+          "https://api/free":{"method":"get","context_obj":[]}}}
+        """#.utf8))
+        let sources = AppInfo.dataSources(fromEndpoints: endpoints)
+        #expect(sources.map(\.method) == ["GET", "POST"])
+        let leaves = AppInfo.leaves(session: nil, local: nil, keychain: #"{"quick-brick-login-flow":{"access_token":"secret"}}"#)
+        #expect(AppInfo.sentKeys(sources, leaves: leaves) == [
+            InfoRow(label: "quick-brick-login-flow.access_token", value: "stored", source: "storage: keychain/quick-brick-login-flow/access_token"),
+            InfoRow(label: "user_account.profile", value: "not in storage", source: "sent by data sources"),
+        ])
+    }
+
+    @Test("Languages, the device's strings file, the icon; urlScheme arrays and zapp_account_id")
+    func remoteConfigurationBits() throws {
+        let remote = try JSONSerialization.jsonObject(with: Data(#"""
+        {"languages":["en","es"],"localizations":{"en":"https://h/en.json","es":"https://h/es.json"},
+         "assets":{"universal":{"Icon-120":"https://a/120.png","Icon-1024":"https://a/1024.png","splash":"https://a/s.png"}}}
+        """#.utf8))
+        #expect(AppInfo.languages(fromRemote: remote) == ["en", "es"])
+        let es = AppInfo.leaves(session: #"{"applicaster.v2":{"languageCode":"es"}}"#, local: nil)
+        #expect(AppInfo.localizationURL(fromRemote: remote, leaves: es) == "https://h/es.json")
+        #expect(AppInfo.localizationURL(fromRemote: remote, leaves: []) == "https://h/en.json")
+        #expect(AppInfo.iconURL(fromRemote: remote) == "https://a/1024.png")
+        let identity = AppInfo.appIdentity(AppInfo.leaves(
+            session: #"{"applicaster.v2":{"urlScheme":"[\"aio\"]","zapp_account_id":"acct9"}}"#, local: nil))
+        #expect(identity.first { $0.label == "URL scheme" }?.value == "aio")
+        #expect(identity.first { $0.label == "Account id" }?.value == "acct9")
+        #expect(AppInfo.kind(of: "https://x/apps/a/b/c/localizations/en.json") == .localization)
+    }
+
+    @Test("Type mapping: content_types by type, with the screen's name when the layout has it")
+    func typeMapping() throws {
+        let layout = try JSONSerialization.jsonObject(with: Data(#"""
+        {"screens":[{"id":"s1","name":"Show"}],
+         "content_types":{"video":{"screen_id":"gone"},"tab-show":{"screen_id":"s1"},"odd":"x"}}
+        """#.utf8))
+        #expect(AppInfo.typeMapping(fromLayout: layout) == [
+            AppInfo.TypeMapping(type: "tab-show", screenId: "s1", screenName: "Show"),
+            AppInfo.TypeMapping(type: "video", screenId: "gone", screenName: nil),
+        ])
+        #expect(AppInfo.typeMapping(fromLayout: ["screens": []]) == [])
+    }
+
     @Test("Visited screens from GA and Navigator logs, once each")
     func screensFromLogs() {
         let screens = AppInfo.screens(fromLogs: [
@@ -104,7 +185,7 @@ struct AppInfoTests {
         #expect(screens.map(\.name) == ["Home", "Player"])
     }
 
-    @Test("The report: CMS wins, a cut captured body is fetched, plugins come from the file")
+    @Test("The report: storage identity, a cut captured body is fetched, plugins come from the file")
     func report() async throws {
         let store = try LogStore(source: .inMemory)
         let s = try await store.createSession(source: .live)
@@ -115,11 +196,6 @@ struct AppInfoTests {
             fallbackMillis: 0)), sessionId: s.id)
         let fetched = LockedBox<[String]>([])
         let http = ZappHTTP(
-            token: { "t" },
-            buildParams: { id, _ in
-                ["app_name": "River CMS", "plugin_configurations_url": base + "/plugins/plugin_configurations.json",
-                 "version_id": id]
-            },
             get: { url in
                 fetched.mutate { $0.append(url.lastPathComponent) }
                 switch url.lastPathComponent {
@@ -129,23 +205,57 @@ struct AppInfoTests {
                 }
             })
         let r = try await AppInfoReport.build(store: store, sessionId: s.id, http: http)
-        #expect(r.cms == .loaded)
-        #expect(r.identity.first == InfoRow(label: "App name", value: "River CMS", source: "CMS"))
+        #expect(r.identity.first == InfoRow(label: "App name", value: "River", source: "storage: session/applicaster.v2/app_name"))
+        #expect(r.identity.first { $0.label == "Account id" }?.source == "storage: session/applicaster.v2/accountsAccountId")
         #expect(r.screens.map(\.name) == ["Home"])
         #expect(r.screensSource == "rivers.json")
         #expect(r.plugins == [AppInfo.Plugin(id: "hero", version: "2.1")])
         #expect(r.configs[.layout]?.error != nil)
-        #expect(fetched.value.sorted() == ["layout.json", "plugin_configurations.json", "rivers.json"])
+        #expect(fetched.value.sorted() == ["layout.json", "plugin_configurations.json", "remote_configurations.json", "rivers.json"])
     }
 
-    @Test("Without a token the CMS isn't asked")
-    func noToken() async throws {
+    @Test("Every launch-time file is listed; only the parsed ones are downloaded")
+    func allConfigFiles() async throws {
         let store = try LogStore(source: .inMemory)
         let s = try await store.createSession(source: .live)
-        let http = ZappHTTP(token: { nil }, buildParams: { _, _ in Issue.record("asked"); return [:] },
-                            get: { _ in throw URLError(.notConnectedToInternet) })
+        try await store.recordStorageSnapshot(sessionId: s.id, namespace: .session, dataJSON: #"""
+            {"applicaster.v2":{"version_name":"0.0.8-dev","bundleIdentifier":"com.app","accountsAccountId":"acct1",
+              "store":"apple_store","app_family_id":"6420"}}
+            """#)
+        let host = "https://assets-secure.applicaster.com/zapp/accounts/acct1"
+        let layouts = host + "/app_families/6420/layouts/L1"
+        let fetched = LockedBox<[String]>([])
+        let http = ZappHTTP(get: { url in
+            fetched.mutate { $0.append(url.lastPathComponent) }
+            guard url.lastPathComponent == "remote_configurations.json" else { return Data("{}".utf8) }
+            return Data(#"""
+                {"general_settings":{"cell_styles_json_url":"\#(layouts)/cell_styles.json",
+                  "presets_mapping_json_url":"\#(layouts)/presets_mapping.json",
+                  "tablet_cell_styles_json_url":"https://evil.example/cell_styles.json"}}
+                """#.utf8)
+        })
         let r = try await AppInfoReport.build(store: store, sessionId: s.id, http: http)
-        #expect(r.cms == .noToken)
+        let app = host + "/apps/com.app/apple_store/0.0.8-dev"
+        #expect(r.configs[.remoteConfigurations]?.url == app + "/remote_configurations/remote_configurations.json")
+        #expect(r.configs[.pluginConfigurations]?.url == app + "/plugin_configurations/plugin_configurations.json")
+        #expect(r.configs[.pipesEndpoints]?.url == host + "/app_families/6420/data_source_providers/endpoints.json")
+        #expect(r.configs[.cellStyles] == .init(url: layouts + "/cell_styles.json", found: "remote_configurations.json", error: nil))
+        #expect(r.configs[.presetsMapping]?.url == layouts + "/presets_mapping.json")
+        #expect(r.configs[.tabletCellStyles] == nil)
+        // Endpoints are read (Data sources); cell styles and presets only listed.
+        #expect(fetched.value.contains("endpoints.json"))
+        #expect(!fetched.value.contains { ["cell_styles.json", "presets_mapping.json"].contains($0) })
+        #expect(AppInfo.kind(of: layouts + "/cell_styles.json") == .cellStyles)
+        #expect(!AppInfo.isAllowedConfigURL(host + "/app_families/6420"))
+    }
+
+    @Test("No storage: nothing to look up, nothing fetched")
+    func noStorage() async throws {
+        let store = try LogStore(source: .inMemory)
+        let s = try await store.createSession(source: .live)
+        let http = ZappHTTP(get: { _ in Issue.record("fetched"); throw URLError(.notConnectedToInternet) })
+        let r = try await AppInfoReport.build(store: store, sessionId: s.id, http: http)
+        #expect(r.configs.isEmpty)
         #expect(r.storageAsOf == nil)
     }
 }
@@ -175,5 +285,100 @@ struct FingerprintTests {
             Captured: 1970-01-01T00:00:00Z
             """)
         #expect(Session(id: 1, startedAt: Date(), source: .imported).fingerprint(capturedAt: Date()).hasPrefix("Unknown device\n"))
+    }
+}
+
+@Suite("Config files saved with the session (D79)")
+struct SavedConfigTests {
+    private let storage = #"""
+        {"applicaster.v2":{"version_name":"1.0","bundleIdentifier":"com.app","accountsAccountId":"acct1",
+          "store":"apple_store","app_family_id":"7"}}
+        """#
+    private static let family = "https://assets-secure.applicaster.com/zapp/accounts/acct1/app_families/7"
+
+    /// Serves every file; counts what was fetched.
+    private func zapp(_ fetched: LockedBox<[String]>, layoutName: String = "Main") -> ZappHTTP {
+        ZappHTTP(get: { url in
+            fetched.mutate { $0.append(url.lastPathComponent) }
+            switch url.lastPathComponent {
+            case "remote_configurations.json":
+                return Data(#"{"general_settings":{"cell_styles_json_url":"\#(Self.family)/layouts/L/cell_styles.json"}}"#.utf8)
+            case "layout.json": return Data(#"{"name":"\#(layoutName)","screens":[{"id":"s1","name":"Home"}]}"#.utf8)
+            case "cell_styles.json": return Data(#"{"c1":{"plugin_identifier":"hero"}}"#.utf8)
+            default: throw URLError(.fileDoesNotExist)
+            }
+        })
+    }
+
+    private func session(_ store: LogStore) async throws -> Int64 {
+        let s = try await store.createSession(source: .live)
+        try await store.recordStorageSnapshot(sessionId: s.id, namespace: .session, dataJSON: storage)
+        return s.id
+    }
+
+    @Test("Capture downloads every file once, a second capture fetches nothing, and App Info reads the saved copy")
+    func capture() async throws {
+        let store = try LogStore(source: .inMemory)
+        let s = try await session(store)
+        let fetched = LockedBox<[String]>([])
+        let n = try await ConfigSnapshot.capture(store: store, sessionId: s, http: zapp(fetched))
+        #expect(n == 6)  // layout, rivers, plugin + remote configurations, pipes endpoints, cell styles
+        #expect(fetched.value.contains("cell_styles.json"))
+        let saved = try await store.savedConfigs(sessionId: s)
+        #expect(saved.first { $0.kind == .cellStyles }?.sha256 != nil)
+        #expect(saved.first { $0.kind == .rivers }?.error != nil)
+
+        let before = fetched.value.count
+        #expect(try await ConfigSnapshot.capture(store: store, sessionId: s, http: zapp(fetched)) == 6)
+        #expect(fetched.value.count == before)
+
+        // Zapp published a new layout since: the session still shows its own.
+        let r = try await AppInfoReport.build(store: store, sessionId: s, http: zapp(fetched, layoutName: "Republished"))
+        #expect(r.identity.first?.value == "Main")
+        #expect(r.configsSavedAt != nil)
+        #expect(r.configs[.cellStyles]?.size == #"{"c1":{"plugin_identifier":"hero"}}"#.utf8.count)
+        #expect(fetched.value.count == before)
+    }
+
+    @Test("A file shared by two sessions is stored once and goes with the last of them")
+    func sharedBlob() async throws {
+        let store = try LogStore(source: .inMemory)
+        let a = try await session(store), b = try await session(store)
+        let fetched = LockedBox<[String]>([])
+        try await ConfigSnapshot.capture(store: store, sessionId: a, http: zapp(fetched))
+        try await ConfigSnapshot.capture(store: store, sessionId: b, http: zapp(fetched))
+        let sha = try #require(try await store.savedConfigs(sessionId: a).first { $0.kind == .layout }?.sha256)
+        #expect(try await store.savedConfigs(sessionId: b).first { $0.kind == .layout }?.sha256 == sha)
+
+        try await store.deleteSessions(ids: [a])
+        #expect(try await store.configData(sha256: sha) != nil)
+        try await store.deleteSessions(ids: [b])
+        #expect(try await store.configData(sha256: sha) == nil)
+    }
+
+    @Test("app_config: the saved files, a path inside one, errors that say what exists, download for older sessions")
+    func tool() async throws {
+        let store = try LogStore(source: .inMemory)
+        let s = try await session(store)
+        let fetched = LockedBox<[String]>([])
+        let ctx = ToolContext(store: store, ui: FakeUI(value: HostSnapshot()), device: FakeDevice(), zapp: zapp(fetched))
+        await #expect(throws: ToolError.self) {
+            _ = try await InfoTools.appConfig.run(ToolArguments(["sessionId": JSON(s)]), ctx)
+        }
+        let list = try await InfoTools.appConfig.run(ToolArguments(["sessionId": JSON(s), "download": true]), ctx)
+        #expect(list.summary.contains("config files saved"))
+
+        let name = try await InfoTools.appConfig.run(
+            ToolArguments(["sessionId": JSON(s), "kind": "layout", "path": "screens.0.name"]), ctx)
+        #expect(name.body == "\"Home\"")
+        let layout = try await InfoTools.appConfig.run(ToolArguments(["sessionId": JSON(s), "kind": "layout"]), ctx)
+        #expect(layout.structured["keys"] == ["name", "screens"])
+
+        do {
+            _ = try await InfoTools.appConfig.run(ToolArguments(["sessionId": JSON(s), "kind": "layout", "path": "screenz"]), ctx)
+            Issue.record("no error")
+        } catch let e as ToolError {
+            #expect(e.message.contains("keys: name, screens"))
+        }
     }
 }

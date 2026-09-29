@@ -12,6 +12,52 @@ does the same for a manual release.
 
 ## [Unreleased]
 
+### Added
+- **Info → Config files** lists every file the app loads at launch, not just
+  three: remote configurations, plugin configurations, layout, cell styles,
+  presets mapping and pipes endpoints (and the tablet variants when the Zapp
+  CMS names them) — found without a Zapp token too, through the app's
+  storage and `remote_configurations.json`. The URLs the app itself keeps
+  in storage (`applicaster.v2` → `layout_url`, `cell_styles_url`,
+  `endpoints_url`, `styles_url`…) come first, and each row says which key.
+- **Config files are saved with the session**: when a device connects,
+  Beaver downloads them and keeps them with its session, so the session
+  shows Zapp as it was then, not after the next publish. **Open** shows a
+  file in your JSON viewer; an older or imported session can **Save with
+  Session** (Zapp's current files). A file shared by several sessions is
+  stored once. Agents: `app_config` reads a saved file by path
+  (`general_settings.layout_id`, `screens.0.name`).
+- **Info → Type mapping**: which screen opens each entry type (layout.json's
+  `content_types`: `audio` → Audio Player). Info is laid out anew: app
+  identity, device, user agent and advertising on the left, so every id is
+  together; screens, type mapping, plugins, cell styles and config files on
+  the right. Ids in the tables have a copy button on hover. Agents get the
+  type mapping in `app_info`.
+- **Info shows more of the app**:
+  - **Navigation**: each menu and tab item and the screen it opens.
+  - **Data sources**: the feeds the app requests and the storage keys each
+    one sends.
+  - **Sign-in**: whether those keys, such as the login token, are stored.
+    It shows only "stored" or "not in storage", never a value, and checks
+    the keychain too.
+  - **Languages**, and the app's strings file for the device's language,
+    saved with the other config files.
+  - The app's **icon** in the header.
+  - More from the app's storage: its URL scheme, sessions of this version
+    and in total, country code, region, currency and right-to-left.
+  - Agents get all of this in `app_info`.
+
+### Fixed
+- **Info shows the versions the app runs, not Zapp's latest build.** With a
+  Zapp token, Info showed the CMS's build parameters over the app's own:
+  they describe the Zapp version's newest build (70), not the one on the
+  device (66). Info now reads the app's storage only.
+
+### Removed
+- **The Zapp token** (Settings → Zapp): the app's storage already names its
+  versions and config files. A token saved by an older Beaver is removed
+  from the keychain at launch.
+
 ## [4.18.0] - 2026-09-29
 
 ### Added

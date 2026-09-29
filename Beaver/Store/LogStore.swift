@@ -4,6 +4,7 @@
 //
 
 import Foundation
+import CryptoKit
 import GRDB
 
 /// Single-writer, multi-reader event store backed by SQLite via GRDB.
@@ -36,6 +37,8 @@ public actor LogStore {
         case agentActivityChanged
         /// An issue signature was ignored or unignored (D95).
         case ignoredIssuesChanged
+        /// A session's config files were saved (D79).
+        case configsSaved(sessionId: Int64)
     }
 
     public enum Source {
@@ -1968,5 +1971,60 @@ public actor LogStore {
             try db.execute(sql: "DELETE FROM agent_activity")
         }
         broadcast(.agentActivityChanged)
+    }
+}
+
+// MARK: - Saved config files (D79)
+
+/// One config file saved with a session: where it was, and its body's
+/// hash (nil when it couldn't be downloaded).
+public struct SavedConfig: Sendable, Equatable {
+    public let kind: AppInfo.ConfigKind
+    public let url: String
+    public let found: String
+    public let savedAt: Date
+    public let sha256: String?
+    public let size: Int?
+    public let error: String?
+}
+
+extension LogStore {
+    /// Saves the session's config files, replacing any saved before.
+    /// Bodies are stored once by hash, shared by every session that has them.
+    public func saveConfigs(sessionId: Int64, _ files: [AppInfoReport.Fetched], at date: Date = Date()) async throws {
+        try await dbQueue.write { db in
+            try db.execute(sql: "DELETE FROM session_config WHERE session_id = ?", arguments: [sessionId])
+            for f in files {
+                let sha = f.data.map { SHA256.hash(data: $0).map { String(format: "%02x", $0) }.joined() }
+                if let sha, let data = f.data {
+                    try db.execute(sql: "INSERT OR IGNORE INTO config_blob (sha256, data) VALUES (?, ?)",
+                                   arguments: [sha, data])
+                }
+                try db.execute(sql: """
+                    INSERT INTO session_config (session_id, kind, url, found, saved_at, sha256, size, error)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """, arguments: [sessionId, f.kind.rawValue, f.url, f.found,
+                                     Int64(date.timeIntervalSince1970 * 1000), sha, f.data?.count, f.error])
+            }
+        }
+        broadcast(.configsSaved(sessionId: sessionId))
+    }
+
+    public func savedConfigs(sessionId: Int64) async throws -> [SavedConfig] {
+        try await dbQueue.read { db in
+            try Row.fetchAll(db, sql: "SELECT * FROM session_config WHERE session_id = ?", arguments: [sessionId])
+                .compactMap { row in
+                    guard let kind = AppInfo.ConfigKind(rawValue: row["kind"]) else { return nil }
+                    return SavedConfig(kind: kind, url: row["url"], found: row["found"],
+                                       savedAt: Date(timeIntervalSince1970: TimeInterval(row["saved_at"] as Int64) / 1000),
+                                       sha256: row["sha256"], size: row["size"], error: row["error"])
+                }
+        }
+    }
+
+    public func configData(sha256: String) async throws -> Data? {
+        try await dbQueue.read { db in
+            try Data.fetchOne(db, sql: "SELECT data FROM config_blob WHERE sha256 = ?", arguments: [sha256])
+        }
     }
 }
