@@ -12,6 +12,11 @@ does the same for a manual release.
 
 ## [Unreleased]
 
+### Fixed
+- The command bar is off while a TV (through the TV bridge) is viewed and
+  says why: the TV sends logs only, so a typed command used to be dropped
+  without a word.
+
 ## [4.16.0] - 2026-09-29
 
 ### Changed
