@@ -209,6 +209,12 @@ public actor AgentAccess {
             example: "Use beaver: what did the app log about login in the last 15 minutes?",
             tools: ["logs_facets", "logs_query", "logs_get", "logs_clear"]),
         Capability(
+            icon: "exclamationmark.triangle",
+            title: "See what's broken",
+            note: "The session's errors and warnings grouped by signature, with counts, first and last time — and, when you ask, mark one as known noise for this app.",
+            example: "Use beaver: what's broken in this session?",
+            tools: ["issues_list", "issues_ignore"]),
+        Capability(
             icon: "network",
             title: "Inspect network requests",
             note: "Find requests by status, method, host or text, read headers and bodies, and copy one as cURL, fetch() or JSON.",

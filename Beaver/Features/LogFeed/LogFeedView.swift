@@ -48,7 +48,7 @@ private struct LogFeedContent: View {
         VStack(spacing: 0) {
             LogFeedFilterBar(vm: vm)
             if vm.filter.chipCount(for: .subsystem) > 0
-                || vm.filter.chipCount(for: .category) > 0 {
+                || vm.filter.chipCount(for: .category) > 0 || vm.filter.pattern != nil {
                 Divider()
                 ActiveChipsBar(vm: vm)
             }
@@ -113,6 +113,8 @@ private struct LogFeedContent: View {
 
 private struct LogFeedFilterBar: View {
     @Bindable var vm: LogFeedViewModel
+    @Environment(AppEnvironment.self) private var env
+    @Environment(IssuesViewModel.self) private var issues: IssuesViewModel?
 
     /// Why the Filter field won't do what it says (D88), or nil.
     private var searchProblem: String? {
@@ -202,6 +204,23 @@ private struct LogFeedFilterBar: View {
             .help(vm.totalCount == vm.unfilteredCount
                   ? "Events in this session"
                   : "Matching the current filter, out of every event in the session")
+
+            // D95: the session's issues, one click to the Issues tab.
+            if let issues, !issues.report.shown.isEmpty {
+                Button {
+                    env.selectedTab = .issues
+                } label: {
+                    Label("\(issues.report.shown.count)", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption.weight(.semibold).monospacedDigit())
+                        .foregroundStyle(issues.report.errors > 0 ? Color.red : Color.orange)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Capsule().fill(Color.secondary.opacity(0.15)))
+                }
+                .buttonStyle(.plain)
+                .fixedSize()
+                .help("\(issues.report.errors) error and \(issues.report.warnings) warning issues — open Issues")
+            }
 
             // Nothing was deleted, so say so and offer the way back.
             // Without this the counter reading "0 / 9034" looks like
@@ -967,10 +986,30 @@ private struct ActiveChipsBar: View {
             HStack(spacing: 6) {
                 chips(for: .subsystem)
                 chips(for: .category)
+                // An issue's signature (D95), from the Issues tab.
+                if let pattern = vm.filter.pattern {
+                    Button {
+                        vm.filter.pattern = nil
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "exclamationmark.triangle").font(.caption2.weight(.bold))
+                            Text(pattern).lineLimit(1).truncationMode(.middle).frame(maxWidth: 360)
+                            Image(systemName: "xmark").font(.caption2)
+                        }
+                        .font(.caption)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Capsule().fill(Color.orange.opacity(0.18)))
+                        .foregroundStyle(.orange)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Only events whose message has this pattern (numbers, ids and times vary) — click to remove")
+                }
 
                 Button {
                     vm.filter.clearChips(in: .subsystem)
                     vm.filter.clearChips(in: .category)
+                    vm.filter.pattern = nil
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .foregroundStyle(.secondary)

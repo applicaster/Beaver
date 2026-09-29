@@ -9,7 +9,7 @@
 public enum BeaverTools {
     public static var all: [MCPTool] {
         let groups: [[MCPTool]] = [
-            StatusTools.all, SessionTools.all, LogTools.all, NetworkTools.all, StorageTools.all,
+            StatusTools.all, SessionTools.all, LogTools.all, IssueTools.all, NetworkTools.all, StorageTools.all,
             StateTools.all, CommandTools.all, ToolboxTools.all, WatchTools.all, JournalTools.all, UITools.all,
             SchemeTools.all, InfoTools.all,
         ]

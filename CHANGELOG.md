@@ -12,6 +12,21 @@ does the same for a manual release.
 
 ## [Unreleased]
 
+### Added
+- **Issues**: a new sidebar tab under Log feed lists the session's errors
+  and warnings grouped by what they say — `Token refresh failed: <n>` ×41 —
+  with the level, count, first and last time and a small timeline, like
+  Sentry but local. Numbers, ids and times are ignored when grouping, the
+  same way Compare does. Sort by newest, most frequent or errors first;
+  switch to errors only. Click one to see exactly its events in the Log
+  feed, the first one selected; right-click to copy it or **Ignore** it as
+  known noise — it stays hidden in every session of that app (**Show
+  ignored** brings it back). While a device is connected new issues appear
+  at the top, briefly highlighted. The sidebar badge counts error issues,
+  the Log feed's filter bar has a ⚠ chip that opens the tab, and Sessions
+  shows each session's issue count and top three. Agents: `issues_list`
+  and `issues_ignore`, and a `pattern` key in every log filter.
+
 ## [4.17.0] - 2026-09-29
 
 ### Added

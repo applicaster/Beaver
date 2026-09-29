@@ -58,6 +58,12 @@ public struct Filter: Equatable, Hashable, Sendable, Codable {
     /// means something inside one session.
     public var hiddenThroughEventId: Int64?
 
+    /// Only events whose message normalises to this pattern
+    /// (`SessionCompare.pattern` of its first 300 characters): with the
+    /// subsystem chip, an issue's signature (D95). Not saved with a named
+    /// filter, like Clear.
+    public var pattern: String?
+
     public init(
         minLevel: LogLevel = .verbose,
         search: String? = nil,
@@ -69,7 +75,8 @@ public struct Filter: Equatable, Hashable, Sendable, Codable {
         excludedSubsystems: Set<String> = [],
         categories: Set<String> = [],
         excludedCategories: Set<String> = [],
-        hiddenThroughEventId: Int64? = nil
+        hiddenThroughEventId: Int64? = nil,
+        pattern: String? = nil
     ) {
         self.minLevel = minLevel
         self.search = search?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
@@ -82,6 +89,7 @@ public struct Filter: Equatable, Hashable, Sendable, Codable {
         self.categories = categories
         self.excludedCategories = excludedCategories
         self.hiddenThroughEventId = hiddenThroughEventId
+        self.pattern = pattern
     }
 
     public static let none = Filter()
@@ -95,6 +103,7 @@ public struct Filter: Equatable, Hashable, Sendable, Codable {
             && categories.isEmpty
             && excludedCategories.isEmpty
             && hiddenThroughEventId == nil
+            && pattern == nil
     }
 
     /// The filter as a new session inherits it: everything but Clear's

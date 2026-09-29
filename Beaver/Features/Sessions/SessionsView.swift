@@ -369,6 +369,8 @@ private struct SessionDetailPane: View {
     let onOpen: () -> Void
     let onCompare: (Int64) -> Void
     let onRequestDelete: () -> Void
+    @Environment(AppEnvironment.self) private var env
+    @State private var issues: Issues.Report?
 
     var body: some View {
         ScrollView {
@@ -409,10 +411,39 @@ private struct SessionDetailPane: View {
                     fact("Status", item.subtitle)
                 }
                 .font(.callout)
+                if let issues, !issues.shown.isEmpty {
+                    issueSummary(issues)
+                }
                 Divider()
                 DevicePopover(session: item.session, isLive: isLive, sessions: sessions, width: nil)
             }
             .padding(16)
+        }
+        // Once per selection; the Issues tab is the live view (D95).
+        .task { issues = try? await env.store.issues(sessionId: item.id) }
+    }
+
+    private func issueSummary(_ r: Issues.Report) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Button {
+                env.viewingSessionId = item.id
+                env.selectedTab = .issues
+            } label: {
+                Label("\(r.shown.count) issues: \(r.errors) errors, \(r.warnings) warnings",
+                      systemImage: "exclamationmark.triangle")
+            }
+            .buttonStyle(.link)
+            .help("Open this session's Issues")
+            ForEach(Issues.Sort.errorsFirst.sorted(r.shown).prefix(3)) { g in
+                HStack(spacing: 6) {
+                    Circle().fill(g.level.displayColor).frame(width: 6, height: 6)
+                    Text(g.pattern).lineLimit(1).truncationMode(.tail)
+                    Spacer(minLength: 4)
+                    Text("×\(g.count)").monospacedDigit().foregroundStyle(.secondary)
+                }
+                .font(.caption)
+                .help("\(g.subsystem): \(g.example)")
+            }
         }
     }
 

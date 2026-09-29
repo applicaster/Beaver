@@ -134,6 +134,8 @@ port, notifications), Zapp (token), About (version, What's New, updates).
 | `logs_get` | Full events with data and context payloads (256 KB cap) |
 | `logs_wait` | Wait up to 60 s for a matching event |
 | `logs_clear` | Hide the viewed Log feed's events up to now, like Clear (⌘K); deletes nothing |
+| `issues_list` | The Issues tab: warnings and errors grouped by signature (subsystem + normalised message, as `sessions_compare`), with level, count, first/last id and time, ignored flag, and the `logs_query` filter for each |
+| `issues_ignore` | Mark a signature as known noise for the app (all its sessions), or unignore it — only when the user asks |
 | `network_query` | Requests by status, method, host, text |
 | `network_get` | One request with the SDK's `requestId`, headers and bodies |
 | `network_copy` | A request as cURL, fetch() or JSON, with replay warnings |
@@ -369,6 +371,26 @@ over the Chrome DevTools Protocol. The TV's developer mode must be on.
    bookmark: to keep one, `bookmarks_set(eventId: <id>)` in it, or tell the user
    the setting is in Beaver → Settings… → General.
 
+### issues — what's broken in this session
+
+Beaver 4.18.0 or later.
+
+1. `issues_list()` — the session's warnings and errors grouped by signature:
+   `ERROR ×41 com.app/auth: Token refresh failed: <n> (first #812 …, last #9120 …)`.
+   Numbers, UUIDs, hex ids, times and URL query values are normalised, as in
+   `sessions_compare`. `minLevel: "error"` for errors only. Signatures the
+   user ignored as known noise are left out and counted;
+   `includeIgnored: true` lists them.
+2. `logs_get(ids: [<firstId>])` — the first occurrence in full.
+3. `logs_query(filter: <the issue's filter>)` — every event of that issue:
+   each row carries `filter: {minLevel, subsystems: [<subsystem>], pattern}`,
+   which shows exactly its events (`pattern` works in any filter).
+4. `ui_show(tab: "issues")` points the user at the Issues tab;
+   `ui_show(filter: <the issue's filter>, select: "first")` at one issue's events.
+5. The user says one is expected noise: `issues_ignore(signature: "<signature>")`
+   hides it in every session of that app (bundle id, else app name);
+   `ignored: false` brings it back. It's their setting — don't ignore on your own.
+
 ### compare — "why does it fail on 4.6 but not on 4.5?"
 
 1. `sessions_list()` — find a session that works (4.5, or device A) and one
@@ -394,9 +416,11 @@ over the Chrome DevTools Protocol. The TV's developer mode must be on.
 
 ### review-errors — go through the errors with the user
 
-1. `logs_facets(filter: {minLevel: "error"}, since: "1h")`.
-2. `logs_query(filter: {minLevel: "error"}, since: "1h", limit: 500)` — group
-   them by cause yourself.
+1. `issues_list(minLevel: "error")` — the errors already grouped by cause
+   (recipe `issues`). For a time window instead:
+   `logs_facets(filter: {minLevel: "error"}, since: "1h")`.
+2. `logs_query(filter: {minLevel: "error"}, since: "1h", limit: 500)` — the
+   lines themselves.
 3. `journal_note(text: "3 causes: token expired ×41, feed 500 ×12, player timeout ×3", links: [{eventId: <first of each cause>}, …])`
    — the user clicks a link to open that event.
 4. Found the cause and the user must look now?

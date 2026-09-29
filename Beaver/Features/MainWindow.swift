@@ -41,6 +41,9 @@ struct MainWindow: View {
     @State private var logFeedVM: LogFeedViewModel?
     @State private var storagesVM: StoragesViewModel?
     @State private var networkVM: NetworkViewModel?
+    /// Kept while other tabs show: the sidebar badge and the Log feed's ⚠
+    /// chip read its counts (D95).
+    @State private var issuesVM: IssuesViewModel?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -142,7 +145,11 @@ struct MainWindow: View {
                 logFeedVM = nil
                 storagesVM = nil
                 networkVM = nil
+                issuesVM = nil
                 return
+            }
+            if issuesVM?.sessionId != sid {
+                issuesVM = IssuesViewModel(store: env.store, sessionId: sid)
             }
             if logFeedVM?.sessionId != sid {
                 // env holds the filter (D54): the previous session's, which a
@@ -222,6 +229,10 @@ struct MainWindow: View {
         List(selection: Bindable(env).selectedTab) {
             Label("Log feed", systemImage: "list.bullet.rectangle")
                 .tag(UITab.logs)
+            Label("Issues", systemImage: "exclamationmark.triangle")
+                .badge(issuesVM?.report.errors ?? 0)
+                .tag(UITab.issues)
+                .help("Errors and warnings grouped by signature; the badge counts error issues")
             Label("Storages",  systemImage: "externaldrive")
                 .tag(UITab.storages)
             Label("Network",   systemImage: "network")
@@ -275,6 +286,12 @@ struct MainWindow: View {
                 } else {
                     ConnectionPlaceholder(state: env.serverState)
                 }
+            case .issues:
+                if let vm = issuesVM {
+                    IssuesView(vm: vm)
+                } else {
+                    ConnectionPlaceholder(state: env.serverState)
+                }
             case .storages:
                 // Same pattern as Log feed above: when no session
                 // is active the tab shows ConnectionPlaceholder so
@@ -319,6 +336,8 @@ struct MainWindow: View {
         // with internal top-leading alignment, so they pin correctly
         // regardless of what the parent says.
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // The Log feed's ⚠ chip (D95).
+        .environment(issuesVM)
         // Every Text on every tab can be selected and copied. Table and
         // List rows ignore it (click, drag, ⌘C and their menus still pick
         // rows), and so do buttons. A selectable Text swallows a tap or a

@@ -176,6 +176,7 @@ public enum ToolSchema {
         "excludeSubsystems": strings("Hide these subsystems; same matching as subsystems."),
         "categories": strings("Only these categories; same matching as subsystems."),
         "excludeCategories": strings("Hide these categories; same matching as subsystems."),
+        "pattern": string("Only events whose message normalises to this pattern — an issue's pattern from issues_list (numbers → <n>, ids → <uuid>/<hex>, times → <time>). With subsystems: [its subsystem] it shows exactly that issue's events."),
     ])
 }
 
