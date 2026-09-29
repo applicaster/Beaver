@@ -12,6 +12,8 @@ does the same for a manual release.
 
 ## [Unreleased]
 
+## [4.18.0] - 2026-09-29
+
 ### Added
 - **Issues**: a new sidebar tab under Log feed lists the session's errors
   and warnings grouped by what they say — `Token refresh failed: <n>` ×41 —
@@ -755,7 +757,7 @@ end-to-end. No code-visible changes versus 1.0.0.
 
 Initial Beaver release. See `DECISIONS.md` D1–D20 for the design history.
 
-[Unreleased]: https://github.com/applicaster/Beaver/compare/4.17.0...HEAD
+[Unreleased]: https://github.com/applicaster/Beaver/compare/4.18.0...HEAD
 [2.0.1]: https://github.com/applicaster/Beaver/releases/tag/2.0.1
 [2.0.0]: https://github.com/applicaster/Beaver/releases/tag/2.0.0
 [1.0.2]: https://github.com/applicaster/Beaver/releases/tag/1.0.2
