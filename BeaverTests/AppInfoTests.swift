@@ -44,7 +44,7 @@ struct AppInfoTests {
         #expect(cells == [AppInfo.CellStyle(id: "0a1b2c3d-1111-2222-3333-444455556666", plugin: "hero")])
     }
 
-    @Test("Config files: captured, then CMS, then derived; only Zapp's bucket")
+    @Test("Config files: captured, then derived; only Zapp's bucket")
     func configFiles() {
         let leaves = AppInfo.leaves(session: session, local: local)
         let base = "https://assets-secure.applicaster.com/zapp/accounts/acct1/apps/com.applicaster.river/apple_store/2.7"
@@ -58,14 +58,11 @@ struct AppInfoTests {
         #expect(files[.rivers]?.body == "[]")
         #expect(files[.layout]?.found == "derived from storage")
 
-        files = AppInfo.configFiles(leaves: leaves, network: [],
-                                    cms: [.pluginConfigurations: base + "/plugin_configurations/plugin_configurations.json"])
-        #expect(files[.pluginConfigurations]?.found == "CMS")
         #expect(!AppInfo.isAllowedConfigURL("http://assets-secure.applicaster.com/zapp/accounts/a/apps/b/c/d/x.json"))
         #expect(!AppInfo.isAllowedConfigURL("https://assets-secure.applicaster.com:444/zapp/accounts/a/apps/b/c/d/x.json"))
     }
 
-    @Test("The app's own URLs in applicaster.v2 win over the CMS and the derived path; the key names the kind")
+    @Test("The app's own URLs in applicaster.v2 win over the derived path; the key names the kind")
     func storageURLs() {
         let host = "https://assets-secure.applicaster.com/zapp/accounts/acct1"
         let app = host + "/apps/com.app/apple_store/0.0.7-dev"
@@ -79,31 +76,16 @@ struct AppInfoTests {
             {"applicaster.v2":{"cell_styles_url":"\#(host)/app_families/7/layouts/L1/cell_styles.json",
               "tablet_layout_url":"\#(app)/layouts/tablet_layout.json"}}
             """#)
-        let files = AppInfo.configFiles(leaves: leaves, network: [],
-                                        cms: [.cellStyles: host + "/app_families/7/layouts/OLD/cell_styles.json",
-                                              .presetsMapping: host + "/app_families/7/layouts/L1/presets_mapping.json"])
+        let files = AppInfo.configFiles(leaves: leaves, network: [])
         #expect(files[.cellStyles] == AppInfo.ConfigFile(url: host + "/app_families/7/layouts/L1/cell_styles.json", body: nil,
                                                          found: "storage: local/applicaster.v2/cell_styles_url"))
         #expect(files[.tabletLayout]?.url == app + "/layouts/tablet_layout.json")
         #expect(files[.layout]?.found == "storage: session/applicaster.v2/layout_url")
         #expect(files[.styles]?.url == app + "/styles/styles.json")
         #expect(files[.pipesEndpoints]?.found == "storage: session/applicaster.v2/endpoints_url")
-        #expect(files[.presetsMapping]?.found == "CMS")
+        #expect(files[.presetsMapping] == nil)
         #expect(files[.rivers]?.found == "derived from storage")
         #expect(AppInfo.accountId(fromConfigURLs: [app + "/layouts/layout.json"]) == "acct1")
-    }
-
-    @Test("build_params fill gaps and show next to a different storage value, never over it")
-    func buildParams() {
-        let identity = [InfoRow(label: "Build number", value: "66", source: "storage: session/applicaster.v2/build_version"),
-                        InfoRow(label: "QuickBrick version", value: "16.0.0-rc.95", source: "storage: s")]
-        let merged = AppInfo.mergeBuildParams(identity, ["build_version": 70, "quick_brick_version": "16.0.0-rc.95",
-                                                         "device_target": "universal"])
-        #expect(merged == [
-            InfoRow(label: "Build number", value: "66", source: "storage: session/applicaster.v2/build_version · Zapp CMS now: 70"),
-            InfoRow(label: "QuickBrick version", value: "16.0.0-rc.95", source: "storage: s"),
-            InfoRow(label: "Device target", value: "universal", source: "CMS"),
-        ])
     }
 
     @Test("Screens and cell styles from layout.json, plugins from configurations")
@@ -145,7 +127,7 @@ struct AppInfoTests {
         #expect(screens.map(\.name) == ["Home", "Player"])
     }
 
-    @Test("The report: storage wins over the CMS, a cut captured body is fetched, plugins come from the file")
+    @Test("The report: storage identity, a cut captured body is fetched, plugins come from the file")
     func report() async throws {
         let store = try LogStore(source: .inMemory)
         let s = try await store.createSession(source: .live)
@@ -156,11 +138,6 @@ struct AppInfoTests {
             fallbackMillis: 0)), sessionId: s.id)
         let fetched = LockedBox<[String]>([])
         let http = ZappHTTP(
-            token: { "t" },
-            buildParams: { id, _ in
-                ["app_name": "River CMS", "plugin_configurations_url": base + "/plugins/plugin_configurations.json",
-                 "version_id": id]
-            },
             get: { url in
                 fetched.mutate { $0.append(url.lastPathComponent) }
                 switch url.lastPathComponent {
@@ -170,10 +147,7 @@ struct AppInfoTests {
                 }
             })
         let r = try await AppInfoReport.build(store: store, sessionId: s.id, http: http)
-        #expect(r.cms == .loaded)
-        // build_params are the version's latest build, not the installed one.
-        #expect(r.identity.first == InfoRow(label: "App name", value: "River",
-                                            source: "storage: session/applicaster.v2/app_name · Zapp CMS now: River CMS"))
+        #expect(r.identity.first == InfoRow(label: "App name", value: "River", source: "storage: session/applicaster.v2/app_name"))
         #expect(r.identity.first { $0.label == "Account id" }?.source == "storage: session/applicaster.v2/accountsAccountId")
         #expect(r.screens.map(\.name) == ["Home"])
         #expect(r.screensSource == "rivers.json")
@@ -182,7 +156,7 @@ struct AppInfoTests {
         #expect(fetched.value.sorted() == ["layout.json", "plugin_configurations.json", "remote_configurations.json", "rivers.json"])
     }
 
-    @Test("Every launch-time file is listed without a token; only the parsed ones are downloaded")
+    @Test("Every launch-time file is listed; only the parsed ones are downloaded")
     func allConfigFiles() async throws {
         let store = try LogStore(source: .inMemory)
         let s = try await store.createSession(source: .live)
@@ -193,7 +167,7 @@ struct AppInfoTests {
         let host = "https://assets-secure.applicaster.com/zapp/accounts/acct1"
         let layouts = host + "/app_families/6420/layouts/L1"
         let fetched = LockedBox<[String]>([])
-        let http = ZappHTTP(token: { nil }, buildParams: { _, _ in [:] }, get: { url in
+        let http = ZappHTTP(get: { url in
             fetched.mutate { $0.append(url.lastPathComponent) }
             guard url.lastPathComponent == "remote_configurations.json" else { return Data("{}".utf8) }
             return Data(#"""
@@ -215,14 +189,13 @@ struct AppInfoTests {
         #expect(!AppInfo.isAllowedConfigURL(host + "/app_families/6420"))
     }
 
-    @Test("Without a token the CMS isn't asked")
-    func noToken() async throws {
+    @Test("No storage: nothing to look up, nothing fetched")
+    func noStorage() async throws {
         let store = try LogStore(source: .inMemory)
         let s = try await store.createSession(source: .live)
-        let http = ZappHTTP(token: { nil }, buildParams: { _, _ in Issue.record("asked"); return [:] },
-                            get: { _ in throw URLError(.notConnectedToInternet) })
+        let http = ZappHTTP(get: { _ in Issue.record("fetched"); throw URLError(.notConnectedToInternet) })
         let r = try await AppInfoReport.build(store: store, sessionId: s.id, http: http)
-        #expect(r.cms == .noToken)
+        #expect(r.configs.isEmpty)
         #expect(r.storageAsOf == nil)
     }
 }
@@ -265,7 +238,7 @@ struct SavedConfigTests {
 
     /// Serves every file; counts what was fetched.
     private func zapp(_ fetched: LockedBox<[String]>, layoutName: String = "Main") -> ZappHTTP {
-        ZappHTTP(token: { nil }, buildParams: { _, _ in [:] }, get: { url in
+        ZappHTTP(get: { url in
             fetched.mutate { $0.append(url.lastPathComponent) }
             switch url.lastPathComponent {
             case "remote_configurations.json":

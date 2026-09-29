@@ -12,7 +12,6 @@ struct InfoView: View {
     let sessionId: Int64
     @Environment(AppEnvironment.self) private var env
     @Environment(ToastCenter.self) private var toasts
-    @Environment(\.openSettings) private var openSettings
     @State private var report: AppInfoReport?
     @State private var session: Session?
     @State private var loading = false
@@ -43,10 +42,6 @@ struct InfoView: View {
                 }
                 if case .configsSaved(let sid) = change, sid == sessionId { await load() }
             }
-        }
-        // Set, replaced or removed in Settings → Zapp: ask the CMS again.
-        .onReceive(NotificationCenter.default.publisher(for: ZappToken.didChange)) { _ in
-            Task { await load() }
         }
     }
 
@@ -100,7 +95,6 @@ struct InfoView: View {
     private func appColumn(_ r: AppInfoReport) -> some View {
         VStack(alignment: .leading, spacing: 16) {
             InfoCard(title: "Identity & versions", rows: r.identity)
-            cmsLine(r.cms)
             TableCard(title: "Screens (\(r.screens.count), \(r.screensSource))",
                       rows: r.screens.map { [$0.name, $0.id, $0.type ?? ""] },
                       empty: "No screens found: the full list needs rivers.json or layout.json, and no visits were logged.")
@@ -118,29 +112,6 @@ struct InfoView: View {
             InfoCard(title: "Advertising", rows: r.device.advertising, empty: r.device.advertisingNote)
             if !r.device.userAgent.isEmpty { InfoCard(title: "User agent", rows: r.device.userAgent) }
         }
-    }
-
-    @ViewBuilder
-    private func cmsLine(_ cms: AppInfoReport.CMS) -> some View {
-        HStack(spacing: 6) {
-            switch cms {
-            case .loaded:
-                Label("Zapp CMS build_params loaded", systemImage: "checkmark.circle").foregroundStyle(.green)
-            case .noToken:
-                Text("Optional: the app's storage has its versions and config URLs. A Zapp token adds what Zapp has now for this version (its latest build, device target).").foregroundStyle(.secondary)
-            case .noVersionId:
-                Text("Zapp CMS not asked: the app's storage has no version_id.").foregroundStyle(.secondary)
-            case .failed(let why):
-                Label("Zapp CMS: \(why)", systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
-            }
-            // D92: the token lives in Settings → Zapp.
-            Button(cms == .noToken ? "Set Zapp Token…" : "Change Token…") {
-                UserDefaults.standard.set(SettingsTab.zapp.rawValue, forKey: SettingsTab.key)
-                openSettings()
-            }
-            .buttonStyle(.link)
-        }
-        .font(.caption)
     }
 
     private func load() async {

@@ -12,7 +12,7 @@ enum InfoTools {
     static let appInfo = MCPTool(
         name: "app_info",
         title: "App and device info",
-        description: "Use to learn what app and device a session is: app, SDK and QuickBrick versions, Zapp ids, the layout's screens, cell styles and plugins, and the device's model, OS, language, country and advertising id — each value with where it came from (storage, CMS, a config file, logs). Config files come from Zapp's public bucket; the Zapp CMS is asked only when the user set a Zapp token in Beaver's Settings → Zapp.",
+        description: "Use to learn what app and device a session is: app, SDK and QuickBrick versions, Zapp ids, the layout's screens, cell styles and plugins, and the device's model, OS, language, country and advertising id — each value with where it came from (storage, a config file, logs) — the app's own storage, so the build it runs, not Zapp's latest. Config files come from Zapp's public bucket, at the URLs the app keeps in storage.",
         kind: .read,
         inputSchema: ToolSchema.object([
             "sessionId": ToolSchema.sessionId,
@@ -33,12 +33,6 @@ enum InfoTools {
         func hw(_ label: String) -> String? { r.device.hardware.first { $0.label == label }?.value }
         let os = hw("OS version").map { v in hw("Platform").map { "\($0) \(v)" } ?? v }
         let device = [hw("Model"), os].compactMap { $0 }
-        let cms: String = switch r.cms {
-        case .noToken: "Zapp CMS not asked: no Zapp token — not needed: versions and config URLs come from the app's storage (a token only adds Zapp's latest build for this version and the device target)."
-        case .noVersionId: "Zapp CMS not asked: the app's storage has no version_id."
-        case .loaded: "Zapp CMS: build_params loaded."
-        case .failed(let why): "Zapp CMS failed: \(why)"
-        }
         let configs = AppInfo.ConfigKind.allCases.compactMap { kind in
             r.configs[kind].map { "  \(kind.rawValue): \($0.url) (\($0.found))" + ($0.error.map { " — couldn't load: \($0)" } ?? "")
                 + ($0.sha256 != nil ? " [saved]" : "") }
@@ -58,7 +52,6 @@ enum InfoTools {
         let savedNote = r.configsSavedAt.map { " (saved with the session \($0.ISO8601Format()), as Zapp had them; read one with app_config)" }
             ?? " (in Zapp now; app_config(download: true) saves them with the session)"
         sections.append(configs.isEmpty ? "Config files: none found." : "Config files\(savedNote):\n" + configs.joined(separator: "\n"))
-        sections.append(cms)
         let body = sections.compactMap { $0 }.joined(separator: "\n\n")
 
         let structured: JSON = [
@@ -81,7 +74,6 @@ enum InfoTools {
                                  "saved": .bool(c.sha256 != nil), "size": JSON(c.size)] as JSON)
             })),
             "configsSavedAt": JSON(r.configsSavedAt?.ISO8601Format()),
-            "cms": .string(cms),
         ]
 
         guard r.storageAsOf != nil else {
@@ -108,7 +100,7 @@ enum InfoTools {
     static let appConfig = MCPTool(
         name: "app_config",
         title: "Read an app config file",
-        description: "Use to read the app's launch-time config files (layout, pluginConfigurations, remoteConfigurations, cellStyles, presetsMapping, pipesEndpoints, their tablet variants, rivers) as saved with the session: Beaver downloads them from Zapp when the device connects, so they are Zapp's as of then, not after a later publish (the app itself may still run a debug build's bundled copy). Without kind: the saved files. With kind: the JSON at path (dot-separated keys and array indexes, e.g. \"general_settings.layout_id\" or \"screens.0.name\"); objects also list their keys, arrays their count. Files are large (cell styles 1–2 MB): walk down with path.",
+        description: "Use to read the app's launch-time config files (layout, pluginConfigurations, remoteConfigurations, cellStyles, presetsMapping, pipesEndpoints, styles, their tablet variants, rivers) as saved with the session: Beaver downloads them from Zapp when the device connects, so they are Zapp's as of then, not after a later publish (the app itself may still run a debug build's bundled copy). Without kind: the saved files. With kind: the JSON at path (dot-separated keys and array indexes, e.g. \"general_settings.layout_id\" or \"screens.0.name\"); objects also list their keys, arrays their count. Files are large (cell styles 1–2 MB): walk down with path.",
         kind: .read,
         inputSchema: ToolSchema.object([
             "sessionId": ToolSchema.sessionId,

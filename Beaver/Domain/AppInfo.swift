@@ -12,7 +12,7 @@ import Foundation
 public struct InfoRow: Sendable, Equatable {
     public let label: String
     public let value: String
-    /// "storage: session/applicaster.v2/deviceModel", "CMS", "user agent (best-effort)"…
+    /// "storage: session/applicaster.v2/deviceModel", "config file URL", "user agent (best-effort)"…
     public let source: String
 
     public init(label: String, value: String, source: String) {
@@ -201,7 +201,7 @@ public enum AppInfo {
     // MARK: - Launch-time config files (S3)
 
     /// The files QuickBrick loads at launch (`runtime_configuration_urls.json`,
-    /// written by zapplicaster-cli from build_params), plus the older
+    /// written by zapplicaster-cli), plus the older
     /// rivers.json and styles.json.
     public enum ConfigKind: String, Sendable, CaseIterable {
         case layout, tabletLayout, rivers, pluginConfigurations, remoteConfigurations,
@@ -215,7 +215,7 @@ public enum AppInfo {
         public let url: String
         /// A captured response body, when the app's request was recorded.
         public let body: String?
-        /// "captured request", "storage: local/applicaster.v2/layout_url", "CMS", "derived from storage".
+        /// "captured request", "storage: local/applicaster.v2/layout_url", "derived from storage".
         public let found: String
     }
 
@@ -242,7 +242,7 @@ public enum AppInfo {
     ]
 
     /// Tablet variants can't be told from the URL: they come only from
-    /// storage keys, build_params and remote_configurations.
+    /// storage keys and remote_configurations.
     static func kind(of url: String) -> ConfigKind? {
         let path = url.components(separatedBy: "?")[0]
         let patterns: [(ConfigKind, String)] = [
@@ -267,12 +267,11 @@ public enum AppInfo {
 
     /// Where each config file is, with its body when a captured request has
     /// it. What the app itself used wins: captured requests, then the URLs
-    /// it keeps in storage; then the CMS's build-time URLs; then the path
-    /// Zapp builds from account, bundle, store and version.
+    /// it keeps in storage; then the path Zapp builds from account, bundle,
+    /// store and version.
     public static func configFiles(
         leaves: [StorageLeaf],
-        network: [(url: String, body: String?)],
-        cms: [ConfigKind: String] = [:]
+        network: [(url: String, body: String?)]
     ) -> [ConfigKind: ConfigFile] {
         var candidates: [(kind: ConfigKind?, file: ConfigFile)] =
             network.map { (nil, ConfigFile(url: $0.url, body: $0.body, found: "captured request")) }
@@ -280,9 +279,6 @@ public enum AppInfo {
             for url in allGroups(#"(https?://[^\s"'\\]+\.json[^\s"'\\]*)"#, in: leaf.text ?? "").map({ $0[0] }) {
                 candidates.append((storageKeys[leaf.key], ConfigFile(url: url, body: nil, found: leaf.source)))
             }
-        }
-        for kind in ConfigKind.allCases {
-            if let url = cms[kind] { candidates.append((kind, ConfigFile(url: url, body: nil, found: "CMS"))) }
         }
         let part = { (keys: [String]) in find(leaves, keys)?.text }
         if let account = part(["accountsAccountId", "account_id", "accounts_account_id"]),
@@ -368,57 +364,16 @@ public enum AppInfo {
         }
     }
 
-    // MARK: - CMS build_params
-
-    /// build_params field → App Info label.
-    static let cmsLabels: [(String, String)] = [
-        ("app_name", "App name"), ("bundle_identifier", "Bundle id"), ("version_name", "App version"),
-        ("build_version", "Build number"), ("sdk_version", "SDK version"),
-        ("quick_brick_version", "QuickBrick version"), ("version_id", "Zapp version id"),
-        ("accounts_account_id", "Account id"), ("app_family_id", "App family id"),
-        ("rivers_configuration_id", "Layout id"), ("device_target", "Device target"), ("store", "Store"),
-    ]
-
-    /// The app's storage wins: build_params describe the Zapp version's
-    /// latest build, not the one installed (a device on build 66 while Zapp
-    /// has built 70). The CMS fills what storage lacks, and a different
-    /// value shows in the source.
-    public static func mergeBuildParams(_ identity: [InfoRow], _ params: [String: Any]?) -> [InfoRow] {
-        guard let params else { return identity }
-        var out = identity
-        for (key, label) in cmsLabels {
-            guard let value = params[key], let t = text(value), !t.isEmpty else { continue }
-            if let i = out.firstIndex(where: { $0.label == label }) {
-                if out[i].value != t {
-                    out[i] = InfoRow(label: label, value: out[i].value, source: out[i].source + " · Zapp CMS now: " + t)
-                }
-            } else {
-                out.append(InfoRow(label: label, value: t, source: "CMS"))
-            }
-        }
-        return out
-    }
-
     /// The account id from a config URL (`/zapp/accounts/<id>/…`), for apps
     /// whose storage doesn't name it.
     public static func accountId(fromConfigURLs urls: [String]) -> String? {
         urls.lazy.compactMap { firstGroup(#"/zapp/accounts/([^/]+)/"#, in: $0) }.first
     }
 
-    /// The config URLs build_params names, by kind — the same keys
-    /// zapplicaster-cli writes into the app's runtime_configuration_urls.json.
-    public static func cmsConfigURLs(_ params: [String: Any]?) -> [ConfigKind: String] {
-        urls(params, [
-            (.layout, "layout_url"), (.tabletLayout, "tablet_layout_url"), (.rivers, "rivers_url"),
-            (.pluginConfigurations, "plugin_configurations_url"), (.remoteConfigurations, "remote_configurations_url"),
-            (.cellStyles, "cell_styles_url"), (.tabletCellStyles, "tablet_cell_styles_url"),
-            (.presetsMapping, "presets_mapping_url"), (.tabletPresetsMapping, "tablet_presets_mapping_url"),
-            (.pipesEndpoints, "pipes_endpoints_url"),
-        ])
-    }
+    // MARK: - Config URLs named inside config files
 
     /// The URLs remote_configurations.json's general_settings names — how
-    /// cell styles and presets are found without a Zapp token.
+    /// cell styles and presets are found when storage doesn't keep them.
     public static func remoteConfigURLs(_ json: Any?) -> [ConfigKind: String] {
         urls((json as? [String: Any])?["general_settings"] as? [String: Any], [
             (.cellStyles, "cell_styles_json_url"), (.tabletCellStyles, "tablet_cell_styles_json_url"),

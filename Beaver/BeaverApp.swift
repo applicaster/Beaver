@@ -46,6 +46,8 @@ struct BeaverApp: App {
     private let updaterDelegate = BeaverUpdaterDelegate()
 
     init() {
+        // D96: Beaver no longer keeps a Zapp token.
+        LegacyZappToken.remove()
         // Build the environment synchronously on the main actor.
         let store: LogStore
         let ranBefore: Bool

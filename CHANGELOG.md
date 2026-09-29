@@ -29,11 +29,15 @@ does the same for a manual release.
   (`general_settings.layout_id`, `screens.0.name`).
 
 ### Fixed
-- **Info no longer shows the Zapp CMS's versions over the app's own.**
-  build_params describe the Zapp version's latest build, not the one on the
-  device (build 70 in Zapp, 66 installed): the app's storage now wins, and
-  a different CMS value shows next to its source. A Zapp token isn't needed
-  for versions or config files any more; it only adds what storage lacks.
+- **Info shows the versions the app runs, not Zapp's latest build.** With a
+  Zapp token, Info showed the CMS's build parameters over the app's own:
+  they describe the Zapp version's newest build (70), not the one on the
+  device (66). Info now reads the app's storage only.
+
+### Removed
+- **The Zapp token** (Settings → Zapp): the app's storage already names its
+  versions and config files. A token saved by an older Beaver is removed
+  from the keychain at launch.
 
 ## [4.18.0] - 2026-09-29
 
