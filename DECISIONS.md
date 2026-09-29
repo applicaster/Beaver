@@ -2342,6 +2342,7 @@ won't decode, and the feed starts unfiltered once.
   Access (MCP)" (toggle, with the port and state in the title) and
   "Copy MCP Setup Command" (copies the `claude mcp add --scope user …` line).
 - **To change:** move to a `Settings` scene if more settings appear.
+- **Superseded by D92:** they did; Beaver has a Settings window now.
 
 ---
 
@@ -3016,6 +3017,8 @@ and `sessions_compare` both do; the menus and pickers only offer them.
 - Idempotent: a file that already has `## [X.Y.Z]` is left alone, and a
   missing `[Unreleased]` only warns — a changelog problem never stops a
   release.
+- **Amended by D92:** CI dates the changelog before `make release`, since
+  the app bundles it for What's New.
 
 ## D89. zapp-support's TV bridge connects to Beaver as a logs-only device
 
@@ -3081,3 +3084,67 @@ and `sessions_compare` both do; the menus and pickers only offer them.
   rebasing the version commit onto the newer main (its tag would point at
   code the built zip doesn't contain, and both jobs would release); a
   GitHub merge queue (more process for a one-person repo).
+
+---
+
+## D92. A Settings window, and What's New from the bundled changelog
+
+**Status:** Accepted (2026-09-28). Amends D62 (settings in the app menu) and
+the step order of D90.
+
+- **Why now:** D62 said "move to a `Settings` scene if more settings
+  appear". They did: session retention (D83), the Zapp token (D79), agent
+  notifications (M28) joined Agent Access, and the MCP port was reachable
+  only through `defaults write`. The app menu had become a settings panel
+  of pickers, toggles and status lines that people outside the team don't
+  look for, and a token prompt in an `NSAlert`.
+- **Decision:** the standard `Settings { }` scene — Beaver → **Settings…**
+  (⌘,) and a gear at the bottom of the sidebar (`SettingsLink`). Tabs:
+  **General** (Delete sessions older than, sessions on disk), **Agents**
+  (Agent Access toggle and status, **port** with validation — 1024–65535,
+  not 9080 — applied by restarting the listener the way the toggle does,
+  Copy MCP Setup Command, agent notifications with the Agent panel's
+  mute toggle and permission button), **Zapp** (token set or not — never
+  shown —, Save/Replace in a `SecureField`, Remove, **Test**), **About**
+  (version and build, What's New…, Check for Updates, GitHub releases).
+  The selected tab is `UserDefaults` `settingsTab`, so Info's **Set Zapp
+  Token…** writes `zapp` and calls `openSettings()`.
+- **The menu keeps actions, not settings:** Check for Updates, What's New…,
+  Copy WebSocket Address, Copy MCP Setup Command. The retention picker,
+  Agent Access toggle and status, Zapp Access Token… and Agent
+  Notifications moved to Settings; testers reach them through Settings…,
+  itself an app-menu item (CLAUDE.md MCP rule 7; MCP.md → "Testing without
+  Xcode" says where each one is).
+- **Toggle and retention apply at once**, through bindings in `BeaverApp`,
+  instead of `.onChange` on the main window: Settings works with that
+  window closed.
+- **Zapp → Test:** one `build_params` call with the stored token, for the
+  viewed session's version id when its storage has one, else an all-zero
+  id. 200 or 404 means the token got past Zapp's check, 401/403 that it
+  didn't (`ZappTokenCheck`); anything else says "couldn't tell". The Info
+  tab reloads when the token changes (`ZappToken.didChange`).
+- **What's New:** `CHANGELOG.md` is a resource of the app target (a file
+  reference in the pbxproj; the `Beaver/` folder is synchronized, the
+  changelog sits at the root). `Changelog` (BeaverCore) reads
+  `## [X.Y.Z] - date`, `###` groups, bullets and paragraphs;
+  `[Unreleased]` and non-version headings are skipped. At launch,
+  `WhatsNew.atLaunch` compares `CFBundleShortVersionString` with
+  `UserDefaults` `lastSeenVersion` and shows every release newer than it,
+  up to the running one, in a sheet over the main window. No
+  `lastSeenVersion`: a fresh install (no store file before this launch)
+  shows nothing; an upgrade from a Beaver without What's New shows the
+  running version's notes only. A downgrade keeps the newer version as
+  seen. Beaver → What's New… and About show every release back to 1.0. Inline
+  Markdown (bold, `code`, links) through `AttributedString`.
+- **D90's order changes:** CI dates the changelog in its own step *before*
+  `make release`, so the bundled file has `## [X.Y.Z]` rather than
+  `[Unreleased]`; the release commit carries that same file.
+- **MCP:** no new tool. `beaver_status` already reports Beaver's version
+  and the retention; the settings stay the person's (as D83 decided for
+  retention), and an agent that wants release notes has the GitHub
+  releases. Tool texts that pointed at the app menu now point at Settings.
+- **Alternatives:** keep everything in the app menu and add Settings too
+  (two places for every setting); a Markdown library for the sheet (the
+  changelog needs bullets and inline styles only); download release notes
+  from GitHub (needs the network, and shows notes for versions not
+  installed).

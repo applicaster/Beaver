@@ -12,6 +12,26 @@ does the same for a manual release.
 
 ## [Unreleased]
 
+### Added
+- **Settings window**: Beaver → **Settings…** (⌘,), or the **gear** at the
+  bottom of the sidebar. **General**: how long sessions are kept and their
+  size on disk. **Agents**: Agent Access (MCP) on or off, its **port** (type
+  one and Apply — no more `defaults write`), Copy MCP Setup Command, and
+  agent notifications. **Zapp**: whether a Zapp token is set, Save/Replace,
+  Remove, and **Test**, which asks Zapp whether it accepts the token.
+  **About**: version, What's New and Check for Updates. The Info tab's
+  **Set Zapp Token…** opens the Zapp tab.
+- Settings → General → **Delete All Sessions…** (asks first) removes every session, as Sessions → Delete all sessions… does. Text in Settings and What's New can be selected and copied.
+- **What's New**: the first launch of a new version shows what changed
+  since the version you ran before. Beaver → **What's New…** and Settings →
+  About show every release back to 1.0, any time.
+
+### Changed
+- The settings left the Beaver menu for the Settings window: Delete
+  Sessions Older Than, Agent Access (MCP), Zapp Access Token… and Agent
+  Notifications. The menu keeps its actions: Check for Updates, What's
+  New…, Copy WebSocket Address and Copy MCP Setup Command.
+
 ## [4.15.0] - 2026-09-29
 
 ### Added

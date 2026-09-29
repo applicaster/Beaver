@@ -113,6 +113,13 @@ public actor AgentAccess {
         return (1...65_535).contains(value) ? UInt16(value) : defaultPort
     }
 
+    /// Settings → Agents → Port (D92): nil when Beaver can use it, else why not.
+    public static func portProblem(_ port: Int) -> String? {
+        guard (1024...65_535).contains(port) else { return "Use a port from 1024 to 65535." }
+        guard port != 9080 else { return "9080 is Beaver's WebSocket port for devices." }
+        return nil
+    }
+
     public static func setupCommand(port: UInt16) -> String {
         "claude mcp add --scope user --transport http beaver http://127.0.0.1:\(port)/mcp"
     }
@@ -170,7 +177,7 @@ public actor AgentAccess {
             Connect an AI agent to Beaver
 
             Beaver runs an MCP server on this Mac at http://127.0.0.1:\(port)/mcp (loopback only). \
-            Keep Beaver open with Agent Access (MCP) turned on in the app menu.
+            Keep Beaver open with Agent Access (MCP) turned on in Beaver → Settings… → Agents.
             """
         let steps = setupSteps(port: port).map { step in
             "\(step.title)\n\(step.note)\n\n\(step.code)"

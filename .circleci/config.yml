@@ -205,6 +205,14 @@ jobs:
 
             rm -f "${PBXPROJ}.bak"
 
+      # ── Date the changelog before building: the app bundles
+      #    CHANGELOG.md for What's New (D92), which must see this
+      #    version's section, not [Unreleased]. [Unreleased] → [X.Y.Z] -
+      #    today (D90); idempotent, only warns without [Unreleased].
+      - run:
+          name: Date the changelog
+          command: ./scripts/changelog-release.sh "${BEAVER_VERSION}"
+
       # ── Build, sign, notarize, zip ──────────────────────────────────
       - run:
           name: make release
@@ -225,11 +233,9 @@ jobs:
             REMOTE="https://x-access-token:${GITHUB_TOKEN}@github.com/applicaster/Beaver.git"
             PBXPROJ="Beaver.xcodeproj/project.pbxproj"
 
-            # 1. Date the changelog: [Unreleased] → [X.Y.Z] - today (D90).
-            #    Idempotent; only warns if CHANGELOG.md has no [Unreleased].
-            ./scripts/changelog-release.sh "${BEAVER_VERSION}"
-
-            # Commit the pbxproj bump and the changelog if either changed.
+            # 1. Commit the pbxproj bump and the changelog the "Date the
+            #    changelog" step dated before the build (D90, D92), if
+            #    either changed.
             if ! git diff --quiet -- "$PBXPROJ" CHANGELOG.md; then
               git add "$PBXPROJ" CHANGELOG.md
               git commit -m "version ${BEAVER_VERSION} [skip ci]"
@@ -250,7 +256,7 @@ jobs:
             fi
 
             # 3. Release notes: the version's section (## [X.Y.Z]) that
-            #    step 1 wrote.
+            #    the "Date the changelog" step wrote.
             NOTES=$(awk -v ver="${BEAVER_VERSION}" '
               $0 ~ "^## \\[" ver "\\]"   { capturing = 1; next }
               capturing && /^## /        { capturing = 0 }

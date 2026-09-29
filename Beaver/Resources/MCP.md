@@ -11,9 +11,10 @@ and a macOS notification when Beaver is in the background. Design:
 
 ## Setup
 
-1. Open Beaver. App menu → **Agent Access (MCP)** is on by default and shows
-   `127.0.0.1:9081`.
-2. App menu → **Copy MCP Setup Command**, and run it:
+1. Open Beaver. Beaver → **Settings…** (⌘, or the gear at the bottom of the
+   sidebar) → **Agents**: **Agent Access (MCP)** is on by default and the
+   status shows `On · 127.0.0.1:9081`.
+2. App menu (or Settings → Agents) → **Copy MCP Setup Command**, and run it:
    ```bash
    claude mcp add --scope user --transport http beaver http://127.0.0.1:9081/mcp
    ```
@@ -23,19 +24,21 @@ and a macOS notification when Beaver is in the background. Design:
 3. Connect the device to Beaver as usual. The agent can also read past and
    imported sessions without one.
 
-Port taken? `defaults write ~/Library/Preferences/com.applicaster.LoggerNext mcpPort -int 9082`,
-then toggle Agent Access off and on. (The bare domain form resolves to a
-sandbox container on a machine that once ran a sandboxed build, which this
-non-sandboxed Beaver never reads — the explicit path always hits the right
-place.)
+Port taken? Settings → Agents → **Port**: type another one (1024–65535) and
+**Apply**; Beaver restarts the listener, and agents need the new setup
+command. (An older Beaver has no Settings window: there,
+`defaults write ~/Library/Preferences/com.applicaster.LoggerNext mcpPort -int 9082`
+and toggle Agent Access off and on in the app menu.)
 
 ## Testing without Xcode
 
 For testers with a built bundle (a PR's "Tester bundle" artifact on CircleCI,
-or a release):
+or a release). Every setting is in Beaver → **Settings…** (⌘,, or the gear at
+the bottom of the sidebar): General (session retention), Agents (Agent Access,
+port, notifications), Zapp (token), About (version, What's New, updates).
 
 1. Unzip `Beaver.zip`, move `Beaver.app` to Applications, open it.
-2. Check the app menu shows **MCP: On · 127.0.0.1:9081**.
+2. Check Settings → Agents shows **Status: On · 127.0.0.1:9081**.
 3. Smoke test in Terminal:
    ```bash
    curl -s -X POST http://127.0.0.1:9081/mcp -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
@@ -60,7 +63,7 @@ or a release):
      with a toast (Beaver in front) or a macOS notification (Beaver in the
      background). **Show** / clicking it brings Beaver forward on the event.
    - Notifications off? The Agent panel's strip says where to turn them on;
-     app menu → **Agent Notifications: Off — Turn On…** opens it.
+     so does Settings → Agents → **Agent notifications**, with the same button.
    - "export this session to ~/Desktop/beaver-test.json, import it back, then
      delete the imported copy" → three calls; the imported session is not
      shown until you pick it; the delete toasts.
@@ -69,24 +72,25 @@ or a release):
    the other app stays in front. Then "show me": Beaver comes forward.
 8. In the **Agent** panel, click a row's link (**session #…**,
    **request #…**): the popover closes and Beaver shows it.
-9. Turn **Agent Access (MCP)** off in the app menu: the `curl` above now fails
-   to connect.
+9. Turn **Agent Access (MCP)** off in Settings → Agents: the `curl` above now
+   fails to connect. Turn it back on, set **Port** to 9082 and **Apply**: the
+   status shows `127.0.0.1:9082` and the `curl` answers on 9082. Set 9081 back.
 10. Connect two apps (two simulators, or a simulator and a phone): both
    appear in the menu behind the toolbar's Connected pill, and `beaver_status` lists both.
-11. Report problems with the Beaver version (Beaver → About) and the Agent
-   panel's **Copy** output.
+11. Report problems with the Beaver version (Settings → About, or Beaver →
+   About) and the Agent panel's **Copy** output.
 12. Compare: Sessions tab → right-click a session → **Compare with** → pick
    another. A sheet lists what differs; click a line to open it. Ask the agent
    "compare session <a> with <b>" → `sessions_compare`.
 13. Toolboxes: connect an app built with quick-brick-xray's **native** WebSocket
    sink (the JS-only sink has none), click the device badge on the left of the
    toolbar — the popover lists its toolboxes. Nothing to turn on in Beaver.
-13. Session retention: app menu → **Delete Sessions Older Than** shows 30
-   Days checked, and "Sessions on disk: …" appears a few seconds after
+13. Session retention: Settings → General → **Delete sessions older than**
+   shows 30 Days, and "Database on disk" fills in a few seconds after
    launch. `beaver_status` reports `retentionDays: 30` and `storeBytes`.
    With sessions older than 30 days, the first launch only shows a toast
    (**Keep All** sets Never); a launch a day later deletes them and toasts
-   "Deleted N old sessions, freed …". Picking a period in the menu deletes
+   "Deleted N old sessions, freed …". Picking a period in Settings deletes
    right away, no waiting day (try 7 Days). Bookmarked and imported
    sessions stay, and so does a connected device's session.
 14. Smart TVs (Beaver 4.15.0 or later): in a zapp-support checkout run
@@ -96,6 +100,13 @@ or a release):
    "TV (DevTools)"; its console lines and exceptions stream in under subsystem
    `tv-cdp`. `beaver_status` lists it with `platform: "tv-cdp"`;
    `commands_send` to it fails with "only sends logs".
+15. Zapp token: Settings → **Zapp** says whether a token is set (never shows
+   it); paste one and **Save**, then **Test** says whether Zapp accepted it.
+   The Info tab's **Set Zapp Token…** opens this tab. **Remove** deletes it.
+16. What's New: the first launch of a new version shows "What's New in
+   Beaver X.Y.Z" with every version since the last one you ran (nothing on
+   a fresh install). Beaver → **What's New…** and Settings → About show it
+   again.
 
 ## Tools
 
@@ -221,7 +232,7 @@ and in zapp-support's web logger (Beaver 4.14.0 or later). Case never matters.
 ### app-info — what app and device is this
 
 1. `app_info(sessionId)` — versions, Zapp ids, the layout's screens and plugins, the device and its advertising id, each with where it came from.
-2. No CMS fields? The user can set a Zapp token: app menu → Zapp Access Token….
+2. No CMS fields? The user can set a Zapp token: Beaver → Settings… → Zapp.
 3. `ui_show(tab: "info")` to show it to the user.
 
 ### storage — read and change what the app has stored
@@ -323,7 +334,7 @@ and in zapp-support's web logger (Beaver 4.14.0 or later). Case never matters.
 5. Imported sessions stay until deleted. Other sessions older than
    `retentionDays` in `beaver_status()` go on their own unless they have a
    bookmark: to keep one, `bookmarks_set(eventId: <id>)` in it, or tell the user
-   the setting is in the app menu → Delete Sessions Older Than.
+   the setting is in Beaver → Settings… → General.
 
 ### compare — "why does it fail on 4.6 but not on 4.5?"
 

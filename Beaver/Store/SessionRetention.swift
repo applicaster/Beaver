@@ -5,7 +5,7 @@
 
 import Foundation
 
-/// "Delete Sessions Older Than" in the app menu (D83). Kept in
+/// "Delete sessions older than" in Settings → General (D83, D92). Kept in
 /// `UserDefaults` as a number of days; 0 is Never.
 public enum SessionRetention: Int, CaseIterable, Sendable {
     case week = 7

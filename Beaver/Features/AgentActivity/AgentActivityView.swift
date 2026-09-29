@@ -189,7 +189,7 @@ struct AgentActivityView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 if env.agentAccessPort == nil {
-                    Label("Agent Access is off. Turn it on in the app menu → Agent Access (MCP).",
+                    Label("Agent Access is off. Turn it on in Beaver → Settings… → Agents.",
                           systemImage: "exclamationmark.triangle.fill")
                         .foregroundStyle(.orange)
                 } else {

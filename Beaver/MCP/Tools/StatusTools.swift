@@ -48,7 +48,7 @@ enum StatusTools {
         lines.append("\(sessions.count) session(s) stored, \(storeBytes.formatted(.byteCount(style: .file))). "
             + (retentionDays.map { "Sessions older than \($0) days are deleted automatically, except imported, bookmarked and connected ones" }
                ?? "Sessions are kept until deleted")
-            + " (the user sets this: app menu → Delete Sessions Older Than).")
+            + " (the user sets this: Beaver → Settings… → General).")
         let notificationsSuffix: String = switch host.notifications {
         case .allowed: "."
         case .muted: " (the user muted them in Beaver)."

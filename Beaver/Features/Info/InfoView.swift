@@ -12,6 +12,7 @@ struct InfoView: View {
     let sessionId: Int64
     @Environment(AppEnvironment.self) private var env
     @Environment(ToastCenter.self) private var toasts
+    @Environment(\.openSettings) private var openSettings
     @State private var report: AppInfoReport?
     @State private var session: Session?
     @State private var loading = false
@@ -41,6 +42,10 @@ struct InfoView: View {
                     await load()
                 }
             }
+        }
+        // Set, replaced or removed in Settings → Zapp: ask the CMS again.
+        .onReceive(NotificationCenter.default.publisher(for: ZappToken.didChange)) { _ in
+            Task { await load() }
         }
     }
 
@@ -131,11 +136,10 @@ struct InfoView: View {
             case .failed(let why):
                 Label("Zapp CMS: \(why)", systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
             }
+            // D92: the token lives in Settings → Zapp.
             Button(cms == .noToken ? "Set Zapp Token…" : "Change Token…") {
-                if let changed = ZappTokenPrompt.run() {
-                    toasts.success(changed)
-                    Task { await load() }
-                }
+                UserDefaults.standard.set(SettingsTab.zapp.rawValue, forKey: SettingsTab.key)
+                openSettings()
             }
             .buttonStyle(.link)
         }
@@ -235,41 +239,6 @@ private struct TableCard: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-        }
-    }
-}
-
-/// The Zapp access token prompt, from the app menu and the Info tab. The
-/// token is the one zapptool uses (accounts.applicaster.com → Users → your
-/// user → Access Tokens); it stays in the login keychain.
-enum ZappTokenPrompt {
-    /// A toast line when the token changed; nil when cancelled.
-    @MainActor
-    static func run() -> String? {
-        let alert = NSAlert()
-        alert.messageText = "Zapp Access Token"
-        alert.informativeText = """
-            With your Zapp token, App Info asks the Zapp CMS for the app version's build parameters \
-            and exact config URLs, as zapptool does. Create one at accounts.applicaster.com → Users → \
-            your user → Access Tokens. It's kept in your login keychain.
-            """
-        let field = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 320, height: 24))
-        field.placeholderString = ZappToken.read() == nil ? "Paste the token" : "A token is set — paste a new one"
-        alert.accessoryView = field
-        alert.addButton(withTitle: "Save")
-        alert.addButton(withTitle: "Cancel")
-        if ZappToken.read() != nil { alert.addButton(withTitle: "Remove Token") }
-        alert.window.initialFirstResponder = field
-        switch alert.runModal() {
-        case .alertFirstButtonReturn:
-            let token = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !token.isEmpty else { return nil }
-            return ZappToken.write(token) ? "Zapp token saved" : "Couldn't save the token to the keychain"
-        case .alertThirdButtonReturn:
-            ZappToken.write(nil)
-            return "Zapp token removed"
-        default:
-            return nil
         }
     }
 }

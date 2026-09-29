@@ -51,10 +51,10 @@ struct AgentSignalTests {
         }
         #expect(AgentNotifications.settingsURL.absoluteString
             == "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=com.applicaster.LoggerNext")
-        #expect(AgentNotifications.menuTitle(for: .denied) == "Agent Notifications: Off — Turn On…")
-        #expect(AgentNotifications.menuTitle(for: .notDetermined) == "Agent Notifications: Off — Turn On…")
-        #expect(AgentNotifications.menuTitle(for: .allowed) == "Agent Notifications: On")
-        #expect(AgentNotifications.menuTitle(for: .muted) == "Agent Notifications: Muted in Beaver")
+        #expect(AgentNotifications.status(for: .denied) == "Off")
+        #expect(AgentNotifications.status(for: .notDetermined) == "Off")
+        #expect(AgentNotifications.status(for: .allowed) == "On")
+        #expect(AgentNotifications.status(for: .muted) == "Muted in Beaver")
     }
 
     @Test("What journal_note tells the agent, per state")

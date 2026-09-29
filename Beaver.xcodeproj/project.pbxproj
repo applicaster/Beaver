@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		402C77552FB7A97700767E7C /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = 402C77542FB7A97700767E7C /* GRDB */; };
 		402C799A2FBCC12600767E7C /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 402C79992FBCC12600767E7C /* Sparkle */; };
+		40D920022FC1000000A92002 /* CHANGELOG.md in Resources */ = {isa = PBXBuildFile; fileRef = 40D920012FC1000000A92001 /* CHANGELOG.md */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -32,6 +33,7 @@
 		4036D8082FB7A18400A60095 /* Beaver.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Beaver.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		4036D8162FB7A18600A60095 /* BeaverTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = BeaverTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		4036D8202FB7A18600A60095 /* BeaverUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = BeaverUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		40D920012FC1000000A92001 /* CHANGELOG.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = CHANGELOG.md; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -89,6 +91,7 @@
 		4036D7FF2FB7A18400A60095 = {
 			isa = PBXGroup;
 			children = (
+				40D920012FC1000000A92001 /* CHANGELOG.md */,
 				4036D80A2FB7A18400A60095 /* Beaver */,
 				4036D8192FB7A18600A60095 /* BeaverTests */,
 				4036D8232FB7A18600A60095 /* BeaverUITests */,
@@ -233,6 +236,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				40D920022FC1000000A92002 /* CHANGELOG.md in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -61,8 +61,9 @@ either tool and we open them in either.
 Beaver runs an MCP server so an AI agent on the same Mac can read everything
 Beaver collected from the connected app — sessions, logs, network requests,
 storage and the app's commands. It listens on `http://127.0.0.1:9081/mcp`
-(loopback only) while Beaver is open and **Agent Access (MCP)** is on in the
-app menu. Everything the agent does is listed behind the **Agent** toolbar
+(loopback only) while Beaver is open and **Agent Access (MCP)** is on in
+Beaver → **Settings…** → Agents (⌘,, or the gear at the bottom of the
+sidebar). Everything the agent does is listed behind the **Agent** toolbar
 button, which also has **Connect agent** with these steps for your port.
 
 Set a client up once; after that just ask it to *use beaver*.
@@ -114,8 +115,8 @@ curl -s -X POST http://127.0.0.1:9081/mcp -H 'Content-Type: application/json' -d
 First prompt to try: *"Use beaver: look at the app's logs from the last 10 minutes
 and tell me about errors and failing network requests."*
 
-Port taken? `defaults write ~/Library/Preferences/com.applicaster.LoggerNext mcpPort -int 9082`,
-then toggle Agent Access off and on. Tools, recipes and the tester checklist:
+Port taken? Settings → Agents → **Port**, then **Apply** (and set your agents
+up again with the new port). Tools, recipes and the tester checklist:
 [`Beaver/Resources/MCP.md`](Beaver/Resources/MCP.md). What it can do, with full
 flows: [`plans/2026-09-23-mcp-capabilities.md`](plans/2026-09-23-mcp-capabilities.md).
 

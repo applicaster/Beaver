@@ -38,6 +38,13 @@ public struct AppInfoReport: Sendable {
     /// When the newest storage snapshot was taken; nil without storage.
     public var storageAsOf: Date?
 
+    /// The session's Zapp version id from its storage, for Settings → Zapp → Test.
+    public static func versionId(store: LogStore, sessionId: Int64) async -> String? {
+        let session = try? await store.latestStorageSnapshot(sessionId: sessionId, namespace: .session)
+        let local = try? await store.latestStorageSnapshot(sessionId: sessionId, namespace: .local)
+        return AppInfo.find(AppInfo.leaves(session: session?.dataJSON, local: local?.dataJSON), ["version_id"])?.text
+    }
+
     public static func build(store: LogStore, sessionId: Int64, http: ZappHTTP) async throws -> AppInfoReport {
         let session = try await store.latestStorageSnapshot(sessionId: sessionId, namespace: .session)
         let local = try await store.latestStorageSnapshot(sessionId: sessionId, namespace: .local)
@@ -134,18 +141,13 @@ public struct ZappHTTP: Sendable {
     public static let live = ZappHTTP(
         token: { ZappToken.read() },
         buildParams: { versionId, token in
-            guard versionId.range(of: #"^[A-Za-z0-9-]{8,64}$"#, options: .regularExpression) != nil else {
+            guard let request = buildParamsRequest(versionId: versionId, token: token) else {
                 throw ZappError("\"\(versionId)\" isn't a Zapp version id")
             }
-            var url = URLComponents(string: "https://zapp.applicaster.com/api/v1/admin/build_params")!
-            url.queryItems = [URLQueryItem(name: "app_version_id", value: versionId),
-                              URLQueryItem(name: "access_token", value: token)]
-            var request = URLRequest(url: url.url!, timeoutInterval: 10)
-            request.setValue("application/json", forHTTPHeaderField: "Accept")
             let (data, response) = try await URLSession.shared.data(for: request)
             switch (response as? HTTPURLResponse)?.statusCode ?? 0 {
             case 200: break
-            case 401, 403: throw ZappError("Zapp rejected the token — set a new one in the app menu")
+            case 401, 403: throw ZappError("Zapp rejected the token — set a new one in Settings → Zapp")
             case 404: throw ZappError("Zapp doesn't know app version \(versionId)")
             case let code: throw ZappError("Zapp answered \(code)")
             }
@@ -162,6 +164,52 @@ public struct ZappHTTP: Sendable {
             return data
         }
     )
+}
+
+extension ZappHTTP {
+    /// Nil when `versionId` isn't shaped like a Zapp version id.
+    static func buildParamsRequest(versionId: String, token: String) -> URLRequest? {
+        guard versionId.range(of: #"^[A-Za-z0-9-]{8,64}$"#, options: .regularExpression) != nil else { return nil }
+        var url = URLComponents(string: "https://zapp.applicaster.com/api/v1/admin/build_params")!
+        url.queryItems = [URLQueryItem(name: "app_version_id", value: versionId),
+                          URLQueryItem(name: "access_token", value: token)]
+        var request = URLRequest(url: url.url!, timeoutInterval: 10)
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        return request
+    }
+}
+
+/// Settings → Zapp → Test (D92): one build_params call with the token.
+public enum ZappTokenCheck: Sendable, Equatable {
+    case accepted
+    case rejected
+    /// Zapp couldn't be asked, or answered something else.
+    case unknown(String)
+
+    /// A version id Zapp doesn't have: past the token check it answers 404.
+    public static let probeVersionId = "00000000-0000-0000-0000-000000000000"
+
+    /// 200 or 404 got past the token check; 401 and 403 didn't.
+    public init(status: Int) {
+        switch status {
+        case 200, 404: self = .accepted
+        case 401, 403: self = .rejected
+        default: self = .unknown("Zapp answered \(status)")
+        }
+    }
+
+    /// Asks about `versionId` (the viewed session's) or, without a usable
+    /// one, the probe id.
+    public static func run(token: String, versionId: String?) async -> ZappTokenCheck {
+        let request = versionId.flatMap { ZappHTTP.buildParamsRequest(versionId: $0, token: token) }
+            ?? ZappHTTP.buildParamsRequest(versionId: probeVersionId, token: token)!
+        do {
+            let (_, response) = try await URLSession.shared.data(for: request)
+            return ZappTokenCheck(status: (response as? HTTPURLResponse)?.statusCode ?? 0)
+        } catch {
+            return .unknown(error.localizedDescription)
+        }
+    }
 }
 
 public struct ZappError: LocalizedError {
@@ -195,9 +243,13 @@ public enum ZappToken {
         return String(data: data, encoding: .utf8)
     }
 
+    /// Posted by `write`, so the Info tab asks the CMS again.
+    public static let didChange = Notification.Name("BeaverZappTokenDidChange")
+
     /// Nil or empty removes it.
     @discardableResult
     public static func write(_ token: String?) -> Bool {
+        defer { NotificationCenter.default.post(name: didChange, object: nil) }
         SecItemDelete(query as CFDictionary)
         guard let token = token?.trimmingCharacters(in: .whitespacesAndNewlines), !token.isEmpty else { return true }
         var q = query
