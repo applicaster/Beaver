@@ -89,7 +89,7 @@ or a release):
    "Deleted N old sessions, freed …". Picking a period in the menu deletes
    right away, no waiting day (try 7 Days). Bookmarked and imported
    sessions stay, and so does a connected device's session.
-14. Smart TVs (Beaver 4.14.0 or later): in a zapp-support checkout run
+14. Smart TVs (Beaver 4.15.0 or later): in a zapp-support checkout run
    `node scripts/tv-bridge.mjs <tv-ip>:<devtools-port> --server ws://127.0.0.1:9080 --name "Living room Vizio"`
    (Node 22+; the TV's DevTools port: Vizio 9555, Vidaa 9226, else often
    9222). The TV appears like a phone, named "Living room Vizio", model
