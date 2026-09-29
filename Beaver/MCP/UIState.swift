@@ -11,11 +11,12 @@ import Foundation
 /// The window's sidebar tabs. Raw values are what `ui_state` and
 /// `ui_show` say.
 public enum UITab: String, Sendable, CaseIterable {
-    case logs, network, storages, info, sessions, schemes
+    case logs, issues, network, storages, info, sessions, schemes
 
     public var title: String {
         switch self {
         case .logs: "Log feed"
+        case .issues: "Issues"
         case .network: "Network"
         case .storages: "Storages"
         case .info: "Info"

@@ -36,7 +36,7 @@ enum UITools {
         description: "Use to point the user at something in Beaver's window: a tab, a session, a log or network filter, a storage layer, a selected event or request. It works in the background — nothing takes focus. reveal: true brings Beaver forward; use it only when the user asks to see it.",
         kind: .change,
         inputSchema: ToolSchema.object([
-            "tab": ToolSchema.string("logs, network, storages, info (App and Device Info), sessions or schemes (the Scheme Generator). Omitted: follows what you set (filter → logs, networkFilter → network, storage → storages).",
+            "tab": ToolSchema.string("logs, issues (errors and warnings grouped), network, storages, info (App and Device Info), sessions or schemes (the Scheme Generator). Omitted: follows what you set (filter → logs, networkFilter → network, storage → storages).",
                                      oneOf: UITab.allCases.map(\.rawValue)),
             "sessionId": ToolSchema.integer("Session to show. Omitted: the one on screen, else the live one, else the most recent."),
             "filter": ToolSchema.filter,
@@ -200,7 +200,7 @@ enum UITools {
                     } else {
                         notes.append("nothing matches the network filter, so nothing is selected")
                     }
-                case .storages, .info, .sessions, .schemes:
+                case .issues, .storages, .info, .sessions, .schemes:
                     throw ToolError("select \"first\" / \"last\" works on the logs and network tabs. Example: ui_show(tab: \"network\", networkFilter: {status: \"errors\"}, select: \"first\").")
                 }
             }
@@ -226,6 +226,7 @@ enum UITools {
     static func tab(_ raw: String) throws -> UITab {
         switch raw.trimmingCharacters(in: .whitespaces).lowercased() {
         case "logs", "log", "logfeed", "log feed", "log_feed", "feed", "events": return .logs
+        case "issues", "issue", "problems", "errors", "warnings": return .issues
         case "network", "requests", "request", "net", "http": return .network
         case "storages", "storage": return .storages
         case "info", "app info", "app_info", "appinfo", "device info", "device_info", "app", "device": return .info
@@ -233,7 +234,7 @@ enum UITools {
         case "schemes", "scheme", "scheme generator", "scheme_generator", "schemegenerator", "deeplink", "deep link", "links":
             return .schemes
         default:
-            throw ToolError("Unknown tab \"\(raw)\". Use logs, network, storages, info, sessions or schemes. Example: ui_show(tab: \"network\").")
+            throw ToolError("Unknown tab \"\(raw)\". Use logs, issues, network, storages, info, sessions or schemes. Example: ui_show(tab: \"network\").")
         }
     }
 
@@ -399,7 +400,7 @@ enum UITools {
             ui.networkFilter.isEmpty ? nil : describe(ui.networkFilter)
         case .storages:
             ui.storageLayer.displayName + (ui.storageSearch.isEmpty ? "" : ", search \"\(ui.storageSearch)\"")
-        case .info, .sessions:
+        case .issues, .info, .sessions:
             nil
         case .schemes:
             ui.scheme.url
@@ -408,7 +409,7 @@ enum UITools {
         let selected: String? = switch ui.tab {
         case .logs: ui.selectedEventId.map { "event #\($0) selected" }
         case .network: ui.selectedNetworkId.map { "request #\($0) selected" }
-        case .storages, .info, .sessions, .schemes: nil
+        case .issues, .storages, .info, .sessions, .schemes: nil
         }
         if let selected { text += "; " + selected }
         return text
@@ -451,6 +452,7 @@ enum UITools {
         where !names.isEmpty {
             o[key] = .array(names.sorted().map(JSON.string))
         }
+        if let p = f.pattern { o["pattern"] = .string(p) }
         return .object(o)
     }
 

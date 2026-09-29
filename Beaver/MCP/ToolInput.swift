@@ -208,7 +208,7 @@ extension ToolContext {
 
     static let filterKeys = [
         "minLevel", "search", "searchIsRegex", "exclude", "excludeIsRegex",
-        "searchPayloads", "subsystems", "excludeSubsystems", "categories", "excludeCategories",
+        "searchPayloads", "subsystems", "excludeSubsystems", "categories", "excludeCategories", "pattern",
     ]
 
     /// `filter` is normally an object, but a weak client sometimes sends it
@@ -244,6 +244,7 @@ extension ToolContext {
         f.exclude = try a.string("exclude").flatMap(Self.trimmedNonEmpty)
         f.excludeIsRegex = try a.bool("excludeIsRegex") ?? false
         f.searchPayloads = try a.bool("searchPayloads") ?? false
+        f.pattern = try a.string("pattern")
         for (term, isRegex, key) in [(f.search, f.searchIsRegex, "search"), (f.exclude, f.excludeIsRegex, "exclude")] {
             if isRegex, let term, !Filter.isValidRegex(term) {
                 throw ToolError("\(key) \"\(term)\" is not a valid regular expression. Drop \(key)IsRegex to search for the text as is.")
@@ -263,7 +264,9 @@ extension ToolContext {
         for (key, facet, path, isInclude) in facets {
             guard let patterns = try a.strings(key), !patterns.isEmpty else { continue }
             let available = try await store.facetCounts(sessionId: sessionId, facet: facet, filter: .none).map(\.value)
-            let r = ToolInput.resolveNames(patterns, among: available)
+            // "" is events without a subsystem (an issue's can be); the facet list drops it.
+            var r = ToolInput.resolveNames(patterns.filter { !$0.isEmpty }, among: available)
+            if patterns.contains("") { r.resolved.append("") }
             if isInclude, let miss = r.misses.first {
                 let noun = facet == .subsystem ? "subsystem" : "category"
                 throw ToolError("No \(noun) matches \"\(miss.pattern)\" in session #\(sessionId). "
@@ -339,6 +342,7 @@ public enum ToolText {
         if !f.excludedSubsystems.isEmpty { parts.append("not subsystems " + f.excludedSubsystems.sorted().joined(separator: ", ")) }
         if !f.categories.isEmpty { parts.append("categories " + f.categories.sorted().joined(separator: ", ")) }
         if !f.excludedCategories.isEmpty { parts.append("not categories " + f.excludedCategories.sorted().joined(separator: ", ")) }
+        if let p = f.pattern { parts.append("pattern \"\(p)\"") }
         return parts.isEmpty ? "no filter" : parts.joined(separator: "; ")
     }
 

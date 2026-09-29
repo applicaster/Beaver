@@ -289,6 +289,22 @@ enum Schema {
             """)
         }
 
+        // D95: issue signatures marked as known noise, per app — bundle id,
+        // else app name ('' when unknown), D81's sameApp. Not tied to a
+        // session: they apply to the app's future sessions.
+        migrator.registerMigration("v12_ignored_issue", foreignKeyChecks: .immediate) { db in
+            try db.execute(sql: """
+                CREATE TABLE ignored_issue (
+                    app_package TEXT    NOT NULL,
+                    app_name    TEXT    NOT NULL,
+                    subsystem   TEXT    NOT NULL,
+                    pattern     TEXT    NOT NULL,
+                    created_at  INTEGER NOT NULL,
+                    PRIMARY KEY (app_package, app_name, subsystem, pattern)
+                );
+            """)
+        }
+
         return migrator
     }
 }

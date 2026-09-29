@@ -3196,3 +3196,54 @@ the step order of D90.
   second time beside the inbound loop, and Disconnect needing its own
   route to the bridge); bundle and run the Node script (Node isn't on
   testers' Macs); keep D89 only.
+
+## D95. Issues: warnings and errors grouped by signature, ignorable per app
+
+**Status:** Accepted (2026-09-29).
+
+- **Decision:** an **Issues** tab (sidebar, under Log feed) and
+  `issues_list` show a session's warnings and errors (or errors only)
+  grouped by **signature** = subsystem + `SessionCompare.pattern` of the
+  first 300 characters — exactly D81's grouping, so a signature means the
+  same thing in Compare and Issues. Each group: worst level, count,
+  first/last event id and time, the first message as an example, and 30
+  histogram buckets over the session's first → last event. Sort: newest
+  (last seen), most frequent, errors first. The badge counts error groups;
+  the Log feed's filter bar has a ⚠ chip; Sessions' details pane shows the
+  counts and the top three.
+- **SQL, for 100k+ events** (`LogStore.issues`): identical lines per time
+  bucket are grouped first, so `BEAVER_PATTERN()` runs once per distinct
+  line and bucket, only on warning/error rows (`idx_event_level`); then per
+  pattern and bucket; then per pattern with the buckets as `b:n` pairs.
+  100k events with 40k distinct warnings/errors: ~0.1 s (release). At most
+  500 groups, worst and most frequent first; past that the result says
+  it's capped.
+- **A row → the Log feed:** a new `Filter.pattern` (also the `pattern` key
+  of every MCP log filter) adds `BEAVER_PATTERN(substr(message, 1, 300)) = ?`
+  — the very expression the group was built with — to the subsystem chip
+  and the Issues view's level. That reproduces the group exactly, first
+  event selected. The query syntax (D88) couldn't: it is zapp-support's,
+  rule for rule, and a regex built from a pattern over- or under-matches
+  (`<n>` inside words, literal `<n>` in a message, the 300-character cut).
+  The pattern shows as a removable orange chip; it is not saved with a
+  named filter (like Clear), and export writes the rows it shows (format
+  unchanged).
+- **Ignore:** known noise is marked per **app** — D81's `sameApp`: bundle
+  id when both sides know it, else the app name — in a new table
+  `ignored_issue` (migration `v12_ignored_issue`), so it applies to that
+  app's later sessions. A session naming no app can't ignore (Beaver
+  couldn't tell its next sessions apart). Ignored groups are hidden and
+  counted ("Show ignored (N)"), and come back with Unignore.
+- **Agents:** `issues_list(sessionId?, minLevel?, includeIgnored?, limit?)`
+  with each group's `signature` and the `logs_query` filter for it, and
+  `issues_ignore(signature, ignored)`. The ignore list is the person's
+  setting, and hiding an error from them is the risk; but CLAUDE.md gives
+  every capability a tool, and a person asking their agent "ignore that
+  one" is the use. So the tool exists, is journaled like every call, and
+  its description says: only when the user asks.
+- **Live:** the view model re-reads on appends at most once a second (4×
+  the last query's time if that's longer); signatures new since the first
+  read are highlighted for four seconds.
+- **Alternatives:** grouping in Swift (every warning read into memory);
+  a separate normaliser (two meanings of "the same line"); ignoring per
+  session (noise comes back every run); per subsystem only (too coarse).

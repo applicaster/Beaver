@@ -34,6 +34,8 @@ public actor LogStore {
         /// A batch of live events could not be written and is lost.
         case writeFailed(message: String)
         case agentActivityChanged
+        /// An issue signature was ignored or unignored (D95).
+        case ignoredIssuesChanged
     }
 
     public enum Source {
@@ -884,6 +886,106 @@ public actor LogStore {
         }
     }
 
+    // MARK: - Issues (D95)
+
+    /// Warnings and errors (or errors only) grouped like `messagePatterns`:
+    /// identical lines per time bucket first, so the pattern runs once per
+    /// distinct line and bucket; then per pattern and bucket; then per
+    /// pattern with the buckets as `b:n` pairs. Worst level and most
+    /// frequent first, at most `limit`; ignored groups are marked, not dropped.
+    public func issues(sessionId: Int64, minLevel: LogLevel = .warning,
+                       limit: Int = Issues.cap) async throws -> Issues.Report {
+        try await dbQueue.read { db in
+            let levels = minLevel >= .error ? "'error'" : "'warning', 'error'"
+            let span = try Row.fetchOne(db, sql: """
+                SELECT (SELECT MIN(timestamp_ms) FROM event WHERE session_id = ?) AS lo,
+                       (SELECT MAX(timestamp_ms) FROM event WHERE session_id = ?) AS hi
+            """, arguments: [sessionId, sessionId])
+            guard let lo = span?["lo"] as Int64?, let hi = span?["hi"] as Int64? else { return .empty }
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT subsystem, pattern, MAX(sev) AS sev, SUM(n) AS n, MIN(first) AS first, MAX(last) AS last,
+                       MIN(first_ms) AS first_ms, MAX(last_ms) AS last_ms, group_concat(b || ':' || n) AS hist
+                FROM (SELECT subsystem, pattern, b, MAX(sev) AS sev, SUM(n) AS n, MIN(first) AS first,
+                             MAX(last) AS last, MIN(first_ms) AS first_ms, MAX(last_ms) AS last_ms
+                      FROM (SELECT subsystem, BEAVER_PATTERN(m) AS pattern, b, sev, n, first, last, first_ms, last_ms
+                            FROM (SELECT subsystem, substr(message, 1, 300) AS m, (timestamp_ms - ?) * ? / ? AS b,
+                                         COUNT(*) AS n, MIN(id) AS first, MAX(id) AS last,
+                                         MIN(timestamp_ms) AS first_ms, MAX(timestamp_ms) AS last_ms,
+                                         MAX(level = 'error') + 3 AS sev
+                                  FROM event WHERE session_id = ? AND level IN (\(levels))
+                                  GROUP BY subsystem, m, b))
+                      GROUP BY subsystem, pattern, b)
+                GROUP BY subsystem, pattern
+                ORDER BY sev DESC, n DESC
+                LIMIT ?
+            """, arguments: [lo, Issues.buckets, hi - lo + 1, sessionId, limit + 1])
+            let capped = rows.count > limit
+            let kept = rows.prefix(limit)
+            let firsts = kept.map { $0["first"] as Int64 }
+            var examples: [Int64: String] = [:]
+            if !firsts.isEmpty {
+                for row in try Row.fetchAll(db, sql: """
+                    SELECT id, substr(message, 1, 2000) AS m FROM event
+                    WHERE id IN (\(firsts.map { _ in "?" }.joined(separator: ",")))
+                """, arguments: StatementArguments(firsts)) {
+                    examples[row["id"]] = row["m"]
+                }
+            }
+            let ignored = try Self.ignoredSignatures(sessionId: sessionId, db: db)
+            func date(_ ms: Int64) -> Date { Date(timeIntervalSince1970: TimeInterval(ms) / 1000) }
+            return Issues.Report(groups: kept.map { row in
+                let subsystem: String = row["subsystem"], pattern: String = row["pattern"]
+                let first: Int64 = row["first"]
+                return Issues.Group(
+                    subsystem: subsystem, pattern: pattern,
+                    level: LogLevel(numericLevel: row["sev"]) ?? .warning,
+                    count: row["n"], firstId: first, lastId: row["last"],
+                    firstAt: date(row["first_ms"]), lastAt: date(row["last_ms"]),
+                    example: examples[first] ?? pattern,
+                    histogram: Issues.histogram(row["hist"]),
+                    ignored: ignored.contains(Issues.signature(subsystem: subsystem, pattern: pattern)))
+            }, capped: capped)
+        }
+    }
+
+    /// D81's `sameApp` in SQL: the bundle id when both know it, else the name.
+    private static let sameAppSQL = """
+        ((app_package <> '' AND :package <> '' AND app_package = :package)
+         OR ((app_package = '' OR :package = '') AND app_name <> '' AND app_name = :name))
+    """
+
+    private static func ignoredSignatures(sessionId: Int64, db: Database) throws -> Set<String> {
+        guard let session = try fetchSession(id: sessionId, db: db), let app = Issues.app(of: session) else { return [] }
+        return Set(try Row.fetchAll(db, sql: "SELECT subsystem, pattern FROM ignored_issue WHERE \(sameAppSQL)",
+                                    arguments: ["package": app.package, "name": app.name])
+            .map { Issues.signature(subsystem: $0["subsystem"], pattern: $0["pattern"]) })
+    }
+
+    /// Marks a signature as known noise for the session's app, or clears
+    /// the mark; it then applies to every session of that app (D95).
+    /// Throws `Issues.UnknownApp` for a session that names no app.
+    public func setIssueIgnored(_ ignored: Bool, subsystem: String, pattern: String,
+                                sessionId: Int64) async throws {
+        try await dbQueue.write { db in
+            guard let session = try Self.fetchSession(id: sessionId, db: db),
+                  let app = Issues.app(of: session) else { throw Issues.UnknownApp() }
+            let args: StatementArguments = ["package": app.package, "name": app.name,
+                                            "subsystem": subsystem, "pattern": pattern]
+            if ignored {
+                try db.execute(sql: """
+                    INSERT OR IGNORE INTO ignored_issue (app_package, app_name, subsystem, pattern, created_at)
+                    VALUES (:package, :name, :subsystem, :pattern, :now)
+                """, arguments: args + ["now": Int64(Date().timeIntervalSince1970 * 1000)])
+            } else {
+                try db.execute(sql: """
+                    DELETE FROM ignored_issue
+                    WHERE subsystem = :subsystem AND pattern = :pattern AND \(Self.sameAppSQL)
+                """, arguments: args)
+            }
+        }
+        broadcast(.ignoredIssuesChanged)
+    }
+
     // MARK: - Bookmarks
 
     /// Add a bookmark for `eventId` in `sessionId`. If already
@@ -1695,6 +1797,13 @@ public actor LogStore {
             clauses: &clauses,
             args: &args
         )
+
+        // An issue's signature (D95): the expression `issues` groups by.
+        // Last, so the cheap tests above run first.
+        if let pattern = filter.pattern {
+            clauses.append("BEAVER_PATTERN(substr(message, 1, 300)) = ?")
+            args.append(pattern)
+        }
 
         return ("WHERE " + clauses.joined(separator: " AND "), args)
     }

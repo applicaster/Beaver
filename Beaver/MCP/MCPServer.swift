@@ -23,7 +23,8 @@ public struct MCPServer: Sendable {
         toolboxes_list and run one with tools_call; deviceId "beaver" reaches Beaver's own tools the same way. \
         A smart TV has no SDK: connect it with devices_connect_tv (its IP and DevTools port); it only \
         sends logs. If no device is connected you can still read past sessions \
-        (sessions_list) and log files the user has (sessions_import). When it works in one session and \
+        (sessions_list) and log files the user has (sessions_import). For what's broken in a session, \
+        issues_list: its warnings and errors grouped by signature, each with a filter for its events. When it works in one session and \
         not in another (app versions, devices), sessions_compare(a: <works>, b: <fails>). Omitting sessionId means the \
         live session (with several, the viewed one if live, else the newest), else the one the user \
         is viewing, else the most recent. Before filtering by \

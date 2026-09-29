@@ -219,6 +219,16 @@ CREATE TABLE agent_activity (
   session_id INTEGER REFERENCES session(id) ON DELETE SET NULL,
   seen INTEGER NOT NULL DEFAULT 0
 );
+
+-- Added in migration v12 (D95). Issue signatures marked as known noise,
+-- per app: bundle id, else app name ('' when unknown), matched like
+-- SessionCompare.sameApp. Not tied to a session.
+CREATE TABLE ignored_issue (
+  app_package TEXT NOT NULL, app_name TEXT NOT NULL,
+  subsystem TEXT NOT NULL, pattern TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (app_package, app_name, subsystem, pattern)
+);
 ```
 
 **Operations.**
@@ -411,6 +421,9 @@ Beaver/
 │   │   │   ├── LogFeedView.swift
 │   │   │   ├── LogFeedViewModel.swift
 │   │   │   └── LogFeedTable.swift
+│   │   ├── Issues/
+│   │   │   ├── IssuesView.swift       (D95 Issues tab)
+│   │   │   └── IssuesViewModel.swift
 │   │   ├── Storages/
 │   │   │   ├── StoragesView.swift
 │   │   │   └── StoragesViewModel.swift
@@ -429,6 +442,7 @@ Beaver/
 │   └── Support/
 │       ├── Highlighting.swift
 │       ├── NetworkInterface.swift
+│       ├── Issues.swift           (D95; issues_list and the Issues tab)
 │       └── SessionCompare.swift   (D81; sessions_compare and the Compare sheet)
 ├── BeaverTests/             (Swift Testing)
 │   ├── ProtocolDecoderTests.swift
