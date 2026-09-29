@@ -30,9 +30,7 @@ struct DevicePopover: View {
                     Toggle("Default for agents", isOn: defaultBinding)
                         .toggleStyle(.checkbox)
                         .disabled(defaultIsAnotherSession)
-                        .help(defaultIsAnotherSession
-                              ? "Another session of this device is the default"
-                              : "Agents' device tools use this app when a call names no device")
+                        .help(defaultIsAnotherSession ? Self.defaultTakenHelp : Self.defaultHelp)
                     Spacer()
                     Button(role: .destructive) {
                         Task { await env.disconnect(session.id) }
@@ -52,6 +50,19 @@ struct DevicePopover: View {
         .frame(maxWidth: width == nil ? .infinity : nil, alignment: .leading)
         .task(id: session.id) { if isLive { await reload() } }
     }
+
+    /// D76, said so a person knows what ticking it changes.
+    static let defaultHelp = """
+        When several apps are connected, an AI agent's commands, storage changes and \
+        app tools go to this app if the agent doesn't name one. Without a default, \
+        such a call fails and the agent has to pick a device.
+        Follows this device across app restarts (by its device id). \
+        Kept until Beaver quits. Reading logs, network and storage isn't affected.
+        """
+    static let defaultTakenHelp = """
+        Another live session of this same device is already the agents' default \
+        (it follows the device across restarts). Untick it there to change it.
+        """
 
     private var title: String {
         (session.appName ?? session.appPackage ?? "Device #\(session.id)")
