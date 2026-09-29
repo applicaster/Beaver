@@ -3044,3 +3044,40 @@ and `sessions_compare` both do; the menus and pickers only offer them.
   `register` as an unknown frame and the TV as an anonymous device (no name,
   no restart following, 5-second MCP timeouts, commands that silently go
   nowhere).
+## D93. Only main's newest commit releases
+
+**Status:** Accepted (2026-09-29).
+
+- **Decision:** a release job whose commit main has moved past steps
+  aside: it halts with exit 0 (the job is green) and builds, tags and
+  publishes nothing. The job on the newest commit releases everything
+  since the last tag (D23 computes the version from all of it, D90 moves
+  all of `[Unreleased]`). `scripts/release-guard.sh` does both checks:
+  `start`, right after checkout, and `push`, for the version commit. A
+  rejected push counts as "main moved on" only when main has a commit the
+  job lacks that runs its own pipeline (no `[skip ci]`); anything else —
+  auth, network, branch protection — fails the job. The tag is created
+  only after the push lands, so a halted job leaves no tag, GitHub
+  Release, appcast or published zip. `make test` runs `--check`.
+- **CI's own commits:** `version X.Y.Z [skip ci]` and `appcast: …
+  [skip ci]` start no pipeline, so they never make a job step aside.
+  When only they are ahead of the job's commit, `start` fast-forwards to
+  main's tip and builds from there (the appcast then keeps the previous
+  entry).
+- **One job at a time:** the release job has `serial-group:
+  <slug>/release`, so jobs run in merge order and the next starts after
+  the previous pushed its appcast commit. A merge that lands after the
+  release is out doesn't stop the appcast push: it rebases onto main
+  (the commit only touches `docs/appcast.xml`) and pushes again.
+- **Why:** each merge to main starts a release job; the version commit
+  is pushed after the ~4 min build. When a second merge landed in that
+  window, the first job's `git push HEAD:main` was rejected
+  (non-fast-forward) and the job failed red — #37, #44, #46, #51 and #52
+  all did, and the next merge's job shipped their changes. That
+  combined release was already the right outcome; the red builds and the
+  wasted notarizations were not.
+- **Alternatives:** CircleCI's "Auto-cancel redundant workflows" never
+  cancels pipelines on the default branch, so it can't help here;
+  rebasing the version commit onto the newer main (its tag would point at
+  code the built zip doesn't contain, and both jobs would release); a
+  GitHub merge queue (more process for a one-person repo).

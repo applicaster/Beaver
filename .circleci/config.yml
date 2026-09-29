@@ -11,6 +11,8 @@ version: 2.1
 #                      pbxproj is already released on GitHub, the job
 #                      halts cleanly. So most merges (without a version
 #                      bump) are a no-op release-wise.
+#                      Only main's newest commit releases (D93): a job
+#                      whose commit main has moved past halts cleanly.
 #
 # Required CircleCI project environment variables — set under
 # Project Settings → Environment Variables:
@@ -106,6 +108,20 @@ jobs:
     executor: macos
     steps:
       - checkout
+
+      # ── Only the newest commit on main releases (D93) ───────────────
+      #    Merges in quick succession each start this job. An older one
+      #    halts here (exit 0, nothing built or published); the newest
+      #    releases everything since the last tag. Moves HEAD onto main's
+      #    tip when only CI's own [skip ci] commits are ahead of it.
+      - run:
+          name: Halt unless this is main's newest commit
+          command: |
+            set -euo pipefail
+            REMOTE="https://x-access-token:${GITHUB_TOKEN}@github.com/applicaster/Beaver.git"
+            rc=0; ./scripts/release-guard.sh start "$REMOTE" || rc=$?
+            if [ "$rc" -eq 3 ]; then circleci-agent step halt; exit 0; fi
+            exit "$rc"
 
       # ── Install the GitHub CLI — needed for release-exists check
       #    and for publishing the release at the end. CircleCI macOS
@@ -217,10 +233,15 @@ jobs:
             if ! git diff --quiet -- "$PBXPROJ" CHANGELOG.md; then
               git add "$PBXPROJ" CHANGELOG.md
               git commit -m "version ${BEAVER_VERSION} [skip ci]"
-              git push "$REMOTE" HEAD:main
             else
-              echo "ℹ️  pbxproj and CHANGELOG.md clean — no bump commit to push."
+              echo "ℹ️  pbxproj and CHANGELOG.md clean — no bump commit."
             fi
+            # Push even without a bump commit: a rejected push is how we
+            # learn main moved on during the build. Then a newer merge
+            # releases instead (D93) — halt before tagging or publishing.
+            rc=0; ./scripts/release-guard.sh push "$REMOTE" || rc=$?
+            if [ "$rc" -eq 3 ]; then circleci-agent step halt; exit 0; fi
+            [ "$rc" -eq 0 ] || exit "$rc"
 
             # 2. Tag the (now possibly bump-) commit if not already tagged.
             if ! git rev-parse "${BEAVER_VERSION}" >/dev/null 2>&1; then
@@ -280,8 +301,14 @@ jobs:
             git config user.email "ci@applicaster.com"
             git add docs/appcast.xml
             git commit -m "appcast: Beaver ${BEAVER_VERSION} [skip ci]"
-            git push "https://x-access-token:${GITHUB_TOKEN}@github.com/applicaster/Beaver.git" \
-                HEAD:main
+            REMOTE="https://x-access-token:${GITHUB_TOKEN}@github.com/applicaster/Beaver.git"
+            # The release is out by now, so a merge that landed meanwhile
+            # doesn't stop this: put the appcast commit on top of it (D93).
+            if ! git push "$REMOTE" HEAD:main; then
+              git fetch --quiet "$REMOTE" main
+              git rebase FETCH_HEAD
+              git push "$REMOTE" HEAD:main
+            fi
 
       - store_artifacts:
           path: build
@@ -325,6 +352,9 @@ workflows:
   on-merge-to-main:
     jobs:
       - release:
+          # One release job at a time, in merge order (D93). A queued job
+          # starts after the previous one pushed its appcast commit.
+          serial-group: << pipeline.project.slug >>/release
           filters:
             branches:
               only: main
