@@ -108,9 +108,9 @@ struct InfoView: View {
             TableCard(title: "Screens (\(r.screens.count), \(r.screensSource))",
                       rows: r.screens.map { [$0.name, $0.id, $0.type ?? ""] }, copy: [1],
                       empty: "No screens found: the full list needs rivers.json or layout.json, and no visits were logged.")
-            if !r.feedMapping.isEmpty {
-                TableCard(title: "Feed mapping — entry type → screen (\(r.feedMapping.count), layout.json)",
-                          rows: r.feedMapping.map { [$0.type, $0.screenName ?? "no such screen", $0.screenId] }, copy: [2],
+            if !r.typeMapping.isEmpty {
+                TableCard(title: "Type mapping — entry type → screen (\(r.typeMapping.count), layout.json)",
+                          rows: r.typeMapping.map { [$0.type, $0.screenName ?? "no such screen", $0.screenId] }, copy: [2],
                           empty: "")
             }
             TableCard(title: "Plugins (\(r.plugins.count), \(r.pluginsSource))",

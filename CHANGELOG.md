@@ -27,12 +27,12 @@ does the same for a manual release.
   Session** (Zapp's current files). A file shared by several sessions is
   stored once. Agents: `app_config` reads a saved file by path
   (`general_settings.layout_id`, `screens.0.name`).
-- **Info → Feed mapping**: which screen opens each entry type (layout.json's
+- **Info → Type mapping**: which screen opens each entry type (layout.json's
   `content_types`: `audio` → Audio Player). Info is laid out anew: app
   identity, device, user agent and advertising on the left, so every id is
-  together; screens, feed mapping, plugins, cell styles and config files on
+  together; screens, type mapping, plugins, cell styles and config files on
   the right. Ids in the tables have a copy button on hover. Agents get the
-  feed mapping in `app_info`.
+  type mapping in `app_info`.
 
 ### Fixed
 - **Info shows the versions the app runs, not Zapp's latest build.** With a

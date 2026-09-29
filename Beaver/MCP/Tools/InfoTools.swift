@@ -12,7 +12,7 @@ enum InfoTools {
     static let appInfo = MCPTool(
         name: "app_info",
         title: "App and device info",
-        description: "Use to learn what app and device a session is: app, SDK and QuickBrick versions, Zapp ids, the layout's screens, feed mapping (entry type → screen), cell styles and plugins, and the device's model, OS, language, country and advertising id — each value with where it came from (storage, a config file, logs) — the app's own storage, so the build it runs, not Zapp's latest. Config files come from Zapp's public bucket, at the URLs the app keeps in storage.",
+        description: "Use to learn what app and device a session is: app, SDK and QuickBrick versions, Zapp ids, the layout's screens, type mapping (entry type → screen), cell styles and plugins, and the device's model, OS, language, country and advertising id — each value with where it came from (storage, a config file, logs) — the app's own storage, so the build it runs, not Zapp's latest. Config files come from Zapp's public bucket, at the URLs the app keeps in storage.",
         kind: .read,
         inputSchema: ToolSchema.object([
             "sessionId": ToolSchema.sessionId,
@@ -41,12 +41,12 @@ enum InfoTools {
         let screenLines = r.screens.isEmpty ? "  none found"
             : r.screens.map { s -> String in "  \(s.name)  \(s.id)" + (s.type.map { "  " + $0 } ?? "") }.joined(separator: "\n")
         let pluginLines = r.plugins.map { p -> String in "  " + p.id + (p.version.map { " " + $0 } ?? "") }.joined(separator: "\n")
-        let feedLines = r.feedMapping.map { f -> String in "  \(f.type) → \(f.screenName ?? "(no such screen)")  \(f.screenId)" }
+        let typeLines = r.typeMapping.map { f -> String in "  \(f.type) → \(f.screenName ?? "(no such screen)")  \(f.screenId)" }
             .joined(separator: "\n")
         let cellLines = r.cellStyles.map { c -> String in "  \(c.id)  \(c.plugin)" }.joined(separator: "\n")
         var sections: [String?] = [lines("Identity & versions", r.identity)]
         sections.append("Screens (\(r.screens.count), \(r.screensSource)):\n" + screenLines)
-        sections.append(r.feedMapping.isEmpty ? nil : "Feed mapping — entry type → screen (\(r.feedMapping.count), layout.json):\n" + feedLines)
+        sections.append(r.typeMapping.isEmpty ? nil : "Type mapping — entry type → screen (\(r.typeMapping.count), layout.json):\n" + typeLines)
         sections.append("Plugins (\(r.plugins.count), \(r.pluginsSource)):\n" + pluginLines)
         sections.append(r.cellStyles.isEmpty ? nil : "Cell styles (\(r.cellStyles.count), \(r.cellStylesSource)):\n" + cellLines)
         sections.append(lines("Device", r.device.identity + r.device.hardware))
@@ -67,7 +67,7 @@ enum InfoTools {
                 "plugins": .array(r.plugins.map { ["id": .string($0.id), "version": JSON($0.version)] }),
                 "pluginsSource": .string(r.pluginsSource),
                 "cellStyles": .array(r.cellStyles.map { ["id": .string($0.id), "plugin": .string($0.plugin)] }),
-                "feedMapping": .array(r.feedMapping.map {
+                "typeMapping": .array(r.typeMapping.map {
                     ["type": .string($0.type), "screenId": .string($0.screenId), "screenName": JSON($0.screenName)]
                 }),
             ],

@@ -161,8 +161,8 @@ public enum AppInfo {
         public let type: String?
     }
 
-    /// Feed mapping: an entry's type → the screen that opens it.
-    public struct FeedType: Sendable, Equatable {
+    /// Type mapping: an entry's type → the screen that opens it.
+    public struct TypeMapping: Sendable, Equatable {
         public let type: String
         public let screenId: String
         /// Nil when the layout has no screen with that id.
@@ -356,15 +356,15 @@ public enum AppInfo {
         }
     }
 
-    /// layout.json's `content_types` (Zapp's feed mapping), by type.
-    public static func feedMapping(fromLayout json: Any) -> [FeedType] {
+    /// layout.json's `content_types` (Zapp's type mapping), by type.
+    public static func typeMapping(fromLayout json: Any) -> [TypeMapping] {
         guard let layout = json as? [String: Any], let types = layout["content_types"] as? [String: Any] else { return [] }
         let names = Dictionary(list(layout["screens"]).compactMap { s in
             (s["id"] as? String).map { ($0, s["name"] as? String ?? "") }
         }, uniquingKeysWith: { a, _ in a })
         return types.keys.sorted().compactMap { type in
             guard let id = (types[type] as? [String: Any])?["screen_id"] as? String else { return nil }
-            return FeedType(type: type, screenId: id, screenName: names[id])
+            return TypeMapping(type: type, screenId: id, screenName: names[id])
         }
     }
 
