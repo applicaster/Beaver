@@ -48,6 +48,7 @@ build:
 # that module and fails before running anything.
 test:
 	./scripts/changelog-release.sh --check
+	./scripts/release-guard.sh --check
 	swift test
 
 release:

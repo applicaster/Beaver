@@ -202,6 +202,10 @@ CircleCI does the rest in ~5-7 min. The release appears at
 Sparkle appcast picks it up so installed Beaver instances see the
 update on their next launch.
 
+Merging several PRs in a row is fine: only the newest commit on `main`
+releases, and it ships everything since the last tag. Jobs for older
+commits halt green with "main has moved on" and publish nothing (D93).
+
 **Required CircleCI environment variables** (set once under Project
 Settings → Environment Variables): `APPLE_ID`, `APPLE_APP_PASSWORD`,
 `APPLE_TEAM_ID`, `DEVELOPER_ID_APPLICATION`, `DEVELOPER_ID_P12_BASE64`,
