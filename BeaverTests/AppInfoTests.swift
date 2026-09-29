@@ -135,7 +135,40 @@ struct AppInfoTests {
         #expect(r.screensSource == "rivers.json")
         #expect(r.plugins == [AppInfo.Plugin(id: "hero", version: "2.1")])
         #expect(r.configs[.layout]?.error != nil)
-        #expect(fetched.value.sorted() == ["layout.json", "plugin_configurations.json", "rivers.json"])
+        #expect(fetched.value.sorted() == ["layout.json", "plugin_configurations.json", "remote_configurations.json", "rivers.json"])
+    }
+
+    @Test("Every launch-time file is listed without a token; only the parsed ones are downloaded")
+    func allConfigFiles() async throws {
+        let store = try LogStore(source: .inMemory)
+        let s = try await store.createSession(source: .live)
+        try await store.recordStorageSnapshot(sessionId: s.id, namespace: .session, dataJSON: #"""
+            {"applicaster.v2":{"version_name":"0.0.8-dev","bundleIdentifier":"com.app","accountsAccountId":"acct1",
+              "store":"apple_store","app_family_id":"6420"}}
+            """#)
+        let host = "https://assets-secure.applicaster.com/zapp/accounts/acct1"
+        let layouts = host + "/app_families/6420/layouts/L1"
+        let fetched = LockedBox<[String]>([])
+        let http = ZappHTTP(token: { nil }, buildParams: { _, _ in [:] }, get: { url in
+            fetched.mutate { $0.append(url.lastPathComponent) }
+            guard url.lastPathComponent == "remote_configurations.json" else { return Data("{}".utf8) }
+            return Data(#"""
+                {"general_settings":{"cell_styles_json_url":"\#(layouts)/cell_styles.json",
+                  "presets_mapping_json_url":"\#(layouts)/presets_mapping.json",
+                  "tablet_cell_styles_json_url":"https://evil.example/cell_styles.json"}}
+                """#.utf8)
+        })
+        let r = try await AppInfoReport.build(store: store, sessionId: s.id, http: http)
+        let app = host + "/apps/com.app/apple_store/0.0.8-dev"
+        #expect(r.configs[.remoteConfigurations]?.url == app + "/remote_configurations/remote_configurations.json")
+        #expect(r.configs[.pluginConfigurations]?.url == app + "/plugin_configurations/plugin_configurations.json")
+        #expect(r.configs[.pipesEndpoints]?.url == host + "/app_families/6420/data_source_providers/endpoints.json")
+        #expect(r.configs[.cellStyles] == .init(url: layouts + "/cell_styles.json", found: "remote_configurations.json", error: nil))
+        #expect(r.configs[.presetsMapping]?.url == layouts + "/presets_mapping.json")
+        #expect(r.configs[.tabletCellStyles] == nil)
+        #expect(!fetched.value.contains { ["cell_styles.json", "presets_mapping.json", "endpoints.json"].contains($0) })
+        #expect(AppInfo.kind(of: layouts + "/cell_styles.json") == .cellStyles)
+        #expect(!AppInfo.isAllowedConfigURL(host + "/app_families/6420"))
     }
 
     @Test("Without a token the CMS isn't asked")

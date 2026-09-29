@@ -13,7 +13,7 @@ public struct AppInfoReport: Sendable {
     public struct Config: Sendable, Equatable {
         public let url: String
         public let found: String
-        /// Nil when the JSON loaded.
+        /// Nil when the JSON loaded, or wasn't needed (only listed).
         public let error: String?
     }
 
@@ -72,6 +72,11 @@ public struct AppInfoReport: Sendable {
         var json: [AppInfo.ConfigKind: Any] = [:]
         var configs: [AppInfo.ConfigKind: Config] = [:]
         for (kind, file) in files {
+            // Cell styles are 1–2 MB and nothing reads them: listed, not downloaded.
+            guard kind.isParsed else {
+                configs[kind] = Config(url: file.url, found: file.found, error: nil)
+                continue
+            }
             do {
                 // A captured body may be cut at the SDK's 100 KB; fetch then.
                 if let body = file.body, let parsed = try? JSONSerialization.jsonObject(with: Data(body.utf8)) {
@@ -84,6 +89,10 @@ public struct AppInfoReport: Sendable {
             } catch {
                 configs[kind] = Config(url: file.url, found: file.found, error: error.localizedDescription)
             }
+        }
+        for (kind, url) in AppInfo.remoteConfigURLs(json[.remoteConfigurations])
+        where configs[kind] == nil && AppInfo.isAllowedConfigURL(url) {
+            configs[kind] = Config(url: url, found: "remote_configurations.json", error: nil)
         }
 
         var identity = AppInfo.appIdentity(leaves)

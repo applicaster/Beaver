@@ -2916,6 +2916,7 @@ and `sessions_compare` both do; the menus and pickers only offer them.
 - **Why:** zapp-support has these tabs; Beaver had the data but no view. zapp-support keeps its token on its server, which a desktop app can't.
 - **Alternatives:** no token (no CMS fields, fewer exact URLs); reading zapptool's saved token (a credential Beaver wasn't given).
 - Config downloads are cached for the run; Reload empties the cache. The tab rebuilds itself only until the first storage arrives.
+- **Every launch-time file** (2026-09-29): the kinds are the keys zapplicaster-cli writes into the app's `runtime_configuration_urls.json` from build_params — layout, plugin and remote configurations, cell styles, presets mapping, pipes endpoints, tablet variants — plus rivers. Without a token, `remote_configurations/` and `plugin_configurations/` are derived beside `layouts/`, pipes endpoints from `accounts/<account>/app_families/<family>/data_source_providers/endpoints.json`, and cell styles and presets from `remote_configurations.json`'s `general_settings`; the allow-list takes `app_families/…` paths. Only the files the report reads are downloaded (cell styles are 1–2 MB). Every URL shows what's in Zapp **now**: Zapp overwrites them on publish, and a debug build runs on the files bundled at build time.
 
 ## D86. Sessions: a click selects, Open opens
 

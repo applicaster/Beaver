@@ -12,6 +12,15 @@ does the same for a manual release.
 
 ## [Unreleased]
 
+### Added
+- **Info → Config files** lists every file the app loads at launch, not just
+  three: remote configurations, plugin configurations, layout, cell styles,
+  presets mapping and pipes endpoints (and the tablet variants when the Zapp
+  CMS names them) — found without a Zapp token too, through the app's
+  storage and `remote_configurations.json`. Cell styles, presets and
+  endpoints are listed with their URL, not downloaded. Agents get them in
+  `app_info`'s `configs`.
+
 ## [4.18.0] - 2026-09-29
 
 ### Added

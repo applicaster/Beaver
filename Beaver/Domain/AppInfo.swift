@@ -200,8 +200,14 @@ public enum AppInfo {
 
     // MARK: - Launch-time config files (S3)
 
+    /// The files QuickBrick loads at launch (`runtime_configuration_urls.json`,
+    /// written by zapplicaster-cli from build_params), plus the older rivers.json.
     public enum ConfigKind: String, Sendable, CaseIterable {
-        case layout, rivers, pluginConfigurations
+        case layout, tabletLayout, rivers, pluginConfigurations, remoteConfigurations,
+             cellStyles, tabletCellStyles, presetsMapping, tabletPresetsMapping, pipesEndpoints
+
+        /// Read by App Info, so always downloaded; the rest are only listed.
+        var isParsed: Bool { [.layout, .rivers, .pluginConfigurations, .remoteConfigurations].contains(self) }
     }
 
     public struct ConfigFile: Sendable, Equatable {
@@ -214,18 +220,25 @@ public enum AppInfo {
 
     public static let configHost = "assets-secure.applicaster.com"
 
-    /// Only Zapp's public config bucket is ever fetched.
+    /// Only Zapp's public config bucket is ever fetched: an app version's
+    /// files, or its app family's (cell styles, presets, pipes endpoints).
     public static func isAllowedConfigURL(_ raw: String) -> Bool {
         guard let u = URLComponents(string: raw), u.scheme == "https", u.host == configHost,
               u.port == nil, u.user == nil, u.password == nil else { return false }
-        return u.path.range(of: #"^/zapp/accounts/[^/]+/apps/[^/]+/[^/]+/[^/]+/.+\.json$"#,
+        return u.path.range(of: #"^/zapp/accounts/[^/]+/(apps/[^/]+/[^/]+/[^/]+|app_families/[^/]+)/.+\.json$"#,
                             options: .regularExpression) != nil
     }
 
+    /// Tablet variants can't be told from the URL: they come only from
+    /// build_params and remote_configurations.
     static func kind(of url: String) -> ConfigKind? {
         let path = url.components(separatedBy: "?")[0]
         let patterns: [(ConfigKind, String)] = [
             (.pluginConfigurations, #"plugin_?configurations?[\w-]*\.json"#),
+            (.remoteConfigurations, #"remote_?configurations?[\w-]*\.json"#),
+            (.cellStyles, #"cell_?styles[\w-]*\.json"#),
+            (.presetsMapping, #"presets_?mapping[\w-]*\.json"#),
+            (.pipesEndpoints, #"/data_source_providers/endpoints\.json|pipes_?endpoints[\w-]*\.json"#),
             (.rivers, #"rivers[\w-]*\.json"#),
             (.layout, #"layout[\w-]*\.json"#),
         ]
@@ -265,8 +278,17 @@ public enum AppInfo {
             let seg = [account, bundle, store, version]
                 .map { $0.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? $0 }
             let base = "https://\(configHost)/zapp/accounts/\(seg[0])/apps/\(seg[1])/\(seg[2])/\(seg[3])"
-            candidates.append(ConfigFile(url: base + "/rivers/rivers.json", body: nil, found: "derived from storage"))
-            candidates.append(ConfigFile(url: base + "/layouts/layout.json", body: nil, found: "derived from storage"))
+            for file in ["rivers/rivers.json", "layouts/layout.json", "remote_configurations/remote_configurations.json",
+                         "plugin_configurations/plugin_configurations.json"] {
+                candidates.append(ConfigFile(url: base + "/" + file, body: nil, found: "derived from storage"))
+            }
+        }
+        if let account = part(["accountsAccountId", "account_id", "accounts_account_id"]),
+           let family = part(["app_family_id"]) {
+            let seg = [account, family].map { $0.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? $0 }
+            candidates.append(ConfigFile(
+                url: "https://\(configHost)/zapp/accounts/\(seg[0])/app_families/\(seg[1])/data_source_providers/endpoints.json",
+                body: nil, found: "derived from storage"))
         }
         for c in candidates where isAllowedConfigURL(c.url) {
             guard let kind = kind(of: c.url), out[kind]?.found != "CMS" else { continue }
@@ -352,12 +374,31 @@ public enum AppInfo {
         return cms + identity.filter { !labels.contains($0.label) }
     }
 
-    /// The config URLs build_params names, by kind.
+    /// The config URLs build_params names, by kind — the same keys
+    /// zapplicaster-cli writes into the app's runtime_configuration_urls.json.
     public static func cmsConfigURLs(_ params: [String: Any]?) -> [ConfigKind: String] {
+        urls(params, [
+            (.layout, "layout_url"), (.tabletLayout, "tablet_layout_url"), (.rivers, "rivers_url"),
+            (.pluginConfigurations, "plugin_configurations_url"), (.remoteConfigurations, "remote_configurations_url"),
+            (.cellStyles, "cell_styles_url"), (.tabletCellStyles, "tablet_cell_styles_url"),
+            (.presetsMapping, "presets_mapping_url"), (.tabletPresetsMapping, "tablet_presets_mapping_url"),
+            (.pipesEndpoints, "pipes_endpoints_url"),
+        ])
+    }
+
+    /// The URLs remote_configurations.json's general_settings names — how
+    /// cell styles and presets are found without a Zapp token.
+    public static func remoteConfigURLs(_ json: Any?) -> [ConfigKind: String] {
+        urls((json as? [String: Any])?["general_settings"] as? [String: Any], [
+            (.cellStyles, "cell_styles_json_url"), (.tabletCellStyles, "tablet_cell_styles_json_url"),
+            (.presetsMapping, "presets_mapping_json_url"), (.tabletPresetsMapping, "tablet_presets_mapping_json_url"),
+        ])
+    }
+
+    static func urls(_ dict: [String: Any]?, _ keys: [(ConfigKind, String)]) -> [ConfigKind: String] {
         var out: [ConfigKind: String] = [:]
-        for (kind, key) in [(ConfigKind.layout, "layout_url"), (.rivers, "rivers_url"),
-                            (.pluginConfigurations, "plugin_configurations_url")] {
-            if let url = params?[key] as? String, !url.isEmpty { out[kind] = url }
+        for (kind, key) in keys {
+            if let url = dict?[key] as? String, !url.isEmpty { out[kind] = url }
         }
         return out
     }
