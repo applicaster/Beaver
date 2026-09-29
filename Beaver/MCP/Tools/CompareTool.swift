@@ -10,7 +10,7 @@ extension SessionTools {
     static let compare = MCPTool(
         name: "sessions_compare",
         title: "Compare two sessions",
-        description: "Use when something works in one session and not in another (app 4.5 vs 4.6, device A vs B): log lines only in one of them (numbers, ids, times and query values normalised), warnings and errors per subsystem A vs B, requests only in one, and requests whose status class or median duration changed. a is the session that works, b the one that doesn't.",
+        description: "Use when something works in one session and not in another (app 4.5 vs 4.6, device A vs B): log lines only in one of them (numbers, ids, times and query values normalised), warnings and errors per subsystem A vs B, requests only in one, and requests whose status class or median duration changed. a is the session that works, b the one that doesn't. Both must be the same app (same bundle id, else the same app name); other versions and devices are fine.",
         kind: .read,
         inputSchema: ToolSchema.object([
             "a": ToolSchema.integer("The session that works (sessions_list shows ids)."),
@@ -35,7 +35,12 @@ extension SessionTools {
             })
         }
         let limit = try args.limit(default: 20, max: 200)
-        let r = try await SessionCompare.run(store: ctx.store, a: a, b: b, sections: sections)
+        let r: SessionCompare.Result
+        do {
+            r = try await SessionCompare.run(store: ctx.store, a: a, b: b, sections: sections)
+        } catch let different as SessionCompare.DifferentApps {
+            throw ToolError((different.errorDescription ?? "") + " sessions_list() shows each session's app; pick two of the same app (other versions or devices are fine). \(example)")
+        }
 
         var parts: [String] = [], lines: [String] = [], next: [String] = []
         var structured: [String: JSON] = ["a": JSON(a), "b": JSON(b)]

@@ -2853,7 +2853,12 @@ won't decode, and the feed starts unfiltered once.
   value (the changed field is what a person looks for in a user object).
 ## D81. Compare two sessions by pattern, in SQL
 
-**Status:** Accepted (2026-09-28).
+**Status:** Accepted (2026-09-28). *Amended 2026-09-28:* only sessions of the
+same app compare — the same bundle id when both sessions know it, else the
+same app name; an app Beaver can't name matches nothing. Versions and
+devices may differ (that's the point); two different apps have nothing to
+learn from each other. `SessionCompare.run` refuses the rest, so the sheet
+and `sessions_compare` both do; the menus and pickers only offer them.
 
 - **Decision:** Sessions → **Compare with** and `sessions_compare(a, b)`
   share `SessionCompare` (BeaverCore). A is the session that works, B the

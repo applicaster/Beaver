@@ -97,8 +97,31 @@ public enum SessionCompare {
 
     // MARK: - Run
 
+    /// Only sessions of one app compare: its versions and devices may
+    /// differ — that's the point — but two different apps have nothing
+    /// to learn from each other. Same bundle id when both sessions know
+    /// it, else the same app name; an app Beaver can't name matches nothing.
+    public static func sameApp(_ a: Session, _ b: Session) -> Bool {
+        if let pa = a.appPackage, let pb = b.appPackage { return pa == pb }
+        if let na = a.appName, let nb = b.appName { return na == nb }
+        return false
+    }
+
+    public struct DifferentApps: LocalizedError {
+        public let errorDescription: String?
+    }
+
     public static func run(store: LogStore, a: Int64, b: Int64,
                            sections: Set<Section> = Set(Section.allCases)) async throws -> Result {
+        let sessions = try await store.sessions()
+        if let sa = sessions.first(where: { $0.id == a }), let sb = sessions.first(where: { $0.id == b }),
+           !sameApp(sa, sb) {
+            func name(_ s: Session) -> String {
+                s.appName.map { $0 + (s.appPackage.map { " (\($0))" } ?? "") } ?? s.appPackage ?? "an unnamed app"
+            }
+            throw DifferentApps(errorDescription:
+                "#\(a) is \(name(sa)) and #\(b) is \(name(sb)): only sessions of the same app can be compared.")
+        }
         var r = Result(a: a, b: b)
         if sections.contains(.logs) {
             let pa = try await store.messagePatterns(sessionId: a, limit: patternCap)

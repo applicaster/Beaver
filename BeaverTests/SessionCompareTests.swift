@@ -39,7 +39,31 @@ struct SessionCompareTests {
         let store = try LogStore(source: .inMemory)
         let a = try await store.createSession(source: .live).id
         let b = try await store.createSession(source: .live).id
+        // Two versions of one app: only such sessions compare.
+        try await store.applyHandshake(ClientHandshake(appPackage: "com.x.app", version: "4.5"), to: a)
+        try await store.applyHandshake(ClientHandshake(appPackage: "com.x.app", version: "4.6"), to: b)
         return (store, a, b)
+    }
+
+    @Test("Only sessions of one app compare: bundle id, else app name")
+    func sameApp() async throws {
+        func s(_ package: String?, _ name: String?) -> Session {
+            Session(id: 1, startedAt: Date(), source: .live, appName: name, appPackage: package)
+        }
+        #expect(SessionCompare.sameApp(s("com.a", "Anton"), s("com.a", "Other name")))
+        #expect(!SessionCompare.sameApp(s("com.a", "App"), s("com.b", "App")))
+        #expect(SessionCompare.sameApp(s(nil, "River"), s("com.r", "River")))
+        #expect(!SessionCompare.sameApp(s(nil, "Anton"), s(nil, "Ruslan")))
+        #expect(!SessionCompare.sameApp(s(nil, nil), s(nil, nil)))
+
+        let store = try LogStore(source: .inMemory)
+        let anton = try await store.createSession(source: .live).id
+        let ruslan = try await store.createSession(source: .live).id
+        try await store.applyHandshake(ClientHandshake(appPackage: "com.anton"), to: anton)
+        try await store.applyHandshake(ClientHandshake(appPackage: "com.ruslan"), to: ruslan)
+        await #expect(throws: SessionCompare.DifferentApps.self) {
+            try await SessionCompare.run(store: store, a: anton, b: ruslan)
+        }
     }
 
     @Test("Logs: patterns only in one session, warnings and errors per subsystem")

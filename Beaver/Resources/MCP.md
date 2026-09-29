@@ -288,7 +288,8 @@ takes focus, unless you pass `reveal: true`.
 ### compare — "why does it fail on 4.6 but not on 4.5?"
 
 1. `sessions_list()` — find a session that works (4.5, or device A) and one
-   that fails (4.6, or device B). No session that works? Ask the user to
+   that fails (4.6, or device B), **of the same app**: two different apps
+   (another bundle id) don't compare. No session that works? Ask the user to
    record one, or import one: `sessions_import(path: …)`.
 2. `sessions_compare(a: <works>, b: <fails>)` — log lines only in one side,
    compared by pattern (`Loaded <n> items in <n>ms`: numbers, UUIDs, hex

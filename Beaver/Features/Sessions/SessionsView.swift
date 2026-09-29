@@ -85,7 +85,10 @@ struct SessionsView: View {
         }
         .onAppear { if selectedId == nil { selectedId = env.viewingSessionId } }
         .sheet(item: $comparing) { pair in
-            SessionCompareView(sessions: vm.sessions, a: pair.a, b: pair.b)
+            // The pickers offer only this app's sessions.
+            SessionCompareView(sessions: vm.sessions.filter { s in
+                s.id == pair.a || vm.sessions.first { $0.id == pair.a }.map { SessionCompare.sameApp(s.session, $0.session) } == true
+            }, a: pair.a, b: pair.b)
         }
         // MARK: Delete-one confirmation
         .confirmationDialog(
@@ -142,7 +145,7 @@ struct SessionsView: View {
                   systemImage: "arrow.forward.circle")
         }
         Menu {
-            ForEach(vm.sessions.filter { $0.id != item.id }) { other in
+            ForEach(related(to: item, in: vm)) { other in
                 Button("#\(other.id) \(other.title)" + (other.appLabel.map { " · \($0)" } ?? "")) {
                     comparing = ComparePair(a: item.id, b: other.id)
                 }
@@ -150,7 +153,8 @@ struct SessionsView: View {
         } label: {
             Label("Compare with", systemImage: "arrow.left.arrow.right")
         }
-        .disabled(vm.sessions.count < 2)
+        .disabled(related(to: item, in: vm).isEmpty)
+        .help(related(to: item, in: vm).isEmpty ? "No other session of this app to compare with" : "")
         if isLiveSession(item) {
             Button {
                 Task { await env.disconnect(item.id) }
@@ -182,6 +186,11 @@ struct SessionsView: View {
         
     }
 
+    /// Other sessions of the same app: the only ones Compare takes.
+    private func related(to item: SessionListItem, in vm: SessionsViewModel) -> [SessionListItem] {
+        vm.sessions.filter { $0.id != item.id && SessionCompare.sameApp($0.session, item.session) }
+    }
+
     private func open(_ id: Int64) {
         env.viewingSessionId = id
         onOpenInLogFeed(id)
@@ -197,7 +206,7 @@ struct SessionsView: View {
                 isLive: isLiveSession(item),
                 isViewed: env.viewingSessionId == item.id,
                 sessions: vm.sessions.map(\.session),
-                others: vm.sessions.filter { $0.id != item.id },
+                others: related(to: item, in: vm),
                 onOpen: { open(item.id) },
                 onCompare: { comparing = ComparePair(a: item.id, b: $0) },
                 onRequestDelete: { pendingDelete = item }
@@ -381,6 +390,8 @@ private struct SessionDetailPane: View {
                     }
                     .fixedSize()
                     .disabled(others.isEmpty)
+                    .help(others.isEmpty ? "No other session of this app to compare with"
+                                         : "Compare with another session of this app")
                     Spacer()
                     if !isLive {
                         Button(role: .destructive, action: onRequestDelete) {
