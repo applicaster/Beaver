@@ -2916,3 +2916,33 @@ and `sessions_compare` both do; the menus and pickers only offer them.
 - **Alternatives:** no token (no CMS fields, fewer exact URLs); reading zapptool's saved token (a credential Beaver wasn't given).
 - Config downloads are cached for the run; Reload empties the cache. The tab rebuilds itself only until the first storage arrives.
 
+## D86. Sessions: a click selects, Open opens
+
+**Status:** Accepted (2026-09-28).
+
+- **Decision:** clicking a row in Sessions selects it and shows its details
+  on the right — the session's times and status, then the device popover's
+  content (device, device id, Disconnect, Default for agents, the app's
+  toolboxes). Open, a double-click or Return (`contextMenu(forSelectionType:
+  primaryAction:)`) opens it in the Log feed. The list no longer drives
+  `viewingSessionId`.
+- **Why:** a click that jumped to the Log feed made it impossible to look at
+  a session — or disconnect a device, or read its toolboxes — without
+  leaving the tab.
+- **Alternatives:** keep the jump and add an info button per row (two ways
+  to do one thing); an inspector sheet (hides the list).
+- Disconnect is in the details and the right-click menu only; one in the
+  row as well was one too many.
+
+## D87. Sessions left open by an earlier run end when Beaver starts
+
+**Status:** Accepted (2026-09-28).
+
+- **Decision:** opening the store ends every live session with no end
+  time — a quit or a crash while a device was connected — at its last
+  event, else at its start. It runs before any device can connect.
+- **Why:** such sessions stayed "Live" in Sessions for ever; nothing writes
+  to them once their connection is gone.
+- D83's retention already treats a missing end time the same way; this
+  makes the list agree.
+
