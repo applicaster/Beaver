@@ -28,6 +28,9 @@ public final class AppEnvironment {
     /// In memory until Beaver quits.
     public var defaultDevice: DefaultDevice?
 
+    /// D91: the tools a person ran, per session, newest first. In memory only.
+    public var toolRuns: [Int64: [ToolRun]] = [:]
+
     public func isLive(_ sessionId: Int64?) -> Bool { live.isLive(sessionId) }
 
     /// Session id the user is *viewing*: a device from the toolbar device
@@ -163,6 +166,23 @@ public final class AppEnvironment {
         let count = (try? await store.eventCount(sessionId: sid, filter: .none)) ?? 0
         viewingEventCount = count
         viewingNetworkCount = (try? await store.networkEntryCount(sessionId: sid)) ?? 0
+    }
+}
+
+extension AppEnvironment {
+    /// D91: a person runs an app's tool. Writes a `beaver.tools` line to the
+    /// session and keeps the run in `toolRuns`; not in the agent journal.
+    @discardableResult
+    func runDeviceTool(_ name: String, arguments: [String: JSON], sessionId: Int64) async
+        -> Result<DeviceToolCall.Reply, DeviceToolCall.Failure> {
+        let at = Date()
+        let outcome = await DeviceToolCall.run(name, arguments: arguments, on: self, sessionId: sessionId)
+        await store.append(DeviceToolCall.logEvent(name: name, arguments: arguments, outcome: outcome, at: at),
+                           to: sessionId)
+        let error: String? = if case .failure(let failure) = outcome { failure.message } else { nil }
+        toolRuns[sessionId] = ToolRun.adding(ToolRun(name: name, arguments: arguments, at: at, error: error),
+                                             to: toolRuns[sessionId] ?? [])
+        return outcome
     }
 }
 

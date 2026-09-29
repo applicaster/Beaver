@@ -81,6 +81,12 @@ or a release):
 13. Toolboxes: connect an app built with quick-brick-xray's **native** WebSocket
    sink (the JS-only sink has none), click the device badge on the left of the
    toolbar — the popover lists its toolboxes. Nothing to turn on in Beaver.
+   Run one yourself: Sessions tab → select the live session → open a toolbox →
+   **Run…** on a read tool (e.g. `storage.get` or `app.info`) → **Run**: the
+   answer shows as a tree with Copy, the run is listed under **Recent runs**
+   with **Run again**, and the Log feed gets a `beaver.tools` line "You ran
+   … → ok". A tool like `app.restart` asks first. Ask the agent "what tools
+   did I run?" → `logs_query` with `subsystems: ["beaver.tools"]`.
 13. Session retention: app menu → **Delete Sessions Older Than** shows 30
    Days checked, and "Sessions on disk: …" appears a few seconds after
    launch. `beaver_status` reports `retentionDays: 30` and `storeBytes`.
@@ -251,7 +257,8 @@ takes focus, unless you pass `reveal: true`.
 3. `toolboxes_list(toolbox: "storage")` — each tool's arguments.
 4. `tools_call(name: "storage.get", arguments: {key: "volume"})` — the app's answer. The summary names the app (`(default)` when the default picked it); Next's `logs_wait(sessionId: …)` reads that app's logs. `tools_call` is marked destructive, so clients that honor destructiveHint ask the user to confirm: app tools can delete data or restart the app.
 5. `tools_call(name: "app.restart")` may time out or report a disconnect: the app drops the connection first, so it may still have run. `beaver_status()` shows it back in a new session; the default follows it. The Agent panel notes the drop. An error that says the call didn't reach the app is different: nothing ran, so the same call can be sent again.
-6. `toolboxes_list(deviceId: "beaver")` and `tools_call(deviceId: "beaver", name: "logs.query", arguments: {since: "5m"})` — Beaver's own tools the same way (`"beaver"` in any case). Beaver's destructive tools aren't listed there: call them directly. A Beaver tool reached through `tools_call` is marked destructive too (the hint is `tools_call`'s), so call Beaver's tools directly to avoid a confirmation.
+6. The user can run the same tools from Beaver (Run… in the device popover, Beaver newer than 4.13.0). Each run is a `beaver.tools` line in the session — `You ran storage.set {"key":"volume"} → ok`, arguments and result in its data: `logs_query(filter: {subsystems: ["beaver.tools"]})` shows what they ran; they are not in the Agent panel.
+7. `toolboxes_list(deviceId: "beaver")` and `tools_call(deviceId: "beaver", name: "logs.query", arguments: {since: "5m"})` — Beaver's own tools the same way (`"beaver"` in any case). Beaver's destructive tools aren't listed there: call them directly. A Beaver tool reached through `tools_call` is marked destructive too (the hint is `tools_call`'s), so call Beaver's tools directly to avoid a confirmation.
 
 ### organise — bookmarks, saved filters, a clean screen
 

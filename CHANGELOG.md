@@ -19,6 +19,16 @@ When releasing:
 - Compare works only on sessions of the same app (same bundle id, else app name); the menus offer only those, and `sessions_compare` says why it refuses two different apps.
 
 ### Added
+- **Run the app's tools yourself.** In the device popover and the Sessions
+  details, each toolbox tool of a connected app has **Run…**: fill in its
+  arguments (text, numbers, checkboxes, pickers, JSON for objects and
+  lists), press **Run**, and see the answer as a JSON tree with Copy — or
+  why it failed (didn't reach the app: nothing ran; no answer: it may still
+  have run; the app's own error). Tools that restart, delete, clear, reset,
+  set, log out or wipe ask first. Your last 20 runs are listed under the
+  toolboxes with **Run again**. Every run adds a `beaver.tools` line to the
+  session ("You ran app.restart → ok"), so it is in exports and agents see
+  it with `logs_query`.
 - **Sessions: click a session to see its details** on the right — times,
   status, the device and device id, **Disconnect** (red), **Default for
   agents** (ⓘ explains it) and the app's toolboxes, which open with a short

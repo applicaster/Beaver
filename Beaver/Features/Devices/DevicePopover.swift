@@ -3,7 +3,8 @@
 //  Beaver
 //
 //  D75/D76: what the viewed device runs, Disconnect, the agents' default,
-//  and the app's toolboxes (read-only). Opened from the leading device badge.
+//  and the app's toolboxes. Opened from the leading device badge. D91: each
+//  tool has Run…, and the person's recent runs are listed under them.
 
 import AppKit
 import SwiftUI
@@ -22,6 +23,9 @@ struct DevicePopover: View {
     @State private var load: ToolboxLoad = .loading
     @State private var openToolbox: String?
     @State private var showingDefaultHelp = false
+    @State private var pendingAgain: PendingToolRun?
+    /// Runs again in flight, by history row.
+    @State private var runningAgain: Set<UUID> = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -218,7 +222,7 @@ struct DevicePopover: View {
                         // Full width, leading: a toolbox with short descriptions
                         // was centred, so open lists looked different.
                         VStack(alignment: .leading, spacing: 8) {
-                            ForEach(box.tools, id: \.name) { ToolRow(tool: $0) }
+                            ForEach(box.tools, id: \.name) { ToolRow(tool: $0, session: session, app: title) }
                         }
                         .padding(.leading, 18)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -227,6 +231,58 @@ struct DevicePopover: View {
                 }
                 .clipped()
             }
+            history
+        }
+        .confirmToolRun($pendingAgain, app: title) { again($0) }
+    }
+
+    /// D91: the person's last runs on this session, newest first.
+    @ViewBuilder
+    private var history: some View {
+        let runs = env.toolRuns[session.id] ?? []
+        if !runs.isEmpty {
+            Text("Recent runs").font(.subheadline.weight(.semibold)).padding(.top, 6)
+            ForEach(runs) { run in
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Image(systemName: run.error == nil ? "checkmark.circle.fill" : "xmark.octagon.fill")
+                        .foregroundStyle(run.error == nil ? .green : .red)
+                        .accessibilityLabel(run.error == nil ? "OK" : "Error")
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(run.name).font(.system(.caption, design: .monospaced).weight(.semibold))
+                        if !run.arguments.isEmpty {
+                            Text(JSON.object(run.arguments).text).font(.caption2.monospaced())
+                                .foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                        }
+                        if let error = run.error {
+                            Text(error).font(.caption2).foregroundStyle(.red).lineLimit(2)
+                        }
+                    }
+                    Spacer()
+                    Text(run.at.formatted(date: .omitted, time: .standard))
+                        .font(.caption2).foregroundStyle(.secondary)
+                    if runningAgain.contains(run.id) {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Button("Run again") {
+                            let item = PendingToolRun(name: run.name, arguments: run.arguments, row: run.id)
+                            if DeviceToolCall.needsConfirmation(run.name) { pendingAgain = item } else { again(item) }
+                        }
+                        .controlSize(.small)
+                        .help("Run \(run.name) again with the same arguments")
+                    }
+                }
+                .help(run.error ?? "OK")
+            }
+        }
+    }
+
+    /// Not tied to the view: the run finishes and is logged even if the
+    /// popover closes.
+    private func again(_ item: PendingToolRun) {
+        if let row = item.row { runningAgain.insert(row) }
+        Task {
+            await env.runDeviceTool(item.name, arguments: item.arguments, sessionId: session.id)
+            if let row = item.row { runningAgain.remove(row) }
         }
     }
 
@@ -240,12 +296,24 @@ struct DevicePopover: View {
 
 private struct ToolRow: View {
     let tool: DeviceTool
+    let session: Session
+    let app: String
+    @State private var showingRun = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(tool.name)
-                .font(.system(.caption, design: .monospaced).weight(.semibold))
-                .textSelection(.enabled)
+            HStack(alignment: .firstTextBaseline) {
+                Text(tool.name)
+                    .font(.system(.caption, design: .monospaced).weight(.semibold))
+                    .textSelection(.enabled)
+                Spacer()
+                Button("Run…") { showingRun = true }
+                    .controlSize(.small)
+                    .help("Run \(tool.name) on the app")
+                    .popover(isPresented: $showingRun, arrowEdge: .trailing) {
+                        ToolRunView(session: session, tool: tool, app: app)
+                    }
+            }
             if !tool.description.isEmpty {
                 Text(tool.description).font(.caption).foregroundStyle(.secondary)
                     .lineLimit(4).help(tool.description)

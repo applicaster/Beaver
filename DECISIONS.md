@@ -2946,3 +2946,39 @@ and `sessions_compare` both do; the menus and pickers only offer them.
 - D83's retention already treats a missing end time the same way; this
   makes the list agree.
 
+
+## D91. A person runs an app's tools from the device popover
+
+**Status:** Accepted (2026-09-28).
+
+- **Decision:** each tool row in the device popover (the badge popover and
+  the Sessions details, live sessions only) has **Run…**: a popover with a
+  form built from the tool's `inputSchema` (string, number/integer as text
+  fields, boolean as a checkbox, a string enum as a picker, object/array/
+  untyped as a JSON field checked before sending), **Run**, a spinner while
+  waiting, and the answer as a JSON tree with Copy, or the reason it failed.
+  Tools whose name after the toolbox contains restart, kill, delete, remove,
+  clear, reset, set, logout or wipe (any case) ask first, naming the tool
+  and the app. The last 20 runs per session stay in memory, under the
+  toolboxes, each with **Run again** (same arguments). Every run writes a
+  `beaver.tools` line to the session: `You ran app.restart {…} → ok` or
+  `→ error: …` (a warning), with the tool, arguments and the result (capped
+  at 16 000 characters of JSON) or error in data.
+- **Why:** only agents could run toolbox tools (`tools_call`, D75). The Log
+  feed line puts a person's run in the session, its export and agents'
+  `logs_query`, next to what the app logged because of it.
+- One call path: `DeviceToolCall` (BeaverCore) builds `tools/call`, reads
+  the reply (structuredContent, text, isError) and names failures the way
+  `tools_call` does: not sent (nothing ran), timeout or drop (may still
+  have run), the app's error. `tools_call` uses its params and reply parsing.
+- Not in the agent journal: it lists agents' actions. No new MCP tool:
+  agents already run tools with `tools_call`, and see a person's runs by
+  `subsystems: ["beaver.tools"]`.
+- The confirmation list differs from D75's journal verbs on purpose: it
+  adds set, logout and wipe (they change what the person is testing) and
+  drops execute and launch; "contains" rather than "starts with" catches
+  `removeNamespace`, `wipeAll` and also `getSettings` — a spare question
+  is cheaper than an unasked restart.
+- **Alternatives:** a sheet or a separate Tools tab (leaves the Sessions
+  details); persisting the history (the Log feed line already keeps it with
+  the session); a confirmation for every tool (most are reads).

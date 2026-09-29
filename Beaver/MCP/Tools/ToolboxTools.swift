@@ -155,14 +155,14 @@ enum ToolboxTools {
         let before = try await ctx.store.latestEventId(sessionId: id) ?? 0
         // Watched from the send: the app may drop before it answers.
         let watch = localName(name, startsWith: endsAppVerbs) ? UUID() : nil
-        let reply = try await device(ctx, "tools/call", ["name": .string(name), "arguments": .object(arguments)],
+        let raw = try await device(ctx, "tools/call", DeviceToolCall.params(name: name, arguments: arguments),
                                      sessionId: id, timeout: DeviceMCPClient.callTimeout, what: name, label: label,
                                      retry: "tools_call(deviceId: \"\(id)\", name: \"\(name)\", arguments: \(JSON.object(arguments).text))",
                                      journalKind: risky ? .destructive : nil, watch: watch)
-        let content = reply["content"]?.array ?? []
-        let text = content.compactMap { $0["text"]?.string }.joined(separator: "\n")
+        let reply = DeviceToolCall.Reply(raw)
+        let text = reply.text
         let box = Toolboxes.name(of: name)
-        if reply["isError"]?.bool == true {
+        if reply.isError {
             // The app answered: a later drop isn't this call's.
             if let watch { await ctx.watches.cancelDisconnectWatcher(watch) }
             var hint = " Example: toolboxes_list(deviceId: \"\(id)\", toolbox: \"\(box)\") for its arguments."
@@ -178,14 +178,14 @@ enum ToolboxTools {
             }
             throw ToolError("\(name) failed on \(label): \(text).\(hint)")
         }
-        let others = content.filter { $0["type"]?.string != "text" }.map { $0["type"]?.string ?? "unknown" }
+        let others = reply.otherTypes
         let body = [text, others.isEmpty ? "" : "(+\(others.count) non-text item(s): \(others.joined(separator: ", ")))"]
             .filter { !$0.isEmpty }.joined(separator: "\n")
         let firstLine = text.split(separator: "\n", omittingEmptySubsequences: false).first.map(String.init) ?? ""
         var structured: [String: JSON] = ["deviceId": .string(String(id)), "name": .string(name),
                                           "isError": false, "afterId": JSON(before)]
         // One copy: the body carries the text; structuredContent is the data.
-        if let data = reply["structuredContent"] { structured["structuredContent"] = data }
+        if let data = reply.structuredContent { structured["structuredContent"] = data }
         else { structured["text"] = .string(text) }
         return ToolResult(
             summary: "\(name) on \(label): " + (text.isEmpty ? "done (no text)" : String(firstLine.prefix(200))),
