@@ -57,13 +57,18 @@ struct DevicePopover: View {
                     .help("Disconnect this device")
                 }
                 Divider()
-                toolboxes
+                if logsOnly {
+                    Text("A TV through zapp-support's TV bridge: it sends logs only, so it has no commands, storage or toolboxes.")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else {
+                    toolboxes
+                }
             }
         }
         .padding(width == nil ? 0 : 16)
         .frame(width: width, alignment: .leading)
         .frame(maxWidth: width == nil ? .infinity : nil, alignment: .leading)
-        .task(id: session.id) { if isLive { await reload() } }
+        .task(id: session.id) { if isLive && !logsOnly { await reload() } }
     }
 
     /// D76, said so a person knows what ticking it changes.
@@ -79,6 +84,9 @@ struct DevicePopover: View {
         Another live session of this same device is already the agents' default \
         (it follows the device across restarts). Untick it there to change it.
         """
+
+    /// A `register` client (D89).
+    private var logsOnly: Bool { env.live.logsOnlySessions.contains(session.id) }
 
     private var title: String {
         (session.appName ?? session.appPackage ?? "Device #\(session.id)")

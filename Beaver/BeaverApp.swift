@@ -195,7 +195,8 @@ struct BeaverApp: App {
                     // storage, whose applicaster.v2 names the device in the
                     // device menu and beaver_status even while another one
                     // is viewed (D73). Brief delay so the SDK has finished
-                    // registering its handlers.
+                    // registering its handlers. A `register` client (the TV
+                    // bridge, D89) sent its frame by then; `send` drops both.
                     Task {
                         try? await Task.sleep(for: .milliseconds(500))
                         await env.sendQuietCmdlist(to: session.id)
@@ -212,7 +213,7 @@ struct BeaverApp: App {
                             await env.mcpClients[connection]?.receive(message)
                         case .success(.clientHandshake(let handshake)):
                             env.live.setHandshake(handshake, for: connection)
-                            await env.mcpClients[connection]?.markNative()
+                            await Self.markMCP(env.mcpClients[connection], for: handshake)
                         default:
                             break
                         }
@@ -329,6 +330,12 @@ struct BeaverApp: App {
 
     private static let retentionLog = Logger(subsystem: "com.applicaster.LoggerNext", category: "Retention")
 
+    /// Only native sinks send a handshake, and they serve MCP (D75); a
+    /// `register` client (D89) never does.
+    private static func markMCP(_ client: DeviceMCPClient?, for handshake: ClientHandshake) async {
+        if handshake.logsOnly { await client?.markLogsOnly() } else { await client?.markNative() }
+    }
+
     private static func handleInbound(frame: Data, connection: UUID, sessionId: Int64, env: AppEnvironment) async {
         switch ProtocolDecoder.decode(frame) {
         case .success(.event(let event)):
@@ -358,8 +365,7 @@ struct BeaverApp: App {
                 env.live.setHandshake(handshake, for: connection)
                 return env.mcpClients[connection]
             }
-            // Only native sinks send a handshake, and they serve MCP (D75).
-            await client?.markNative()
+            await Self.markMCP(client, for: handshake)
             try? await env.store.applyHandshake(handshake, to: sessionId)
         case .success(.mcp(let message)):
             // D75: an answer to Beaver's request; not a log line.

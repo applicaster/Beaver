@@ -81,7 +81,7 @@ enum CommandTools {
         inputSchema: ToolSchema.object(["deviceId": ToolSchema.deviceId])
     ) { args, ctx in
         let (_, live) = try await ctx.requireDevice(args, doing: "disconnect it", call: "devices_disconnect()",
-                                                    useDefault: false)
+                                                    useDefault: false, logsOnlyOK: true)
         let session = try await ctx.liveSession(live)
         await ctx.device.disconnect(live)
         return ToolResult(

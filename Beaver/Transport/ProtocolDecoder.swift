@@ -54,6 +54,8 @@ public enum ProtocolDecoder {
             return decodeNetwork(envelope: envelope)
         case "handshake":
             return .success(.clientHandshake(decodeHandshake(envelope: envelope)))
+        case "register":
+            return .success(.clientHandshake(decodeRegister(envelope: envelope)))
         case "mcp":
             return decodeMCP(envelope["payload"])
         default:
@@ -92,8 +94,9 @@ public enum ProtocolDecoder {
 
         // Level: string OR integer per protocol.
         let level: LogLevel
+        // "warn" and "log" are the browser console's names (D89).
         if let levelString = inner["level"] as? String,
-           let parsed = LogLevel(rawValue: levelString) {
+           let parsed = LogLevel(rawValue: levelString) ?? ["warn": .warning, "log": .info][levelString] {
             level = parsed
         } else if let levelInt = inner["level"] as? Int,
                   let parsed = LogLevel(numericLevel: levelInt) {
@@ -167,6 +170,26 @@ public enum ProtocolDecoder {
         let deviceId = str("deviceId").flatMap { $0 == model ? nil : $0 }
         return ClientHandshake(deviceId: deviceId, deviceName: str("deviceName"), model: model,
                                platform: str("platform"), appPackage: str("appPackage"), version: str("version"))
+    }
+
+    /// zapp-support's `register` (PROTOCOL.md §4.6, D89): the fields in
+    /// `event`, a JSON string (or in `data`, an object), as zapp-support's
+    /// server reads them. A bad payload still registers, with nothing known.
+    private static func decodeRegister(envelope: [String: Any]) -> ClientHandshake {
+        let info = (envelope["event"] as? String)
+            .flatMap { try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any] }
+            ?? envelope["data"] as? [String: Any] ?? [:]
+        func str(_ key: String) -> String? {
+            (info[key] as? String).map { $0.trimmingCharacters(in: .whitespaces) }.flatMap { $0.isEmpty ? nil : $0 }
+        }
+        let platform = str("platform")
+        // A TV bridged over the Chrome DevTools Protocol names no model.
+        let model = str("deviceModel") ?? (platform == "tv-cdp" ? "TV (DevTools)" : nil)
+        let platformLine = [platform, str("osVersion")].compactMap { $0 }.joined(separator: " ")
+        return ClientHandshake(deviceId: str("deviceId"), deviceName: str("deviceName"), model: model,
+                               platform: platformLine.isEmpty ? nil : platformLine,
+                               version: str("versionName"),
+                               appName: str("appName") ?? str("deviceName"), logsOnly: true)
     }
 
     // MARK: - MCP

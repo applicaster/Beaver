@@ -198,10 +198,23 @@ extension ToolContext {
     /// with several it may not. `call` is the tool's own example call; the
     /// error shows it with a deviceId filled in. `useDefault: false`
     /// (devices_disconnect) ignores the default: with several apps the
-    /// caller must name one.
+    /// caller must name one. A device that only sends logs (D89) is refused
+    /// unless `logsOnlyOK` (it can still be disconnected or be the default).
     public func requireDevice(_ args: ToolArguments, doing what: String, call: String,
-                              useDefault: Bool = true) async throws
+                              useDefault: Bool = true, logsOnlyOK: Bool = false) async throws
         -> (host: HostSnapshot, liveSessionId: Int64) {
+        let (host, id) = try await pickDevice(args, doing: what, call: call, useDefault: useDefault)
+        guard logsOnlyOK || !host.logsOnly.contains(id) else {
+            let name = try await store.sessions().first { $0.id == id }.map(StatusTools.describeDevice) ?? "It"
+            throw ToolError("Device \"\(id)\" (\(name)) only sends logs: it is connected through zapp-support's "
+                + "TV bridge, so Beaver can't \(what). Its logs are all there is. "
+                + "Example: logs_query(sessionId: \(id), since: \"10m\").")
+        }
+        return (host, id)
+    }
+
+    private func pickDevice(_ args: ToolArguments, doing what: String, call: String,
+                            useDefault: Bool) async throws -> (host: HostSnapshot, liveSessionId: Int64) {
         let host = await ui.snapshot()
         let live = host.liveSessionIds
         if try Self.isBeaver(args) {

@@ -90,6 +90,12 @@ public actor DeviceMCPClient {
         if case .unsupported = setup { setup = .idle }
     }
 
+    /// The app sent `register` (D89): it never answers MCP, so don't wait
+    /// out an `initialize` to find that out.
+    public func markLogsOnly() {
+        if !native { setup = .unsupported }
+    }
+
     /// The connection closed: a call already sent fails with `.disconnected`,
     /// one still queued with `.notSent`.
     public func close() {

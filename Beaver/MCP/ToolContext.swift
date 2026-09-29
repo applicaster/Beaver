@@ -34,6 +34,8 @@ public struct HostSnapshot: Sendable, Equatable {
     public var liveSessionIds: [Int64]
     /// Each live app's `cmdlist` answer.
     public var commandsBySession: [Int64: [CommandHint]]
+    /// Live devices that only send logs: `register` clients such as the TV bridge (D89).
+    public var logsOnly: Set<Int64> = []
     public var deviceURL: String?
     public var beaverVersion: String
     public var mcpPort: UInt16

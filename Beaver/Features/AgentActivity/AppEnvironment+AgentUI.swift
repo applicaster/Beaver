@@ -16,7 +16,7 @@ extension AppEnvironment: AgentUI {
             case .clientDisconnected(let reason): "clientDisconnected: \(reason)"
             case .failed(let reason): "failed: \(reason)"
             }
-            return HostSnapshot(
+            var host = HostSnapshot(
                 serverState: state,
                 liveSessionIds: live.sessionIds,
                 commandsBySession: live.commands,
@@ -30,6 +30,8 @@ extension AppEnvironment: AgentUI {
                 defaultDevice: defaultDevice,
                 retention: SessionRetention.current()
             )
+            host.logsOnly = live.logsOnlySessions
+            return host
         }
     }
 

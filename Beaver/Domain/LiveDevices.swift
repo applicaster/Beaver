@@ -97,6 +97,12 @@ public struct LiveDevices: Sendable, Equatable {
     }
 
     public func handshake(for connection: UUID) -> ClientHandshake? { handshakes[connection] }
+
+    /// Live sessions of `register` clients (D89): they take no commands,
+    /// storage requests or MCP, so Beaver sends them none.
+    public var logsOnlySessions: Set<Int64> {
+        Set(sessions.compactMap { handshakes[$0.key]?.logsOnly == true ? $0.value : nil })
+    }
 }
 
 /// The toolbar device menu (D73).
