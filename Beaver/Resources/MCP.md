@@ -83,8 +83,9 @@ port, notifications), Zapp (token), About (version, What's New, updates).
    another. A sheet lists what differs; click a line to open it. Ask the agent
    "compare session <a> with <b>" → `sessions_compare`.
 13. Toolboxes: connect an app built with quick-brick-xray's **native** WebSocket
-   sink (the JS-only sink has none), click the device badge on the left of the
-   toolbar — the popover lists its toolboxes. Nothing to turn on in Beaver.
+   sink (the JS-only sink has none), then Sessions → select its live session —
+   the details list its toolboxes (the device badge's popover links there with
+   **Toolboxes in Sessions**). Nothing to turn on in Beaver.
 13. Session retention: Settings → General → **Delete sessions older than**
    shows 30 Days, and "Database on disk" fills in a few seconds after
    launch. `beaver_status` reports `retentionDays: 30` and `storeBytes`.

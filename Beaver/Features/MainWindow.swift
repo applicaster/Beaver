@@ -705,7 +705,7 @@ private struct ToolbarDeviceBadge: View {
             }
         }
         .popover(isPresented: $showingDetails, arrowEdge: .bottom) {
-            DevicePopover(session: session, isLive: isLive, sessions: sessions)
+            DevicePopover(session: session, isLive: isLive, sessions: sessions, showsToolboxes: false)
                 .textSelection(.enabled)
         }
     }

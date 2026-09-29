@@ -3,7 +3,8 @@
 //  Beaver
 //
 //  D75/D76: what the viewed device runs, Disconnect, the agents' default,
-//  and the app's toolboxes (read-only). Opened from the leading device badge.
+//  and the app's toolboxes. The Sessions tab's details show all of it; the
+//  device badge's popover leaves the toolboxes to them (D86).
 
 import AppKit
 import SwiftUI
@@ -17,7 +18,11 @@ struct DevicePopover: View {
     /// The popover's width; nil inside the Sessions tab's details, which
     /// set their own width and padding.
     var width: CGFloat? = 360
+    /// The toolboxes live in the Sessions details; the badge's popover
+    /// points there instead of listing them twice.
+    var showsToolboxes = true
     @Environment(AppEnvironment.self) private var env
+    @Environment(\.dismiss) private var dismiss
     @Environment(ToastCenter.self) private var toasts
     @State private var load: ToolboxLoad = .loading
     @State private var openToolbox: String?
@@ -60,15 +65,24 @@ struct DevicePopover: View {
                 if logsOnly {
                     Text("A TV through zapp-support's TV bridge: it sends logs only, so it has no commands, storage or toolboxes.")
                         .font(.caption).foregroundStyle(.secondary)
-                } else {
+                } else if showsToolboxes {
                     toolboxes
+                } else {
+                    Button {
+                        dismiss()
+                        env.selectedTab = .sessions
+                    } label: {
+                        Label("Toolboxes in Sessions", systemImage: "wrench.and.screwdriver")
+                    }
+                    .buttonStyle(.link)
+                    .help("The app's toolboxes and their tools are in the Sessions tab's details for this session")
                 }
             }
         }
         .padding(width == nil ? 0 : 16)
         .frame(width: width, alignment: .leading)
         .frame(maxWidth: width == nil ? .infinity : nil, alignment: .leading)
-        .task(id: session.id) { if isLive && !logsOnly { await reload() } }
+        .task(id: session.id) { if isLive && !logsOnly && showsToolboxes { await reload() } }
     }
 
     /// D76, said so a person knows what ticking it changes.
