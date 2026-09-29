@@ -2853,7 +2853,12 @@ won't decode, and the feed starts unfiltered once.
   value (the changed field is what a person looks for in a user object).
 ## D81. Compare two sessions by pattern, in SQL
 
-**Status:** Accepted (2026-09-28).
+**Status:** Accepted (2026-09-28). *Amended 2026-09-28:* only sessions of the
+same app compare — the same bundle id when both sessions know it, else the
+same app name; an app Beaver can't name matches nothing. Versions and
+devices may differ (that's the point); two different apps have nothing to
+learn from each other. `SessionCompare.run` refuses the rest, so the sheet
+and `sessions_compare` both do; the menus and pickers only offer them.
 
 - **Decision:** Sessions → **Compare with** and `sessions_compare(a, b)`
   share `SessionCompare` (BeaverCore). A is the session that works, B the
@@ -2873,10 +2878,15 @@ won't decode, and the feed starts unfiltered once.
     at least 100 ms apart (both ends: 80 → 170 ms isn't news, 120 → 900 ms
     is; a request that got much faster is reported too, since it may have
     stopped doing its work).
-  - **Storage** (D80) and **App Info** (D79) are sections in
-    `SessionCompare.Section` that `run` doesn't fill yet: asked for, they
-    come back in `pending`, the sheet shows a placeholder and the tool
-    says "not compared yet". Each lands by filling its field in `run`.
+  - **Storage** (D80's diff): each layer's latest snapshot, A → B, key by
+    key with the fields inside JSON values; a layer only one side has is
+    named, not diffed. Values that always differ (tokens, session ids) do
+    show — it's the same diff as `storage_diff`, and a person skims past them.
+  - **App Info** (D79's report, both sides): identity, device and
+    advertising rows whose values differ — except session id and session
+    start, which always do — and plugins added, removed or at another
+    version. Plugin versions are Zapp's current lists for each app version,
+    not necessarily what was built (see D85).
 - **Why:** "works on 4.5, not on 4.6" is the most common support question,
   and eyeballing two 100k-line sessions finds nothing: every line differs
   in its numbers.

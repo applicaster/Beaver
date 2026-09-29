@@ -14,6 +14,10 @@ When releasing:
 
 ## [Unreleased]
 
+### Changed
+- Compare also compares **storage** (each layer's latest snapshot, key by key, with the fields inside JSON values) and **App Info** (versions, Zapp ids, device, plugin versions), in the sheet and in `sessions_compare` (default: all four sections).
+- Compare works only on sessions of the same app (same bundle id, else app name); the menus offer only those, and `sessions_compare` says why it refuses two different apps.
+
 ### Added
 - **⌘1…⌘9 apply your saved filters** — the 1st…9th in the ★ popover,
   which shows each one's shortcut. From another tab, they switch to the
