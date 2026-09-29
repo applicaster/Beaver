@@ -19,6 +19,11 @@ When releasing:
 - Compare works only on sessions of the same app (same bundle id, else app name); the menus offer only those, and `sessions_compare` says why it refuses two different apps.
 
 ### Added
+- **Sessions: click a session to see its details** on the right — times,
+  status, the device and device id, **Disconnect** (red), **Default for
+  agents** (ⓘ explains it) and the app's toolboxes, which open with a short
+  animation. **Open**, a double-click or Return opens it in the Log feed;
+  a click no longer does.
 - **⌘1…⌘9 apply your saved filters** — the 1st…9th in the ★ popover,
   which shows each one's shortcut. From another tab, they switch to the
   Log feed.
@@ -123,6 +128,14 @@ When releasing:
   when the app sent one and `text` otherwise.
 
 ### Fixed
+- Sessions left open by quitting Beaver (or a crash) while a device was
+  connected no longer stay "Live" for ever: they end at their last event
+  when Beaver starts.
+- The row separator under a live session in Sessions runs the full width
+  again, and the Agent button's count no longer hides under the window's
+  rounded corner.
+- The Info tab uses the window's width: app and device side by side when
+  there's room.
 - **Events a device sends just before it disconnects are no longer lost.**
   When the connection closed, Beaver could stop reading while the last
   few frames were still waiting, or show them after the session ended.
