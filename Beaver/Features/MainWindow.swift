@@ -209,6 +209,10 @@ struct MainWindow: View {
                                     set: { if !$0 { env.whatsNew = [] } })) {
             WhatsNewView(releases: env.whatsNew)
         }
+        // D94: the device menu, the waiting screen and Beaver → Connect a TV….
+        .sheet(isPresented: Bindable(env).showingConnectTV) {
+            ConnectTVSheet().environment(env).environment(toasts)
+        }
     }
 
     // MARK: - Sidebar
@@ -778,6 +782,7 @@ private struct DeviceSwitcher: View {
                     Task { await env.disconnect(viewed.id) }
                 }
             }
+            Button("Connect a TV…") { env.showingConnectTV = true }
             Button("All Sessions…") { env.selectedTab = .sessions }
         } label: {
             ConnectionIndicator(state: env.serverState, liveCount: env.live.sessionIds.count, showsChevron: true)
@@ -837,13 +842,22 @@ struct ToolbarButtonLabel: View {
 
 private struct ConnectionPlaceholder: View {
     let state: WSServer.State
+    @Environment(AppEnvironment.self) private var env
 
     var body: some View {
-        ContentUnavailableView(
-            title,
-            systemImage: iconName,
-            description: Text(descriptionText)
-        )
+        ContentUnavailableView {
+            Label(title, systemImage: iconName)
+        } description: {
+            Text(descriptionText)
+        } actions: {
+            // D94: a TV has no SDK to connect with; Beaver reads it.
+            switch state {
+            case .listening, .clientDisconnected:
+                Button("TV? Connect a TV…") { env.showingConnectTV = true }
+            case .stopped, .clientConnected, .failed:
+                EmptyView()
+            }
+        }
     }
 
     private var title: String {

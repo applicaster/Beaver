@@ -97,6 +97,7 @@ this document gets updated.
 |-----------------------|--------------------------|----------------------------------------|
 | `WSServer`            | `actor`                  | Owns `NWListener` + current `NWConnection`. Inbound frames published as `AsyncStream<Inbound>`, bracketed by `.connected` / `.disconnected`. |
 | `ProtocolDecoder`     | Free function / struct   | Pure. Stateless. Called from WSServer's consumer task. |
+| `TVBridge`            | `actor`                  | Connect a TV… (D94): reads a smart TV over the Chrome DevTools Protocol and is a `register` client of our own WSServer (ws://127.0.0.1:9080), so the TV takes the inbound path above. `CDP` holds the pure mapping. Stops when WSServer closes its connection. |
 | `LogStore`            | `actor`                  | Owns a single GRDB `DatabaseQueue`. All reads and writes go through it. Publishes `AsyncStream<StoreChange>` notifications. |
 | `LogFeedViewModel`    | `@MainActor @Observable` | Subscribes to `LogStore` snapshots, owns visible-window state, manages follow-tail/auto-pause. Owned by `MainWindow` (see D32), keyed by `env.viewingSessionId`. |
 | `StoragesViewModel`   | `@MainActor @Observable` | Owns selected tab + current snapshot. Triggers `storage.list` on activation. Same ownership model as `LogFeedViewModel` — lives on `MainWindow`, not on `StoragesView`. |

@@ -88,6 +88,9 @@ public final class AppEnvironment {
     /// when it's closed (D92).
     public var whatsNew: [Changelog.Release] = []
 
+    /// The Connect a TV sheet is open over the main window (D94).
+    public var showingConnectTV = false
+
     // MARK: - Window state an agent can set (D54, design §7.1)
     //
     // The view models follow these (`UIStateSync`), and write the
@@ -190,6 +193,35 @@ extension AppEnvironment: DeviceLink {
     nonisolated public func disconnect(_ sessionId: Int64) async {
         guard let connection = await MainActor.run(body: { self.live.connection(for: sessionId) }) else { return }
         await server.disconnect(connection)
+    }
+
+    nonisolated public func connectTV(host: String, port: Int, name: String?) async throws -> Int64 {
+        try await connectTVOnMain(host: host, port: port, name: name)
+    }
+
+    /// D94: the bridge is a `register` client of our own server, so the TV
+    /// is the device zapp-support's bridge makes (D89): the inbound loop
+    /// opens its session, Disconnect closes its socket and that stops it.
+    private func connectTVOnMain(host: String, port: Int, name: String?) async throws -> Int64 {
+        let bridge = try TVBridge(host: host, port: port, name: name)
+        // Already connected, here or by zapp-support's script.
+        if let id = live.session(deviceId: bridge.deviceId) { return id }
+        switch serverState {
+        case .listening, .clientConnected, .clientDisconnected: break
+        case .stopped, .failed: throw TVBridgeError.beaverUnavailable
+        }
+        try await bridge.start()
+        // The session opens, then the register lands in the store: wait for both.
+        for _ in 0..<100 {
+            if let id = live.session(deviceId: bridge.deviceId),
+               try await store.sessions().first(where: { $0.id == id })?.deviceUID == bridge.deviceId {
+                RecentTVs.remember(RecentTV(host: host.trimmingCharacters(in: .whitespaces), port: port, name: name))
+                return id
+            }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        await bridge.stop()
+        throw TVBridgeError.beaverUnavailable
     }
 
     nonisolated public func mcp(_ method: String, params: JSON, to sessionId: Int64, timeout: Duration,

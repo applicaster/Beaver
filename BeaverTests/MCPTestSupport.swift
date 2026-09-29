@@ -60,7 +60,9 @@ final class FakeDevice: DeviceLink {
     /// false plays one that never went out.
     init(onSend: @escaping @Sendable (String) async -> Void = { _ in },
          onMCP: @escaping @Sendable (String, JSON) async throws -> JSON = { _, _ in throw DeviceMCPError.unsupported },
-         callsOnSent: Bool = true) {
+         callsOnSent: Bool = true,
+         onConnectTV: @escaping @Sendable (String, Int) throws -> Int64 = { _, _ in throw TVBridgeError.noPage }) {
+        self.onConnectTV = onConnectTV
         self.onSend = onSend
         self.onMCP = onMCP
         self.callsOnSent = callsOnSent
@@ -73,6 +75,16 @@ final class FakeDevice: DeviceLink {
     var mcpCalls: [(method: String, params: JSON, sessionId: Int64)] { mcpLog.withLock { $0 } }
 
     func disconnect(_ sessionId: Int64) async { drops.withLock { $0.append(sessionId) } }
+
+    /// `devices_connect_tv`: what it was asked, and what it answers.
+    private let tvs = Mutex<[(host: String, port: Int, name: String?)]>([])
+    var connectedTVs: [(host: String, port: Int, name: String?)] { tvs.withLock { $0 } }
+    private let onConnectTV: @Sendable (String, Int) throws -> Int64
+
+    func connectTV(host: String, port: Int, name: String?) async throws -> Int64 {
+        tvs.withLock { $0.append((host, port, name)) }
+        return try onConnectTV(host, port)
+    }
 
     func send(command: String, to sessionId: Int64) async {
         log.withLock { $0.append((command, sessionId)) }
@@ -92,6 +104,7 @@ struct ClientDevice: DeviceLink {
     let client: DeviceMCPClient
     func send(command: String, to sessionId: Int64) async {}
     func disconnect(_ sessionId: Int64) async {}
+    func connectTV(host: String, port: Int, name: String?) async throws -> Int64 { throw TVBridgeError.noPage }
     func mcp(_ method: String, params: JSON, to sessionId: Int64, timeout: Duration,
              onSent: (@Sendable () async -> Void)?) async throws -> JSON {
         try await client.request(method, params: params, timeout: timeout, onSent: onSent)

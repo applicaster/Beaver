@@ -134,6 +134,11 @@ struct BeaverApp: App {
                     toasts.success("Copied \(url)")
                 }
                 .keyboardShortcut("c", modifiers: [.command, .shift])
+                // D94: a TV connects from Beaver, not from an SDK.
+                Button("Connect a TV…") {
+                    NSApp.activate()
+                    env.showingConnectTV = true
+                }
                 // Settings live in Settings… (D92); the actions stay here.
                 Button("Copy MCP Setup Command") {
                     let command = AgentAccess.setupCommand(port: env.agentAccessPort ?? AgentAccess.configuredPort())

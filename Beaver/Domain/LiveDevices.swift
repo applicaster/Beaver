@@ -98,6 +98,11 @@ public struct LiveDevices: Sendable, Equatable {
 
     public func handshake(for connection: UUID) -> ClientHandshake? { handshakes[connection] }
 
+    /// The live session of the device that registered `deviceId` (a TV, D94).
+    public func session(deviceId: String) -> Int64? {
+        sessions.first { handshakes[$0.key]?.deviceId == deviceId }?.value
+    }
+
     /// Live sessions of `register` clients (D89): they take no commands,
     /// storage requests or MCP, so Beaver sends them none.
     public var logsOnlySessions: Set<Int64> {

@@ -83,6 +83,17 @@
     <key>SUAutomaticallyUpdate</key>
     <true/>
 
+    <!-- ── Smart TVs (D94) ──────────────────────────────────────── -->
+    <!-- Connect a TV… reads the TV's DevTools over plain http/ws on the
+         local network: macOS asks for Local Network access with this
+         text, and ATS lets local (non-TLS) loads through. -->
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>Beaver connects to smart TVs on your network to read their app's logs.</string>
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsLocalNetworking</key>
+        <true/>
+    </dict>
     <!-- ── Imported types ───────────────────────────────────────── -->
     <!-- macOS declares no UTI for .har; without one, Export HAR's
          `UTType(filenameExtension:conformingTo:)` still works but the
