@@ -126,6 +126,9 @@ struct JSONTreeView: View {
             }
             .padding(.leading, CGFloat(depth) * Self.indentStep)
             .contentShape(Rectangle())
+            // Only the key: value text is selectable (JSONTreeRow opts
+            // in); the rest of the row expands on click.
+            .textSelection(.disabled)
             .onTapGesture {
                 guard canOpen else { return }
                 expandedOverride = !isExpanded

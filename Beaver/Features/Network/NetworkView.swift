@@ -57,6 +57,7 @@ struct NetworkView: View {
                 .padding(12)
             }
             .frame(minWidth: 800, minHeight: 600)
+            .textSelection(.enabled)
             // The window's toast chip sits behind the sheet.
             .overlay(alignment: .top) { ToastPresenter() }
             .environment(toasts)

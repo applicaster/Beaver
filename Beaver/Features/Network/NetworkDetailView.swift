@@ -148,6 +148,7 @@ private struct NetworkDetailContent: View {
                 .truncationMode(.middle)
                 .fixedSize(horizontal: false, vertical: true)
                 .onTapGesture { if isCut { showsFullURL.toggle() } }
+                .textSelection(.disabled)
                 .help(isCut ? "Show full URL" : "")
             copyIcon(help: "Copy URL") { toasts.copy(entry.url, "Copied URL") }
             if isCut {
