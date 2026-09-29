@@ -14,10 +14,14 @@ struct DevicePopover: View {
     /// Every session row — to resolve which live session among several
     /// sharing a device uid is the one agents' default actually targets.
     let sessions: [Session]
+    /// The popover's width; nil inside the Sessions tab's details, which
+    /// set their own width and padding.
+    var width: CGFloat? = 360
     @Environment(AppEnvironment.self) private var env
     @Environment(ToastCenter.self) private var toasts
     @State private var load: ToolboxLoad = .loading
     @State private var openToolbox: String?
+    @State private var showingDefaultHelp = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -27,22 +31,54 @@ struct DevicePopover: View {
                     Toggle("Default for agents", isOn: defaultBinding)
                         .toggleStyle(.checkbox)
                         .disabled(defaultIsAnotherSession)
-                        .help(defaultIsAnotherSession
-                              ? "Another session of this device is the default"
-                              : "Agents' device tools use this app when a call names no device")
+                        .help(defaultIsAnotherSession ? Self.defaultTakenHelp : Self.defaultHelp)
+                    // A tooltip alone is easy to miss (and doesn't show in
+                    // every container): ⓘ says it on a click.
+                    Button { showingDefaultHelp.toggle() } label: { Image(systemName: "info.circle") }
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(.secondary)
+                        .help("What Default for agents does")
+                        .accessibilityLabel("What Default for agents does")
+                        .popover(isPresented: $showingDefaultHelp, arrowEdge: .bottom) {
+                            Text(defaultIsAnotherSession ? Self.defaultTakenHelp : Self.defaultHelp)
+                                .font(.callout)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(width: 300, alignment: .leading)
+                                .padding(12)
+                        }
                     Spacer()
-                    Button("Disconnect", role: .destructive) {
+                    Button(role: .destructive) {
                         Task { await env.disconnect(session.id) }
+                    } label: {
+                        Label("Disconnect", systemImage: "eject")
                     }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.red)
+                    .help("Disconnect this device")
                 }
                 Divider()
                 toolboxes
             }
         }
-        .padding(16)
-        .frame(width: 360, alignment: .leading)
+        .padding(width == nil ? 0 : 16)
+        .frame(width: width, alignment: .leading)
+        .frame(maxWidth: width == nil ? .infinity : nil, alignment: .leading)
         .task(id: session.id) { if isLive { await reload() } }
     }
+
+    /// D76, said so a person knows what ticking it changes.
+    static let defaultHelp = """
+        When several apps are connected, an AI agent's commands, storage changes and \
+        app tools go to this app if the agent doesn't name one. Without a default, \
+        such a call fails and the agent has to pick a device.
+        Only one app is the default: ticking this one unticks the other.
+        Follows this device across app restarts (by its device id). \
+        Kept until Beaver quits. Reading logs, network and storage isn't affected.
+        """
+    static let defaultTakenHelp = """
+        Another live session of this same device is already the agents' default \
+        (it follows the device across restarts). Untick it there to change it.
+        """
 
     private var title: String {
         (session.appName ?? session.appPackage ?? "Device #\(session.id)")
@@ -146,24 +182,51 @@ struct DevicePopover: View {
         case .loaded(let boxes) where boxes.isEmpty:
             Text("This app has no toolboxes.").font(.caption).foregroundStyle(.secondary)
         case .loaded(let boxes):
-            ScrollView {
+            // The Sessions details scroll as a whole; a ScrollView inside
+            // theirs would collapse to nothing.
+            if width == nil {
+                toolboxList(boxes)
+            } else {
+                ScrollView { toolboxList(boxes) }
+                    .frame(maxHeight: 420)
+            }
+        }
+    }
+
+    private func toolboxList(_ boxes: [Toolbox]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(boxes, id: \.name) { box in
+                // Our own disclosure, not DisclosureGroup: on macOS its rows
+                // pop in; this slides and fades them.
+                let isOpen = openToolbox == box.name
                 VStack(alignment: .leading, spacing: 6) {
-                    ForEach(boxes, id: \.name) { box in
-                        DisclosureGroup(isExpanded: Binding(
-                            get: { openToolbox == box.name },
-                            set: { openToolbox = $0 ? box.name : nil }
-                        )) {
-                            VStack(alignment: .leading, spacing: 8) {
-                                ForEach(box.tools, id: \.name) { ToolRow(tool: $0) }
-                            }
-                            .padding(.leading, 4)
-                        } label: {
+                    Button {
+                        withAnimation(.smooth(duration: 0.35)) { openToolbox = isOpen ? nil : box.name }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .rotationEffect(.degrees(isOpen ? 90 : 0))
                             Text("\(box.name) · \(box.tools.count) tool\(box.tools.count == 1 ? "" : "s")")
+                            Spacer()
                         }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    if isOpen {
+                        // Full width, leading: a toolbox with short descriptions
+                        // was centred, so open lists looked different.
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(box.tools, id: \.name) { ToolRow(tool: $0) }
+                        }
+                        .padding(.leading, 18)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
                     }
                 }
+                .clipped()
             }
-            .frame(maxHeight: 420)
         }
     }
 
