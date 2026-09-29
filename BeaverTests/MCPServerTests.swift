@@ -175,7 +175,7 @@ struct MCPServerTests {
     @Test("instructions teach the action loop, follow-the-device, watches and notes")
     func instructionsCoverActions() {
         for phrase in ["commands_send", "collectLogsMs", "storage_set", "watch_start", "journal_note",
-                       "attention", "howToEnable", "sessionChanged"] {
+                       "attention", "howToEnable", "sessionChanged", "beaver_guide topic query"] {
             #expect(MCPServer.instructions.contains(phrase), "\(phrase)")
         }
     }

@@ -114,6 +114,15 @@ private struct LogFeedContent: View {
 private struct LogFeedFilterBar: View {
     @Bindable var vm: LogFeedViewModel
 
+    /// Why the Filter field won't do what it says (D88), or nil.
+    private var searchProblem: String? {
+        guard let search = vm.filter.search else { return nil }
+        if vm.filter.searchIsRegex {
+            return Filter.isValidRegex(search) ? nil : "Not a valid regular expression — ignored until it is"
+        }
+        return LogQuery.problem(in: search)
+    }
+
     var body: some View {
         HStack(spacing: 10) {
             // Saved-filter presets. Star icon shows the user's named
@@ -141,7 +150,9 @@ private struct LogFeedFilterBar: View {
                     set: { vm.filter.searchIsRegex = $0 }
                 ),
                 payloads: $vm.filter.searchPayloads,
-                isInvalid: vm.filter.searchIsRegex && !Filter.isValidRegex(vm.filter.search ?? "")
+                isInvalid: searchProblem != nil,
+                invalidReason: searchProblem,
+                syntaxHelp: LogQueryHelp.text
             )
             FilterPillField(
                 systemImage: "minus.circle",
@@ -248,10 +259,15 @@ struct FilterPillField: View {
     /// Outlines the pill in red: a regex that doesn't compile, which
     /// the query ignores rather than matching nothing.
     var isInvalid = false
+    /// The invalid outline's tooltip; defaults to the regex one.
+    var invalidReason: String? = nil
+    /// Adds a `?` button that shows this in a popover.
+    var syntaxHelp: AttributedString? = nil
     /// Bump to put the cursor in the field (⌘F).
     var focusRequest = 0
 
     @FocusState private var isFocused: Bool
+    @State private var showsHelp = false
 
     var body: some View {
         HStack(spacing: 6) {
@@ -273,6 +289,25 @@ struct FilterPillField: View {
                 }
                 .buttonStyle(.plain)
                 .help("Clear")
+            }
+
+            if let syntaxHelp {
+                Button {
+                    showsHelp.toggle()
+                } label: {
+                    Image(systemName: "questionmark.circle")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Filter syntax")
+                .popover(isPresented: $showsHelp, arrowEdge: .bottom) {
+                    Text(syntaxHelp)
+                        .font(.callout)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(14)
+                        .frame(width: 400, alignment: .leading)
+                }
             }
 
             Button {
@@ -306,8 +341,26 @@ struct FilterPillField: View {
                 .strokeBorder(isInvalid ? Color.red : Color(.separatorColor),
                               lineWidth: isInvalid ? 1.5 : 1)
         )
-        .help(isInvalid ? "Not a valid regular expression — ignored until it is" : "")
+        .help(isInvalid ? invalidReason ?? "Not a valid regular expression — ignored until it is" : "")
     }
+}
+
+/// The Filter field's `?` popover: `LogQuery`'s syntax (D88).
+enum LogQueryHelp {
+    static let text: AttributedString = (try? AttributedString(markdown: #"""
+        **Filter syntax** — the same as the web logger (zapp-support).
+
+        `timeout player` — both words, anywhere in message, subsystem or category (and data with `{}`)
+        `timeout OR stall` — either one
+        `-heartbeat` — without it
+        `"token refresh"` — the exact phrase
+        `/^err\d+/` — a regular expression
+        `level:error` — exactly that level (`warn` = `warning`)
+        `sub:auth`  `cat:net`  `msg:401` — in that field only; `*` globs in `sub:` and `cat:`
+
+        Example: `level:error sub:*auth* -heartbeat`
+        With `.*` on, the whole text is one regular expression instead.
+        """#, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? ""
 }
 
 /// The small monospaced on/off chip inside a filter pill.

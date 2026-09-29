@@ -275,7 +275,8 @@ fast but doesn't yet match GRDB on these axes for this kind of workload.
 
 The view model never holds the full event set. It holds:
 - A `Filter` value (level, search string + regex flag, exclude string +
-  regex flag).
+  regex flag). The search string is a `LogQuery` (D88) that `LogStore`
+  compiles to a parameterised `WHERE` fragment.
 - A `visibleRange: Range<Int>` representing the row indices currently
   needed by the UI (driven by the SwiftUI table's onAppear / scroll).
 - A `cache: [Int: EventRecord]` mapping row index → record, evicted on

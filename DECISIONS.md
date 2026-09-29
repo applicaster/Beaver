@@ -2946,3 +2946,51 @@ and `sessions_compare` both do; the menus and pickers only offer them.
 - D83's retention already treats a missing end time the same way; this
   makes the list agree.
 
+
+## D88. The Filter field speaks the web logger's query syntax
+
+**Status:** Accepted (2026-09-28). Amends D4.
+
+- **Decision:** the Log feed's Filter text (`Filter.search`) is a query in
+  zapp-support's syntax (`src/utils/logQuery.ts`, ported rule for rule to
+  `LogQuery`): words are ANDed; `OR` joins its neighbours into one group
+  and binds tighter than AND; `-x` excludes, `+x` is plain; `"a phrase"`;
+  `/regex/` (ending at a space, so `/var/log` is a path); `level:` is
+  exactly that level (`warn` = `warning`); `sub:` `cat:` `msg:` search one
+  column; unknown `word:` prefixes are text. `LogStore` compiles the query
+  to one parameterised `WHERE` fragment (`LIKE … ESCAPE`, `REGEXP`,
+  `level = ?`) — no user text in the SQL, nothing filtered in memory.
+- **Why:** people and agents move between the web logger and Beaver with
+  the same logs (SESSION_FILE_FORMAT); one query language means one
+  thing to learn, and one line an agent can hand the user. D4 rejected a
+  chip-based query *builder*; this is typing in the field that exists,
+  and plain substring search still works as typed.
+- **Regex toggle:** on, the whole text is one regular expression, exactly
+  as before — no syntax. Off, `/…/` terms are regexes. A saved filter keeps
+  its text and toggle, so saved regex filters behave as they did.
+- **Kept:** the Exclude field, the level control, the chips and the `{}`
+  payload toggle are unchanged and AND with the query.
+- **Differences from zapp-support, on purpose:**
+  - plain words search `data_json` only with `{}` on (D40): payloads are
+    ~97 % of a session's bytes; the web logger always searches them;
+  - `*` globs in `sub:` and `cat:` (`sub:*auth*`), as MCP's subsystem
+    filters do, so agents' habit works; in zapp-support `*` is literal.
+    Proposed there too;
+  - matching is SQLite's `LIKE` (case folding for ASCII only) and ICU
+    regexes, not JavaScript's.
+- **Changes for users:** several plain words used to be one substring
+  (`player ready` only side by side); now each word may be anywhere in the
+  row — a superset, and `"player ready"` gives the old result. A leading
+  `-`, quotes or `/…/` used to be literal text.
+- **Invalid input:** an unclosed quote or a regex that doesn't compile
+  outlines the field in red with the reason; the query still runs as
+  zapp-support runs it (the quote is text, the regex term is dropped). MCP
+  refuses such a `search` with an example instead.
+- **Agents:** `filter.search` in every filter-taking tool (`logs_query`,
+  `logs_facets`, `logs_wait`, `ui_show`, `filters_save`, `watch_start`, …)
+  takes the same syntax — `search` rather than a new `query` field, so the
+  UI, `ui_state` and saved filters show one text. Single-word calls behave
+  as before.
+- **Alternatives:** a separate `query` field beside `search` (two text
+  semantics on one filter, a migration for saved filters); filtering the
+  parsed query in Swift (feeds reach 1M rows); FTS5 (D40 removed it).

@@ -25,6 +25,8 @@ public struct Filter: Equatable, Hashable, Sendable, Codable {
 
     public var minLevel: LogLevel
 
+    /// A `LogQuery` (`level:error sub:auth -heartbeat`), the web logger's
+    /// syntax (D88) — or, with `searchIsRegex`, one regular expression.
     public var search: String?
 
     public var searchIsRegex: Bool

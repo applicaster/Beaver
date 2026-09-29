@@ -98,6 +98,12 @@ struct ToolInputTests {
         await #expect(throws: ToolError.self) {
             try await ctx.resolveFilter(["search": "(", "searchIsRegex": true], sessionId: s.id)
         }
+        // The query syntax (D88): a broken query is an error with an example.
+        await #expect(throws: ToolError.self) {
+            try await ctx.resolveFilter(["search": #"level:error "unclosed"#], sessionId: s.id)
+        }
+        let query = try await ctx.resolveFilter(["search": "level:error sub:*auth* -heartbeat"], sessionId: s.id)
+        #expect(query.filter.search == "level:error sub:*auth* -heartbeat")
         let none = try await ctx.resolveFilter(nil, sessionId: s.id)
         #expect(none.filter == .none)
     }

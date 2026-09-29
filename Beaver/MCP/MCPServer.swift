@@ -27,7 +27,9 @@ public struct MCPServer: Sendable {
         live session (with several, the viewed one if live, else the newest), else the one the user \
         is viewing, else the most recent. Before filtering by \
         subsystem or category call logs_facets: names are namespaced and you will not guess them \
-        (globs like "*auth*" and name fragments work, and results say what they matched). Use \
+        (globs like "*auth*" and name fragments work, and results say what they matched). A filter's \
+        search is a query in the Log feed's syntax, one line for many conditions: \
+        "level:error sub:*auth* -heartbeat" (beaver_guide topic query). Use \
         since: "5m" or afterId to look at recent events. To see what an action causes, send it with \
         commands_send and collectLogsMs, or note latestEventId, act (commands_send, storage_set), \
         then logs_wait with afterId. Beaver sends any command and can't know which ones restart the \

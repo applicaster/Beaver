@@ -167,8 +167,8 @@ public enum ToolSchema {
 
     public static let filter: JSON = object([
         "minLevel": string("Lowest level: verbose, debug, info, warning, error. Aliases: warn, err, e, 0–4."),
-        "search": string("Text to find in message, subsystem or category; case-insensitive."),
-        "searchIsRegex": boolean("Treat search as a regular expression."),
+        "search": string("A query in the Log feed's syntax, the same as zapp-support's web logger; case-insensitive. Words are ANDed and each is found in message, subsystem or category (plus data with searchPayloads); OR joins alternatives, -word excludes, \"a phrase\", /regex/, and level:error (exactly that level; warn = warning), sub:, cat: (* globs), msg:. Example: \"level:error sub:*auth* -heartbeat\"."),
+        "searchIsRegex": boolean("Treat the whole search as one regular expression, without the query syntax."),
         "exclude": string("Hide events containing this text."),
         "excludeIsRegex": boolean("Treat exclude as a regular expression."),
         "searchPayloads": boolean("Also search the data payload. Slower on big sessions."),
