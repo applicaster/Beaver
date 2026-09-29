@@ -26,6 +26,17 @@ does the same for a manual release.
 ## [4.14.1] - 2026-09-29
 
 ### Added
+- **Smart TVs (Vizio, Vidaa, …) show up in Beaver like a phone.** Run
+  zapp-support's TV bridge against Beaver:
+  `node scripts/tv-bridge.mjs <tv-ip>:<devtools-port> --server ws://127.0.0.1:9080 --name "Living room Vizio"`.
+  The TV's console lines and exceptions arrive under subsystem `tv-cdp`; the
+  device is named after `--name` (else the app's page title), shows as
+  "TV (DevTools)", and is followed across bridge reconnects. It only sends
+  logs: Beaver asks it for no commands or storage, the device popover says
+  it has no toolboxes, and agents' commands, storage changes and toolboxes
+  are refused for it (`beaver_status` shows `platform: "tv-cdp"`).
+- Log lines with the browser console's levels `warn` and `log` are read as
+  warning and info instead of being rejected.
 - Network: the request detail shows the SDK's **Request ID** (with a copy
   button), to find the request in the app's own logs. Agents:
   `network_get` returns it as `requestId`.
@@ -61,17 +72,6 @@ does the same for a manual release.
 ## [4.12.0] - 2026-09-29
 
 ### Added
-- **Smart TVs (Vizio, Vidaa, …) show up in Beaver like a phone.** Run
-  zapp-support's TV bridge against Beaver:
-  `node scripts/tv-bridge.mjs <tv-ip>:<devtools-port> --server ws://127.0.0.1:9080 --name "Living room Vizio"`.
-  The TV's console lines and exceptions arrive under subsystem `tv-cdp`; the
-  device is named after `--name` (else the app's page title), shows as
-  "TV (DevTools)", and is followed across bridge reconnects. It only sends
-  logs: Beaver asks it for no commands or storage, the device popover says
-  it has no toolboxes, and agents' commands, storage changes and toolboxes
-  are refused for it (`beaver_status` shows `platform: "tv-cdp"`).
-- Log lines with the browser console's levels `warn` and `log` are read as
-  warning and info instead of being rejected.
 - **Sessions: click a session to see its details** on the right — times,
   status, the device and device id, **Disconnect** (red), **Default for
   agents** (ⓘ explains it) and the app's toolboxes, which open with a short
