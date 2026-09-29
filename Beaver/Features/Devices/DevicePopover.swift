@@ -71,6 +71,7 @@ struct DevicePopover: View {
         When several apps are connected, an AI agent's commands, storage changes and \
         app tools go to this app if the agent doesn't name one. Without a default, \
         such a call fails and the agent has to pick a device.
+        Only one app is the default: ticking this one unticks the other.
         Follows this device across app restarts (by its device id). \
         Kept until Beaver quits. Reading logs, network and storage isn't affected.
         """
