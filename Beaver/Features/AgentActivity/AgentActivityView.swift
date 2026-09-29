@@ -418,14 +418,17 @@ struct AgentToolbarButton: View {
         } label: {
             ToolbarButtonLabel(systemImage: "sparkles", title: "Agent")
                 .symbolEffect(.bounce, value: model.arrivals)
-                .overlay(alignment: .topTrailing) {
+                // On the icon, not past the label's trailing edge: the Agent
+                // button is the toolbar's last, and the badge ran under the
+                // window's rounded corner.
+                .overlay(alignment: .top) {
                     if model.unseen > 0 {
                         Text(model.unseen > 99 ? "99+" : "\(model.unseen)")
                             .font(.caption2.bold())
                             .padding(.horizontal, 4)
                             .background(Capsule().fill(.red))
                             .foregroundStyle(.white)
-                            .offset(x: 6, y: -4)
+                            .offset(x: 13, y: -5)
                             .accessibilityLabel("\(model.unseen) new agent actions")
                     }
                 }
