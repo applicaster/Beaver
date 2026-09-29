@@ -201,10 +201,11 @@ public enum AppInfo {
     // MARK: - Launch-time config files (S3)
 
     /// The files QuickBrick loads at launch (`runtime_configuration_urls.json`,
-    /// written by zapplicaster-cli from build_params), plus the older rivers.json.
+    /// written by zapplicaster-cli from build_params), plus the older
+    /// rivers.json and styles.json.
     public enum ConfigKind: String, Sendable, CaseIterable {
         case layout, tabletLayout, rivers, pluginConfigurations, remoteConfigurations,
-             cellStyles, tabletCellStyles, presetsMapping, tabletPresetsMapping, pipesEndpoints
+             cellStyles, tabletCellStyles, presetsMapping, tabletPresetsMapping, pipesEndpoints, styles
 
         /// Read by App Info, so always downloaded; the rest are only listed.
         var isParsed: Bool { [.layout, .rivers, .pluginConfigurations, .remoteConfigurations].contains(self) }
@@ -214,7 +215,7 @@ public enum AppInfo {
         public let url: String
         /// A captured response body, when the app's request was recorded.
         public let body: String?
-        /// "CMS", "captured request", "storage", "derived from storage".
+        /// "captured request", "storage: local/applicaster.v2/layout_url", "CMS", "derived from storage".
         public let found: String
     }
 
@@ -229,8 +230,19 @@ public enum AppInfo {
                             options: .regularExpression) != nil
     }
 
+    /// The app's own record of the URLs it loaded: applicaster.v2 keys, in
+    /// the session and local layers. The key names the kind, tablet ones too.
+    static let storageKeys: [String: ConfigKind] = [
+        "layout_url": .layout, "tablet_layout_url": .tabletLayout, "rivers_url": .rivers,
+        "plugin_configuration_url": .pluginConfigurations, "plugin_configurations_url": .pluginConfigurations,
+        "remote_configuration_url": .remoteConfigurations, "remote_configurations_url": .remoteConfigurations,
+        "cell_styles_url": .cellStyles, "tablet_cell_styles_url": .tabletCellStyles,
+        "presets_mapping_url": .presetsMapping, "tablet_presets_mapping_url": .tabletPresetsMapping,
+        "endpoints_url": .pipesEndpoints, "pipes_endpoints_url": .pipesEndpoints, "styles_url": .styles,
+    ]
+
     /// Tablet variants can't be told from the URL: they come only from
-    /// build_params and remote_configurations.
+    /// storage keys, build_params and remote_configurations.
     static func kind(of url: String) -> ConfigKind? {
         let path = url.components(separatedBy: "?")[0]
         let patterns: [(ConfigKind, String)] = [
@@ -239,6 +251,7 @@ public enum AppInfo {
             (.cellStyles, #"cell_?styles[\w-]*\.json"#),
             (.presetsMapping, #"presets_?mapping[\w-]*\.json"#),
             (.pipesEndpoints, #"/data_source_providers/endpoints\.json|pipes_?endpoints[\w-]*\.json"#),
+            (.styles, #"/styles/styles\.json"#),
             (.rivers, #"rivers[\w-]*\.json"#),
             (.layout, #"layout[\w-]*\.json"#),
         ]
@@ -253,22 +266,23 @@ public enum AppInfo {
     ]
 
     /// Where each config file is, with its body when a captured request has
-    /// it. CMS URLs win, then captured requests, then URLs in storage, then
-    /// the path Zapp builds from account, bundle, store and version.
+    /// it. What the app itself used wins: captured requests, then the URLs
+    /// it keeps in storage; then the CMS's build-time URLs; then the path
+    /// Zapp builds from account, bundle, store and version.
     public static func configFiles(
         leaves: [StorageLeaf],
         network: [(url: String, body: String?)],
         cms: [ConfigKind: String] = [:]
     ) -> [ConfigKind: ConfigFile] {
-        var out: [ConfigKind: ConfigFile] = [:]
-        for (kind, url) in cms where isAllowedConfigURL(url) {
-            out[kind] = ConfigFile(url: url, body: network.first { $0.url == url }?.body, found: "CMS")
-        }
-        var candidates = network.map { ConfigFile(url: $0.url, body: $0.body, found: "captured request") }
+        var candidates: [(kind: ConfigKind?, file: ConfigFile)] =
+            network.map { (nil, ConfigFile(url: $0.url, body: $0.body, found: "captured request")) }
         for leaf in leaves {
             for url in allGroups(#"(https?://[^\s"'\\]+\.json[^\s"'\\]*)"#, in: leaf.text ?? "").map({ $0[0] }) {
-                candidates.append(ConfigFile(url: url, body: nil, found: "storage"))
+                candidates.append((storageKeys[leaf.key], ConfigFile(url: url, body: nil, found: leaf.source)))
             }
+        }
+        for kind in ConfigKind.allCases {
+            if let url = cms[kind] { candidates.append((kind, ConfigFile(url: url, body: nil, found: "CMS"))) }
         }
         let part = { (keys: [String]) in find(leaves, keys)?.text }
         if let account = part(["accountsAccountId", "account_id", "accounts_account_id"]),
@@ -280,19 +294,20 @@ public enum AppInfo {
             let base = "https://\(configHost)/zapp/accounts/\(seg[0])/apps/\(seg[1])/\(seg[2])/\(seg[3])"
             for file in ["rivers/rivers.json", "layouts/layout.json", "remote_configurations/remote_configurations.json",
                          "plugin_configurations/plugin_configurations.json"] {
-                candidates.append(ConfigFile(url: base + "/" + file, body: nil, found: "derived from storage"))
+                candidates.append((nil, ConfigFile(url: base + "/" + file, body: nil, found: "derived from storage")))
             }
         }
         if let account = part(["accountsAccountId", "account_id", "accounts_account_id"]),
            let family = part(["app_family_id"]) {
             let seg = [account, family].map { $0.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? $0 }
-            candidates.append(ConfigFile(
+            candidates.append((nil, ConfigFile(
                 url: "https://\(configHost)/zapp/accounts/\(seg[0])/app_families/\(seg[1])/data_source_providers/endpoints.json",
-                body: nil, found: "derived from storage"))
+                body: nil, found: "derived from storage")))
         }
-        for c in candidates where isAllowedConfigURL(c.url) {
-            guard let kind = kind(of: c.url), out[kind]?.found != "CMS" else { continue }
-            if out[kind] == nil || (out[kind]!.body == nil && c.body != nil) { out[kind] = c }
+        var out: [ConfigKind: ConfigFile] = [:]
+        for (known, c) in candidates where isAllowedConfigURL(c.url) {
+            guard let kind = known ?? kind(of: c.url) else { continue }
+            if out[kind] == nil { out[kind] = c }
         }
         return out
     }
@@ -355,7 +370,7 @@ public enum AppInfo {
 
     // MARK: - CMS build_params
 
-    /// build_params field → App Info label; the CMS wins over storage.
+    /// build_params field → App Info label.
     static let cmsLabels: [(String, String)] = [
         ("app_name", "App name"), ("bundle_identifier", "Bundle id"), ("version_name", "App version"),
         ("build_version", "Build number"), ("sdk_version", "SDK version"),
@@ -364,14 +379,30 @@ public enum AppInfo {
         ("rivers_configuration_id", "Layout id"), ("device_target", "Device target"), ("store", "Store"),
     ]
 
+    /// The app's storage wins: build_params describe the Zapp version's
+    /// latest build, not the one installed (a device on build 66 while Zapp
+    /// has built 70). The CMS fills what storage lacks, and a different
+    /// value shows in the source.
     public static func mergeBuildParams(_ identity: [InfoRow], _ params: [String: Any]?) -> [InfoRow] {
         guard let params else { return identity }
-        let cms = cmsLabels.compactMap { key, label -> InfoRow? in
-            guard let value = params[key], let t = text(value), !t.isEmpty else { return nil }
-            return InfoRow(label: label, value: t, source: "CMS")
+        var out = identity
+        for (key, label) in cmsLabels {
+            guard let value = params[key], let t = text(value), !t.isEmpty else { continue }
+            if let i = out.firstIndex(where: { $0.label == label }) {
+                if out[i].value != t {
+                    out[i] = InfoRow(label: label, value: out[i].value, source: out[i].source + " · Zapp CMS now: " + t)
+                }
+            } else {
+                out.append(InfoRow(label: label, value: t, source: "CMS"))
+            }
         }
-        let labels = Set(cms.map(\.label))
-        return cms + identity.filter { !labels.contains($0.label) }
+        return out
+    }
+
+    /// The account id from a config URL (`/zapp/accounts/<id>/…`), for apps
+    /// whose storage doesn't name it.
+    public static func accountId(fromConfigURLs urls: [String]) -> String? {
+        urls.lazy.compactMap { firstGroup(#"/zapp/accounts/([^/]+)/"#, in: $0) }.first
     }
 
     /// The config URLs build_params names, by kind — the same keys

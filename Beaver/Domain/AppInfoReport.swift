@@ -160,6 +160,10 @@ public struct AppInfoReport: Sendable {
         if let name = json[.layout].flatMap(AppInfo.layoutName) {
             identity.insert(InfoRow(label: "Layout name", value: name, source: "layout.json"), at: 0)
         }
+        if !identity.contains(where: { $0.label == "Account id" }),
+           let account = AppInfo.accountId(fromConfigURLs: configs.values.map(\.url)) {
+            identity.append(InfoRow(label: "Account id", value: account, source: "config file URL"))
+        }
         identity = AppInfo.mergeBuildParams(identity, params)
 
         let listed = json[.rivers].map(AppInfo.screens(fromRiversOrLayout:))

@@ -44,7 +44,7 @@ struct AppInfoTests {
         #expect(cells == [AppInfo.CellStyle(id: "0a1b2c3d-1111-2222-3333-444455556666", plugin: "hero")])
     }
 
-    @Test("Config files: CMS, then captured, then derived; only Zapp's bucket")
+    @Test("Config files: captured, then CMS, then derived; only Zapp's bucket")
     func configFiles() {
         let leaves = AppInfo.leaves(session: session, local: local)
         let base = "https://assets-secure.applicaster.com/zapp/accounts/acct1/apps/com.applicaster.river/apple_store/2.7"
@@ -63,6 +63,34 @@ struct AppInfoTests {
         #expect(files[.pluginConfigurations]?.found == "CMS")
         #expect(!AppInfo.isAllowedConfigURL("http://assets-secure.applicaster.com/zapp/accounts/a/apps/b/c/d/x.json"))
         #expect(!AppInfo.isAllowedConfigURL("https://assets-secure.applicaster.com:444/zapp/accounts/a/apps/b/c/d/x.json"))
+    }
+
+    @Test("The app's own URLs in applicaster.v2 win over the CMS and the derived path; the key names the kind")
+    func storageURLs() {
+        let host = "https://assets-secure.applicaster.com/zapp/accounts/acct1"
+        let app = host + "/apps/com.app/apple_store/0.0.7-dev"
+        // As a real iOS app keeps them (loggernext_2026-09-23): cell styles only in local.
+        let leaves = AppInfo.leaves(session: #"""
+            {"applicaster.v2":{"accountsAccountId":"acct1","bundleIdentifier":"com.app","store":"apple_store","version_name":"0.0.7-dev",
+              "layout_url":"\#(app)/layouts/layout.json","styles_url":"\#(app)/styles/styles.json",
+              "endpoints_url":"\#(host)/app_families/7/data_source_providers/endpoints.json",
+              "remote_configuration_url":"\#(app)/remote_configurations/remote_configurations.json"}}
+            """#, local: #"""
+            {"applicaster.v2":{"cell_styles_url":"\#(host)/app_families/7/layouts/L1/cell_styles.json",
+              "tablet_layout_url":"\#(app)/layouts/tablet_layout.json"}}
+            """#)
+        let files = AppInfo.configFiles(leaves: leaves, network: [],
+                                        cms: [.cellStyles: host + "/app_families/7/layouts/OLD/cell_styles.json",
+                                              .presetsMapping: host + "/app_families/7/layouts/L1/presets_mapping.json"])
+        #expect(files[.cellStyles] == AppInfo.ConfigFile(url: host + "/app_families/7/layouts/L1/cell_styles.json", body: nil,
+                                                         found: "storage: local/applicaster.v2/cell_styles_url"))
+        #expect(files[.tabletLayout]?.url == app + "/layouts/tablet_layout.json")
+        #expect(files[.layout]?.found == "storage: session/applicaster.v2/layout_url")
+        #expect(files[.styles]?.url == app + "/styles/styles.json")
+        #expect(files[.pipesEndpoints]?.found == "storage: session/applicaster.v2/endpoints_url")
+        #expect(files[.presetsMapping]?.found == "CMS")
+        #expect(files[.rivers]?.found == "derived from storage")
+        #expect(AppInfo.accountId(fromConfigURLs: [app + "/layouts/layout.json"]) == "acct1")
     }
 
     @Test("Screens and cell styles from layout.json, plugins from configurations")
@@ -104,7 +132,7 @@ struct AppInfoTests {
         #expect(screens.map(\.name) == ["Home", "Player"])
     }
 
-    @Test("The report: CMS wins, a cut captured body is fetched, plugins come from the file")
+    @Test("The report: storage wins over the CMS, a cut captured body is fetched, plugins come from the file")
     func report() async throws {
         let store = try LogStore(source: .inMemory)
         let s = try await store.createSession(source: .live)
@@ -130,7 +158,10 @@ struct AppInfoTests {
             })
         let r = try await AppInfoReport.build(store: store, sessionId: s.id, http: http)
         #expect(r.cms == .loaded)
-        #expect(r.identity.first == InfoRow(label: "App name", value: "River CMS", source: "CMS"))
+        // build_params are the version's latest build, not the installed one.
+        #expect(r.identity.first == InfoRow(label: "App name", value: "River",
+                                            source: "storage: session/applicaster.v2/app_name · Zapp CMS now: River CMS"))
+        #expect(r.identity.first { $0.label == "Account id" }?.source == "storage: session/applicaster.v2/accountsAccountId")
         #expect(r.screens.map(\.name) == ["Home"])
         #expect(r.screensSource == "rivers.json")
         #expect(r.plugins == [AppInfo.Plugin(id: "hero", version: "2.1")])

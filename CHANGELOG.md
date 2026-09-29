@@ -17,7 +17,9 @@ does the same for a manual release.
   three: remote configurations, plugin configurations, layout, cell styles,
   presets mapping and pipes endpoints (and the tablet variants when the Zapp
   CMS names them) — found without a Zapp token too, through the app's
-  storage and `remote_configurations.json`.
+  storage and `remote_configurations.json`. The URLs the app itself keeps
+  in storage (`applicaster.v2` → `layout_url`, `cell_styles_url`,
+  `endpoints_url`, `styles_url`…) come first, and each row says which key.
 - **Config files are saved with the session**: when a device connects,
   Beaver downloads them and keeps them with its session, so the session
   shows Zapp as it was then, not after the next publish. **Open** shows a
@@ -25,6 +27,13 @@ does the same for a manual release.
   Session** (Zapp's current files). A file shared by several sessions is
   stored once. Agents: `app_config` reads a saved file by path
   (`general_settings.layout_id`, `screens.0.name`).
+
+### Fixed
+- **Info no longer shows the Zapp CMS's versions over the app's own.**
+  build_params describe the Zapp version's latest build, not the one on the
+  device (build 70 in Zapp, 66 installed): the app's storage now wins, and
+  a different CMS value shows next to its source. A Zapp token isn't needed
+  for versions or config files any more; it only adds what storage lacks.
 
 ## [4.18.0] - 2026-09-29
 

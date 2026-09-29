@@ -34,7 +34,7 @@ enum InfoTools {
         let os = hw("OS version").map { v in hw("Platform").map { "\($0) \(v)" } ?? v }
         let device = [hw("Model"), os].compactMap { $0 }
         let cms: String = switch r.cms {
-        case .noToken: "Zapp CMS not asked: no Zapp token (the user can set one in Beaver → Settings… → Zapp)."
+        case .noToken: "Zapp CMS not asked: no Zapp token — not needed: versions and config URLs come from the app's storage (a token only adds Zapp's latest build for this version and the device target)."
         case .noVersionId: "Zapp CMS not asked: the app's storage has no version_id."
         case .loaded: "Zapp CMS: build_params loaded."
         case .failed(let why): "Zapp CMS failed: \(why)"

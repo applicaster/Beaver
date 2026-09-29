@@ -127,7 +127,7 @@ struct InfoView: View {
             case .loaded:
                 Label("Zapp CMS build_params loaded", systemImage: "checkmark.circle").foregroundStyle(.green)
             case .noToken:
-                Text("Set a Zapp token to add the CMS's versions and the exact config URLs.").foregroundStyle(.secondary)
+                Text("Optional: the app's storage has its versions and config URLs. A Zapp token adds what Zapp has now for this version (its latest build, device target).").foregroundStyle(.secondary)
             case .noVersionId:
                 Text("Zapp CMS not asked: the app's storage has no version_id.").foregroundStyle(.secondary)
             case .failed(let why):
