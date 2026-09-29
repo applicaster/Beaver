@@ -93,6 +93,19 @@ struct AppInfoTests {
         #expect(AppInfo.accountId(fromConfigURLs: [app + "/layouts/layout.json"]) == "acct1")
     }
 
+    @Test("build_params fill gaps and show next to a different storage value, never over it")
+    func buildParams() {
+        let identity = [InfoRow(label: "Build number", value: "66", source: "storage: session/applicaster.v2/build_version"),
+                        InfoRow(label: "QuickBrick version", value: "16.0.0-rc.95", source: "storage: s")]
+        let merged = AppInfo.mergeBuildParams(identity, ["build_version": 70, "quick_brick_version": "16.0.0-rc.95",
+                                                         "device_target": "universal"])
+        #expect(merged == [
+            InfoRow(label: "Build number", value: "66", source: "storage: session/applicaster.v2/build_version · Zapp CMS now: 70"),
+            InfoRow(label: "QuickBrick version", value: "16.0.0-rc.95", source: "storage: s"),
+            InfoRow(label: "Device target", value: "universal", source: "CMS"),
+        ])
+    }
+
     @Test("Screens and cell styles from layout.json, plugins from configurations")
     func parsers() throws {
         let layout = try JSONSerialization.jsonObject(with: Data(#"""
