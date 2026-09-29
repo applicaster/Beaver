@@ -210,3 +210,98 @@ struct FingerprintTests {
         #expect(Session(id: 1, startedAt: Date(), source: .imported).fingerprint(capturedAt: Date()).hasPrefix("Unknown device\n"))
     }
 }
+
+@Suite("Config files saved with the session (D79)")
+struct SavedConfigTests {
+    private let storage = #"""
+        {"applicaster.v2":{"version_name":"1.0","bundleIdentifier":"com.app","accountsAccountId":"acct1",
+          "store":"apple_store","app_family_id":"7"}}
+        """#
+    private static let family = "https://assets-secure.applicaster.com/zapp/accounts/acct1/app_families/7"
+
+    /// Serves every file; counts what was fetched.
+    private func zapp(_ fetched: LockedBox<[String]>, layoutName: String = "Main") -> ZappHTTP {
+        ZappHTTP(token: { nil }, buildParams: { _, _ in [:] }, get: { url in
+            fetched.mutate { $0.append(url.lastPathComponent) }
+            switch url.lastPathComponent {
+            case "remote_configurations.json":
+                return Data(#"{"general_settings":{"cell_styles_json_url":"\#(Self.family)/layouts/L/cell_styles.json"}}"#.utf8)
+            case "layout.json": return Data(#"{"name":"\#(layoutName)","screens":[{"id":"s1","name":"Home"}]}"#.utf8)
+            case "cell_styles.json": return Data(#"{"c1":{"plugin_identifier":"hero"}}"#.utf8)
+            default: throw URLError(.fileDoesNotExist)
+            }
+        })
+    }
+
+    private func session(_ store: LogStore) async throws -> Int64 {
+        let s = try await store.createSession(source: .live)
+        try await store.recordStorageSnapshot(sessionId: s.id, namespace: .session, dataJSON: storage)
+        return s.id
+    }
+
+    @Test("Capture downloads every file once, a second capture fetches nothing, and App Info reads the saved copy")
+    func capture() async throws {
+        let store = try LogStore(source: .inMemory)
+        let s = try await session(store)
+        let fetched = LockedBox<[String]>([])
+        let n = try await ConfigSnapshot.capture(store: store, sessionId: s, http: zapp(fetched))
+        #expect(n == 6)  // layout, rivers, plugin + remote configurations, pipes endpoints, cell styles
+        #expect(fetched.value.contains("cell_styles.json"))
+        let saved = try await store.savedConfigs(sessionId: s)
+        #expect(saved.first { $0.kind == .cellStyles }?.sha256 != nil)
+        #expect(saved.first { $0.kind == .rivers }?.error != nil)
+
+        let before = fetched.value.count
+        #expect(try await ConfigSnapshot.capture(store: store, sessionId: s, http: zapp(fetched)) == 6)
+        #expect(fetched.value.count == before)
+
+        // Zapp published a new layout since: the session still shows its own.
+        let r = try await AppInfoReport.build(store: store, sessionId: s, http: zapp(fetched, layoutName: "Republished"))
+        #expect(r.identity.first?.value == "Main")
+        #expect(r.configsSavedAt != nil)
+        #expect(r.configs[.cellStyles]?.size == #"{"c1":{"plugin_identifier":"hero"}}"#.utf8.count)
+        #expect(fetched.value.count == before)
+    }
+
+    @Test("A file shared by two sessions is stored once and goes with the last of them")
+    func sharedBlob() async throws {
+        let store = try LogStore(source: .inMemory)
+        let a = try await session(store), b = try await session(store)
+        let fetched = LockedBox<[String]>([])
+        try await ConfigSnapshot.capture(store: store, sessionId: a, http: zapp(fetched))
+        try await ConfigSnapshot.capture(store: store, sessionId: b, http: zapp(fetched))
+        let sha = try #require(try await store.savedConfigs(sessionId: a).first { $0.kind == .layout }?.sha256)
+        #expect(try await store.savedConfigs(sessionId: b).first { $0.kind == .layout }?.sha256 == sha)
+
+        try await store.deleteSessions(ids: [a])
+        #expect(try await store.configData(sha256: sha) != nil)
+        try await store.deleteSessions(ids: [b])
+        #expect(try await store.configData(sha256: sha) == nil)
+    }
+
+    @Test("app_config: the saved files, a path inside one, errors that say what exists, download for older sessions")
+    func tool() async throws {
+        let store = try LogStore(source: .inMemory)
+        let s = try await session(store)
+        let fetched = LockedBox<[String]>([])
+        let ctx = ToolContext(store: store, ui: FakeUI(value: HostSnapshot()), device: FakeDevice(), zapp: zapp(fetched))
+        await #expect(throws: ToolError.self) {
+            _ = try await InfoTools.appConfig.run(ToolArguments(["sessionId": JSON(s)]), ctx)
+        }
+        let list = try await InfoTools.appConfig.run(ToolArguments(["sessionId": JSON(s), "download": true]), ctx)
+        #expect(list.summary.contains("config files saved"))
+
+        let name = try await InfoTools.appConfig.run(
+            ToolArguments(["sessionId": JSON(s), "kind": "layout", "path": "screens.0.name"]), ctx)
+        #expect(name.body == "\"Home\"")
+        let layout = try await InfoTools.appConfig.run(ToolArguments(["sessionId": JSON(s), "kind": "layout"]), ctx)
+        #expect(layout.structured["keys"] == ["name", "screens"])
+
+        do {
+            _ = try await InfoTools.appConfig.run(ToolArguments(["sessionId": JSON(s), "kind": "layout", "path": "screenz"]), ctx)
+            Issue.record("no error")
+        } catch let e as ToolError {
+            #expect(e.message.contains("keys: name, screens"))
+        }
+    }
+}

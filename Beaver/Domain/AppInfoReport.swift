@@ -15,6 +15,19 @@ public struct AppInfoReport: Sendable {
         public let found: String
         /// Nil when the JSON loaded, or wasn't needed (only listed).
         public let error: String?
+        /// Set when the file is saved with the session: open it by its hash.
+        public var savedAt: Date? = nil
+        public var sha256: String? = nil
+        public var size: Int? = nil
+    }
+
+    /// A config file found for a session, with its body when it was downloaded.
+    public struct Fetched: Sendable {
+        public let kind: AppInfo.ConfigKind
+        public let url: String
+        public let found: String
+        public let data: Data?
+        public let error: String?
     }
 
     public enum CMS: Sendable, Equatable {
@@ -34,6 +47,8 @@ public struct AppInfoReport: Sendable {
     public var plugins: [AppInfo.Plugin]
     public var pluginsSource: String
     public var configs: [AppInfo.ConfigKind: Config]
+    /// When the config files were saved with the session; nil: read from Zapp now.
+    public var configsSavedAt: Date?
     public var cms: CMS
     /// When the newest storage snapshot was taken; nil without storage.
     public var storageAsOf: Date?
@@ -45,11 +60,19 @@ public struct AppInfoReport: Sendable {
         return AppInfo.find(AppInfo.leaves(session: session?.dataJSON, local: local?.dataJSON), ["version_id"])?.text
     }
 
-    public static func build(store: LogStore, sessionId: Int64, http: ZappHTTP) async throws -> AppInfoReport {
+    /// The session's storage and, with a token, the CMS's build_params.
+    struct Inputs {
+        var session: StorageSnapshot?
+        var local: StorageSnapshot?
+        var leaves: [StorageLeaf]
+        var params: [String: Any]?
+        var cms: CMS
+    }
+
+    static func inputs(store: LogStore, sessionId: Int64, http: ZappHTTP) async throws -> Inputs {
         let session = try await store.latestStorageSnapshot(sessionId: sessionId, namespace: .session)
         let local = try await store.latestStorageSnapshot(sessionId: sessionId, namespace: .local)
         let leaves = AppInfo.leaves(session: session?.dataJSON, local: local?.dataJSON)
-
         var cms = CMS.noToken
         var params: [String: Any]?
         if let token = http.token() {
@@ -64,36 +87,74 @@ public struct AppInfoReport: Sendable {
                 cms = .noVersionId
             }
         }
+        return Inputs(session: session, local: local, leaves: leaves, params: params, cms: cms)
+    }
 
+    /// Every config file the session points to, with the bodies of the
+    /// kinds `download` asks for (remote_configurations always: it names
+    /// cell styles and presets).
+    static func locate(_ inputs: Inputs, store: LogStore, sessionId: Int64, http: ZappHTTP,
+                       download: (AppInfo.ConfigKind) -> Bool) async throws -> [Fetched] {
         let network = try await store.networkEntries(sessionId: sessionId)
             .filter { AppInfo.isAllowedConfigURL($0.url) }
             .map { (url: $0.url, body: $0.responseBody) }
-        let files = AppInfo.configFiles(leaves: leaves, network: network, cms: AppInfo.cmsConfigURLs(params))
-        var json: [AppInfo.ConfigKind: Any] = [:]
-        var configs: [AppInfo.ConfigKind: Config] = [:]
-        for (kind, file) in files {
-            // Cell styles are 1–2 MB and nothing reads them: listed, not downloaded.
-            guard kind.isParsed else {
-                configs[kind] = Config(url: file.url, found: file.found, error: nil)
-                continue
+        var files = AppInfo.configFiles(leaves: inputs.leaves, network: network, cms: AppInfo.cmsConfigURLs(inputs.params))
+
+        func fetch(_ kind: AppInfo.ConfigKind, _ file: AppInfo.ConfigFile) async -> Fetched {
+            guard download(kind) || kind == .remoteConfigurations else {
+                return Fetched(kind: kind, url: file.url, found: file.found, data: nil, error: nil)
             }
             do {
                 // A captured body may be cut at the SDK's 100 KB; fetch then.
-                if let body = file.body, let parsed = try? JSONSerialization.jsonObject(with: Data(body.utf8)) {
-                    json[kind] = parsed
-                } else {
+                var data = file.body.map { Data($0.utf8) }
+                if data.flatMap({ try? JSONSerialization.jsonObject(with: $0) }) == nil {
                     guard let url = URL(string: file.url) else { throw URLError(.badURL) }
-                    json[kind] = try JSONSerialization.jsonObject(with: try await http.get(url))
+                    data = try await http.get(url)
+                    _ = try JSONSerialization.jsonObject(with: data!)
                 }
-                configs[kind] = Config(url: file.url, found: file.found, error: nil)
+                return Fetched(kind: kind, url: file.url, found: file.found, data: data, error: nil)
             } catch {
-                configs[kind] = Config(url: file.url, found: file.found, error: error.localizedDescription)
+                return Fetched(kind: kind, url: file.url, found: file.found, data: nil, error: error.localizedDescription)
             }
         }
-        for (kind, url) in AppInfo.remoteConfigURLs(json[.remoteConfigurations])
-        where configs[kind] == nil && AppInfo.isAllowedConfigURL(url) {
-            configs[kind] = Config(url: url, found: "remote_configurations.json", error: nil)
+
+        var out: [Fetched] = []
+        if let remote = files.removeValue(forKey: .remoteConfigurations) {
+            let fetched = await fetch(.remoteConfigurations, remote)
+            out.append(fetched)
+            let json = fetched.data.flatMap { try? JSONSerialization.jsonObject(with: $0) }
+            for (kind, url) in AppInfo.remoteConfigURLs(json) where files[kind] == nil && AppInfo.isAllowedConfigURL(url) {
+                files[kind] = AppInfo.ConfigFile(url: url, body: nil, found: "remote_configurations.json")
+            }
         }
+        for (kind, file) in files { out.append(await fetch(kind, file)) }
+        return out
+    }
+
+    public static func build(store: LogStore, sessionId: Int64, http: ZappHTTP) async throws -> AppInfoReport {
+        let inputs = try await inputs(store: store, sessionId: sessionId, http: http)
+        let (session, local, leaves, params, cms) = (inputs.session, inputs.local, inputs.leaves, inputs.params, inputs.cms)
+
+        var json: [AppInfo.ConfigKind: Any] = [:]
+        var configs: [AppInfo.ConfigKind: Config] = [:]
+        let saved = try await store.savedConfigs(sessionId: sessionId)
+        if !saved.isEmpty {
+            // Saved when the device connected: Zapp as the session saw it.
+            for s in saved {
+                configs[s.kind] = Config(url: s.url, found: s.found, error: s.error,
+                                         savedAt: s.savedAt, sha256: s.sha256, size: s.size)
+                if s.kind.isParsed, let sha = s.sha256, let data = try await store.configData(sha256: sha) {
+                    json[s.kind] = try? JSONSerialization.jsonObject(with: data)
+                }
+            }
+        } else {
+            // Cell styles are 1–2 MB and nothing reads them: listed, not downloaded.
+            for f in try await locate(inputs, store: store, sessionId: sessionId, http: http, download: \.isParsed) {
+                configs[f.kind] = Config(url: f.url, found: f.found, error: f.error)
+                json[f.kind] = f.data.flatMap { try? JSONSerialization.jsonObject(with: $0) }
+            }
+        }
+        let savedAt = saved.first?.savedAt
 
         var identity = AppInfo.appIdentity(leaves)
         if let name = json[.layout].flatMap(AppInfo.layoutName) {
@@ -117,13 +178,45 @@ public struct AppInfoReport: Sendable {
             cellStyles: json[.layout].map { AppInfo.cellStyles(fromLayout: $0, known: storageCells) } ?? storageCells,
             cellStylesSource: json[.layout] != nil ? "layout.json" : "local storage cache",
             plugins: pluginList ?? AppInfo.pluginsFromStorage(leaves),
-            // The app's own list is the build's; Zapp's file is today's and
-            // may have moved on (a plugin bumped without a rebuild).
-            pluginsSource: pluginList != nil ? "in Zapp now, may differ from the build" : "session storage namespaces",
+            // The app's own list is the build's; Zapp's file is today's (or
+            // the connect time's, when saved) and may have moved on.
+            pluginsSource: pluginList == nil ? "session storage namespaces"
+                : savedAt.map { "in Zapp at \($0.formatted(date: .abbreviated, time: .shortened)), may differ from the build" }
+                    ?? "in Zapp now, may differ from the build",
             configs: configs,
+            configsSavedAt: savedAt,
             cms: cms,
             storageAsOf: [session?.takenAt, local?.takenAt].compactMap { $0 }.max()
         )
+    }
+}
+
+/// D79: a live session's config files, downloaded when its storage first
+/// names the app and kept with it — so the session later shows Zapp as it
+/// was then, not after the next publish.
+public enum ConfigSnapshot {
+    /// Downloads every file the session points to and saves it; returns how
+    /// many were found (0: storage doesn't name the app yet — try again on
+    /// the next snapshot). Already saved: saves nothing, returns their count.
+    @discardableResult
+    public static func capture(store: LogStore, sessionId: Int64, http: ZappHTTP) async throws -> Int {
+        let saved = try await store.savedConfigs(sessionId: sessionId)
+        guard saved.isEmpty else { return saved.count }
+        let inputs = try await AppInfoReport.inputs(store: store, sessionId: sessionId, http: http)
+        let files = try await AppInfoReport.locate(inputs, store: store, sessionId: sessionId, http: http) { _ in true }
+        if !files.isEmpty { try await store.saveConfigs(sessionId: sessionId, files) }
+        return files.count
+    }
+
+    /// Storage arrives every few seconds: one capture per session at a time,
+    /// and none after one found the files.
+    public actor Gate {
+        public static let shared = Gate()
+        private var busyOrDone: Set<Int64> = []
+        public func run(_ sessionId: Int64, _ capture: @Sendable () async -> Int) async {
+            guard busyOrDone.insert(sessionId).inserted else { return }
+            if await capture() == 0 { busyOrDone.remove(sessionId) }
+        }
     }
 }
 
@@ -166,13 +259,21 @@ public struct ZappHTTP: Sendable {
         },
         get: { url in
             if let cached = await ConfigCache.shared.data(for: url) { return cached }
-            let (data, response) = try await URLSession.shared.data(for: URLRequest(url: url, timeoutInterval: 15))
-            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
-            guard code == 200 else { throw ZappError("\(url.lastPathComponent): HTTP \(code)") }
+            let data = try await download(url)
             await ConfigCache.shared.store(data, for: url)
             return data
         }
     )
+
+    /// `live` without the run's cache: what Zapp has this minute, for saving.
+    public static let liveUncached = ZappHTTP(token: live.token, buildParams: live.buildParams, get: download)
+
+    static func download(_ url: URL) async throws -> Data {
+        let (data, response) = try await URLSession.shared.data(for: URLRequest(url: url, timeoutInterval: 15))
+        let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard code == 200 else { throw ZappError("\(url.lastPathComponent): HTTP \(code)") }
+        return data
+    }
 }
 
 extension ZappHTTP {

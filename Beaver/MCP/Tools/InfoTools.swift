@@ -7,7 +7,7 @@
 import Foundation
 
 enum InfoTools {
-    static let all = [appInfo]
+    static let all = [appInfo, appConfig]
 
     static let appInfo = MCPTool(
         name: "app_info",
@@ -40,7 +40,8 @@ enum InfoTools {
         case .failed(let why): "Zapp CMS failed: \(why)"
         }
         let configs = AppInfo.ConfigKind.allCases.compactMap { kind in
-            r.configs[kind].map { "  \(kind.rawValue): \($0.url) (\($0.found))" + ($0.error.map { " — couldn't load: \($0)" } ?? "") }
+            r.configs[kind].map { "  \(kind.rawValue): \($0.url) (\($0.found))" + ($0.error.map { " — couldn't load: \($0)" } ?? "")
+                + ($0.sha256 != nil ? " [saved]" : "") }
         }
 
         let screenLines = r.screens.isEmpty ? "  none found"
@@ -54,7 +55,9 @@ enum InfoTools {
         sections.append(lines("Device", r.device.identity + r.device.hardware))
         sections.append(lines("Advertising", r.device.advertising) ?? r.device.advertisingNote)
         sections.append(lines("User agent", r.device.userAgent))
-        sections.append(configs.isEmpty ? "Config files: none found." : "Config files:\n" + configs.joined(separator: "\n"))
+        let savedNote = r.configsSavedAt.map { " (saved with the session \($0.ISO8601Format()), as Zapp had them; read one with app_config)" }
+            ?? " (in Zapp now; app_config(download: true) saves them with the session)"
+        sections.append(configs.isEmpty ? "Config files: none found." : "Config files\(savedNote):\n" + configs.joined(separator: "\n"))
         sections.append(cms)
         let body = sections.compactMap { $0 }.joined(separator: "\n\n")
 
@@ -74,8 +77,10 @@ enum InfoTools {
                 "advertising": rows(r.device.advertising), "userAgent": rows(r.device.userAgent),
             ],
             "configs": .object(Dictionary(uniqueKeysWithValues: r.configs.map { kind, c in
-                (kind.rawValue, ["url": .string(c.url), "found": .string(c.found), "error": JSON(c.error)] as JSON)
+                (kind.rawValue, ["url": .string(c.url), "found": .string(c.found), "error": JSON(c.error),
+                                 "saved": .bool(c.sha256 != nil), "size": JSON(c.size)] as JSON)
             })),
+            "configsSavedAt": JSON(r.configsSavedAt?.ISO8601Format()),
             "cms": .string(cms),
         ]
 
@@ -98,5 +103,86 @@ enum InfoTools {
                    "ui_show(tab: \"info\", sessionId: \(s.id)) to show it to the user"],
             sessionId: s.id
         )
+    }
+
+    static let appConfig = MCPTool(
+        name: "app_config",
+        title: "Read an app config file",
+        description: "Use to read the app's launch-time config files (layout, pluginConfigurations, remoteConfigurations, cellStyles, presetsMapping, pipesEndpoints, their tablet variants, rivers) as saved with the session: Beaver downloads them from Zapp when the device connects, so they are Zapp's as of then, not after a later publish (the app itself may still run a debug build's bundled copy). Without kind: the saved files. With kind: the JSON at path (dot-separated keys and array indexes, e.g. \"general_settings.layout_id\" or \"screens.0.name\"); objects also list their keys, arrays their count. Files are large (cell styles 1–2 MB): walk down with path.",
+        kind: .read,
+        inputSchema: ToolSchema.object([
+            "sessionId": ToolSchema.sessionId,
+            "kind": ToolSchema.string("Which file.", oneOf: AppInfo.ConfigKind.allCases.map(\.rawValue)),
+            "path": ToolSchema.string("Dot-separated keys and indexes inside the file. Omitted: the whole file (cut at maxChars)."),
+            "maxChars": ToolSchema.integer("Characters of JSON to return. Default 20000, max 200000."),
+            "download": ToolSchema.boolean("Session has no saved copy (connected before Beaver 4.19, or imported): download the files from Zapp now and save them with it. Default false."),
+        ])
+    ) { args, ctx in
+        let s = try await ctx.resolveSession(args)
+        var saved = try await ctx.store.savedConfigs(sessionId: s.id)
+        if saved.isEmpty, try args.bool("download") == true {
+            try await ConfigSnapshot.capture(store: ctx.store, sessionId: s.id, http: ctx.zapp)
+            saved = try await ctx.store.savedConfigs(sessionId: s.id)
+        }
+        guard !saved.isEmpty else {
+            throw ToolError("Session \(s.label) has no saved config files (it connected before Beaver 4.19, was imported, or its storage doesn't name the app). app_info(sessionId: \(s.id)) lists their URLs; app_config(sessionId: \(s.id), download: true) saves Zapp's current ones.")
+        }
+        let at = saved[0].savedAt.ISO8601Format()
+        guard let raw = try args.string("kind") else {
+            let lines = saved.sorted { $0.kind.rawValue < $1.kind.rawValue }.map { c in
+                "\(c.kind.rawValue): " + (c.size.map { "\($0) bytes" } ?? "not saved: \(c.error ?? "only listed")") + "  \(c.url)"
+            }
+            return ToolResult(
+                summary: "Session \(s.label): \(saved.filter { $0.sha256 != nil }.count) config files saved \(at), as Zapp had them.",
+                body: lines.joined(separator: "\n"),
+                structured: ["sessionId": JSON(s.id), "savedAt": .string(at), "files": .array(saved.map { c in
+                    ["kind": .string(c.kind.rawValue), "url": .string(c.url), "size": JSON(c.size), "error": JSON(c.error)]
+                })],
+                next: ["app_config(sessionId: \(s.id), kind: \"remoteConfigurations\", path: \"general_settings\")"],
+                sessionId: s.id)
+        }
+        let kinds = saved.map(\.kind.rawValue).sorted().joined(separator: ", ")
+        guard let file = saved.first(where: { $0.kind.rawValue == raw }) else {
+            throw ToolError("No saved \"\(raw)\" in session \(s.label); it has \(kinds). Example: app_config(kind: \"layout\", path: \"screens.0\").")
+        }
+        guard let sha = file.sha256, let data = try await ctx.store.configData(sha256: sha) else {
+            throw ToolError("\(raw) couldn't be downloaded when saved: \(file.error ?? "unknown"). Its URL: \(file.url)")
+        }
+        var value = try JSON.parse(data)
+        let path = try args.string("path") ?? ""
+        var walked: [String] = []
+        for step in path.split(separator: ".").map(String.init) {
+            switch value {
+            case .object(let o) where o[step] != nil: value = o[step]!
+            case .array(let a) where Int(step).map(a.indices.contains) == true: value = a[Int(step)!]
+            case .object(let o):
+                throw ToolError("No key \"\(step)\" at \"\(walked.joined(separator: "."))\"; keys: \(o.keys.sorted().prefix(50).joined(separator: ", ")).")
+            case .array(let a):
+                throw ToolError("\"\(walked.joined(separator: "."))\" is an array of \(a.count): use an index 0…\(max(a.count - 1, 0)).")
+            default:
+                throw ToolError("\"\(walked.joined(separator: "."))\" is a value, not an object or array.")
+            }
+            walked.append(step)
+        }
+        let maxChars = try args.limit("maxChars", default: 20_000, max: 200_000)
+        let text = value.prettyText
+        let cut = text.count > maxChars
+        var shape = ""
+        var structured: [String: JSON] = ["sessionId": JSON(s.id), "kind": .string(raw), "path": .string(path),
+                                "url": .string(file.url), "savedAt": .string(at), "truncated": .bool(cut)]
+        if case .object(let o) = value {
+            shape = ", object with \(o.count) keys"
+            structured["keys"] = .array(o.keys.sorted().map { .string($0) })
+        } else if case .array(let a) = value {
+            shape = ", array of \(a.count)"
+            structured["count"] = JSON(a.count)
+        }
+        return ToolResult(
+            summary: "\(raw)\(path.isEmpty ? "" : " → " + path) of session \(s.label) (saved \(at))\(shape)"
+                + (cut ? ", first \(maxChars) of \(text.count) characters" : "") + ".",
+            body: cut ? String(text.prefix(maxChars)) + "\n… cut; narrow with path or raise maxChars" : text,
+            structured: .object(structured),
+            next: ["app_config(sessionId: \(s.id), kind: \"\(raw)\", path: \"\(path.isEmpty ? "" : path + ".")<key>\")"],
+            sessionId: s.id)
     }
 }

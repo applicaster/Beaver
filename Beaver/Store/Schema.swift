@@ -305,6 +305,36 @@ enum Schema {
             """)
         }
 
+        // D79: the app's config files as Zapp had them when the device
+        // connected. A file is kept once however many sessions saved it
+        // (same app, same publish); the trigger drops it with its last one.
+        migrator.registerMigration("v13_session_config", foreignKeyChecks: .immediate) { db in
+            try db.execute(sql: """
+                CREATE TABLE config_blob (
+                    sha256  TEXT PRIMARY KEY,
+                    data    BLOB NOT NULL
+                );
+                CREATE TABLE session_config (
+                    session_id  INTEGER NOT NULL REFERENCES session(id) ON DELETE CASCADE,
+                    kind        TEXT    NOT NULL,
+                    url         TEXT    NOT NULL,
+                    found       TEXT    NOT NULL,
+                    saved_at    INTEGER NOT NULL,
+                    sha256      TEXT,
+                    size        INTEGER,
+                    error       TEXT,
+                    PRIMARY KEY (session_id, kind)
+                );
+                CREATE INDEX idx_session_config_sha ON session_config(sha256);
+                CREATE TRIGGER session_config_gc AFTER DELETE ON session_config
+                WHEN OLD.sha256 IS NOT NULL
+                     AND NOT EXISTS (SELECT 1 FROM session_config WHERE sha256 = OLD.sha256)
+                BEGIN
+                    DELETE FROM config_blob WHERE sha256 = OLD.sha256;
+                END;
+            """)
+        }
+
         return migrator
     }
 }

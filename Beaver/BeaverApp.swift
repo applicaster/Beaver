@@ -377,6 +377,14 @@ struct BeaverApp: App {
                     dataJSON: json
                 )
             }
+            // D79: keep the app's config files as Zapp has them now, near
+            // when the app loaded them. Off the inbound loop.
+            let store = env.store
+            Task.detached {
+                await ConfigSnapshot.Gate.shared.run(sessionId) {
+                    (try? await ConfigSnapshot.capture(store: store, sessionId: sessionId, http: .liveUncached)) ?? 0
+                }
+            }
         case .success(.network(let capture)):
             try? await env.store.recordNetworkEntry(capture, sessionId: sessionId)
         case .success(.clientHandshake(let handshake)):

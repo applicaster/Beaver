@@ -17,9 +17,14 @@ does the same for a manual release.
   three: remote configurations, plugin configurations, layout, cell styles,
   presets mapping and pipes endpoints (and the tablet variants when the Zapp
   CMS names them) — found without a Zapp token too, through the app's
-  storage and `remote_configurations.json`. Cell styles, presets and
-  endpoints are listed with their URL, not downloaded. Agents get them in
-  `app_info`'s `configs`.
+  storage and `remote_configurations.json`.
+- **Config files are saved with the session**: when a device connects,
+  Beaver downloads them and keeps them with its session, so the session
+  shows Zapp as it was then, not after the next publish. **Open** shows a
+  file in your JSON viewer; an older or imported session can **Save with
+  Session** (Zapp's current files). A file shared by several sessions is
+  stored once. Agents: `app_config` reads a saved file by path
+  (`general_settings.layout_id`, `screens.0.name`).
 
 ## [4.18.0] - 2026-09-29
 
