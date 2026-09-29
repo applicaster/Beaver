@@ -496,6 +496,7 @@ private struct StoragesTopBar: View {
             .help("Compare this layer with an earlier snapshot of the session")
             .popover(isPresented: $showingChanges, arrowEdge: .bottom) {
                 StorageChangesPopover(vm: vm)
+                    .textSelection(.enabled)
             }
 
             // Same two choices as the Log feed's Export, writing the
@@ -1316,6 +1317,8 @@ private struct NamespaceRow: View {
         .overlay(currentMatchOutline)
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }
+        // A selectable key would swallow the click and the right-click.
+        .textSelection(.disabled)
         // Whole row toggles expansion on container rows; scalars
         // can't expand, so the tap is a no-op there.
         .onTapGesture {
@@ -1709,6 +1712,7 @@ private struct InnerKeyRow: View {
                                 ? { showingFullValue = false; onDelete() } : nil,
                             canWrite: isClientConnected
                         )
+                        .textSelection(.enabled)
                     }
                 }
 
@@ -1758,6 +1762,9 @@ private struct InnerKeyRow: View {
         }
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }
+        // Only the key: value text is selectable (it opts in above);
+        // the rest of the row expands on click.
+        .textSelection(.disabled)
         .onTapGesture {
             guard canExpandInline else { return }
             vm.toggleExpansion(record: child, in: namespace)

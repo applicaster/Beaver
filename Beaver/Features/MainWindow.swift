@@ -300,6 +300,13 @@ struct MainWindow: View {
         // with internal top-leading alignment, so they pin correctly
         // regardless of what the parent says.
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Every Text on every tab can be selected and copied. Table and
+        // List rows ignore it (click, drag, ⌘C and their menus still pick
+        // rows), and so do buttons. A selectable Text swallows a tap or a
+        // right-click aimed at it, so rows that expand on click set
+        // `.textSelection(.disabled)`. Popovers and sheets don't inherit
+        // this: each one that shows data opts in itself.
+        .textSelection(.enabled)
     }
 
     // MARK: - Toolbar
@@ -456,6 +463,7 @@ struct MainWindow: View {
                             showingAgentPanel = false
                         }
                         .frame(width: 560, height: 640)
+                        .textSelection(.enabled)
                     }
             }
         }
@@ -683,6 +691,7 @@ private struct ToolbarDeviceBadge: View {
         }
         .popover(isPresented: $showingDetails, arrowEdge: .bottom) {
             DevicePopover(session: session, isLive: isLive, sessions: sessions)
+                .textSelection(.enabled)
         }
     }
 

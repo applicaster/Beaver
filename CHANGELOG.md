@@ -12,6 +12,15 @@ does the same for a manual release.
 
 ## [Unreleased]
 
+### Fixed
+- Text in Beaver's panels can be selected and copied: Info, Storages,
+  Network (and its expanded sheet), the event detail pane, Sessions
+  details, the Scheme Generator, the compare sheet, the Agent panel, the
+  device popover and the storage Changes and value popovers. Rows of the
+  Log feed, Network and Sessions lists still select on click and copy with
+  ⌘C; rows that expand on click (storage keys, JSON trees) keep doing so.
+  Info values copy with a button that shows on hover.
+
 ## [4.14.1] - 2026-09-29
 
 ### Added

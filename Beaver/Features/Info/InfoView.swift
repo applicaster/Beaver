@@ -160,7 +160,6 @@ private struct InfoCard: View {
     let title: String
     let rows: [InfoRow]
     var empty: String?
-    @Environment(ToastCenter.self) private var toasts
 
     var body: some View {
         if !rows.isEmpty || empty != nil {
@@ -170,25 +169,43 @@ private struct InfoCard: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
                     Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 4) {
-                        ForEach(rows, id: \.label) { row in
-                            GridRow {
-                                Text(row.label).foregroundStyle(.secondary)
-                                Text(row.value).font(.body.monospaced()).lineLimit(3).textSelection(.enabled)
-                                    .onTapGesture {
-                                        NSPasteboard.general.clearContents()
-                                        NSPasteboard.general.setString(row.value, forType: .string)
-                                        toasts.success("Copied \(row.label)")
-                                    }
-                                    .help("Click to copy")
-                                Text(row.source).font(.caption).foregroundStyle(.tertiary).lineLimit(1)
-                                    .truncationMode(.middle)
-                            }
-                        }
+                        ForEach(rows, id: \.label) { InfoGridRow(row: $0) }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
         }
+    }
+}
+
+/// Label, value, source. The value is selectable, so a click can't also
+/// copy it (selection takes the click): a copy button shows on hover.
+private struct InfoGridRow: View {
+    let row: InfoRow
+    @Environment(ToastCenter.self) private var toasts
+    @State private var hovered = false
+
+    var body: some View {
+        GridRow {
+            Text(row.label).foregroundStyle(.secondary)
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(row.value).font(.body.monospaced()).lineLimit(3).textSelection(.enabled)
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(row.value, forType: .string)
+                    toasts.success("Copied \(row.label)")
+                } label: {
+                    Image(systemName: "doc.on.doc").font(.caption)
+                }
+                .buttonStyle(.borderless)
+                .help("Copy \(row.label)")
+                .accessibilityLabel("Copy \(row.label)")
+                .opacity(hovered ? 1 : 0)
+            }
+            Text(row.source).font(.caption).foregroundStyle(.tertiary).lineLimit(1)
+                .truncationMode(.middle)
+        }
+        .onHover { hovered = $0 }
     }
 }
 

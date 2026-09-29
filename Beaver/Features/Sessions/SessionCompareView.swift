@@ -38,6 +38,8 @@ struct SessionCompareView: View {
             .padding(12)
         }
         .frame(minWidth: 760, minHeight: 560)
+        // A sheet doesn't inherit the main window's selectable text.
+        .textSelection(.enabled)
         .task(id: [a, b]) {
             result = nil
             failure = nil
