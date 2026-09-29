@@ -12,10 +12,6 @@ does the same for a manual release.
 
 ## [Unreleased]
 
-### Fixed
-- The command bar is off while a TV (through the TV bridge) is viewed and
-  says why: the TV sends logs only, so a typed command used to be dropped
-  without a word.
 ### Added
 - **Connect a TV…**: read a smart TV app's logs (Vizio, Vidaa, other TVs
   with remote debugging on) from Beaver itself — no Node, no zapp-support
@@ -27,6 +23,11 @@ does the same for a manual release.
   problems say what to check (wrong address, no DevTools on that port, a
   DevTools window already attached). The last five TVs are one click away.
   Disconnect stops reading it. Agents: `devices_connect_tv`.
+
+### Fixed
+- The command bar is off while a TV (through the TV bridge) is viewed and
+  says why: the TV sends logs only, so a typed command used to be dropped
+  without a word.
 
 ## [4.16.0] - 2026-09-29
 
