@@ -12,6 +12,11 @@ does the same for a manual release.
 
 ## [Unreleased]
 
+### Changed
+- The device badge's popover no longer lists the app's toolboxes: they're
+  in Sessions → the session's details. **Toolboxes in Sessions** in the
+  popover takes you there.
+
 ### Added
 - **Settings window**: Beaver → **Settings…** (⌘,), or the **gear** at the
   bottom of the sidebar. **General**: how long sessions are kept and their
