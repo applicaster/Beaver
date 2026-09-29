@@ -46,11 +46,12 @@ public enum AgentNotifications {
         }
     }
 
-    public static func menuTitle(for state: State) -> String {
+    /// Settings → Agents (D92).
+    public static func status(for state: State) -> String {
         switch state {
-        case .allowed: "Agent Notifications: On"
-        case .muted: "Agent Notifications: Muted in Beaver"
-        case .denied, .notDetermined: "Agent Notifications: Off — Turn On…"
+        case .allowed: "On"
+        case .muted: "Muted in Beaver"
+        case .denied, .notDetermined: "Off"
         }
     }
 

@@ -74,15 +74,19 @@ public final class AppEnvironment {
     /// to the rows the user is currently looking at — see D26.
     public var activeFilter: Filter = .none
 
-    /// Menu text for Agent Access: "On · 127.0.0.1:9081", "Off", "Port 9081 in use".
+    /// Agent Access state for Settings → Agents: "On · 127.0.0.1:9081", "Off", "Port 9081 in use".
     public var agentAccessStatus: String = "Off"
 
     /// The bound MCP port while Agent Access is on.
     public var agentAccessPort: UInt16?
 
-    /// The store's size on disk for the app menu, as of the last
+    /// The store's size on disk for Settings → General, as of the last
     /// retention pass (D83).
     public var storeSize: Int64?
+
+    /// Releases the What's New sheet shows over the main window; empty
+    /// when it's closed (D92).
+    public var whatsNew: [Changelog.Release] = []
 
     // MARK: - Window state an agent can set (D54, design §7.1)
     //

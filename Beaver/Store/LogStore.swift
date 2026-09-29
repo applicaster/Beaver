@@ -407,6 +407,10 @@ public actor LogStore {
         try await dbQueue.write { db in
             try db.execute(sql: "DELETE FROM session")
         }
+        // Everything is gone, so give the file back: "Sessions on disk"
+        // otherwise stayed at its old size. Cheap now that little is left.
+        // Before the broadcast, so listeners read the new size.
+        try? await reclaimSpace()
         broadcast(.sessionsCleared)
     }
 

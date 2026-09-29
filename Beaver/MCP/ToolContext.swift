@@ -56,7 +56,7 @@ public struct HostSnapshot: Sendable, Equatable {
     public var notifications: AgentNotifications.State
     /// The agents' default device (D76), if set.
     public var defaultDevice: DefaultDevice?
-    /// App menu → Delete Sessions Older Than (D83).
+    /// Settings → General → Delete sessions older than (D83, D92).
     public var retention: SessionRetention
 
     public init(serverState: String = "listening", liveSessionIds: [Int64] = [],

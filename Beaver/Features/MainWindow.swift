@@ -204,6 +204,11 @@ struct MainWindow: View {
             defaultFilename: defaultExportName,
             onCompletion: { _ in exportDocument = nil }
         )
+        // D92: a new version's first launch, and Beaver → What's New….
+        .sheet(isPresented: Binding(get: { !env.whatsNew.isEmpty },
+                                    set: { if !$0 { env.whatsNew = [] } })) {
+            WhatsNewView(releases: env.whatsNew)
+        }
     }
 
     // MARK: - Sidebar
@@ -228,6 +233,16 @@ struct MainWindow: View {
             }
         }
         .navigationTitle("Beaver")
+        // D92: the way to Settings for people who don't look in the app menu.
+        .safeAreaInset(edge: .bottom, alignment: .leading) {
+            SettingsLink {
+                Image(systemName: "gearshape").font(.system(size: 14))
+            }
+            .buttonStyle(.borderless)
+            .help("Settings (⌘,)")
+            .accessibilityLabel("Settings")
+            .padding(10)
+        }
     }
 
     // MARK: - Detail

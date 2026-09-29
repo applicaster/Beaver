@@ -12,7 +12,7 @@ enum InfoTools {
     static let appInfo = MCPTool(
         name: "app_info",
         title: "App and device info",
-        description: "Use to learn what app and device a session is: app, SDK and QuickBrick versions, Zapp ids, the layout's screens, cell styles and plugins, and the device's model, OS, language, country and advertising id — each value with where it came from (storage, CMS, a config file, logs). Config files come from Zapp's public bucket; the Zapp CMS is asked only when the user set a Zapp token in Beaver's app menu.",
+        description: "Use to learn what app and device a session is: app, SDK and QuickBrick versions, Zapp ids, the layout's screens, cell styles and plugins, and the device's model, OS, language, country and advertising id — each value with where it came from (storage, CMS, a config file, logs). Config files come from Zapp's public bucket; the Zapp CMS is asked only when the user set a Zapp token in Beaver's Settings → Zapp.",
         kind: .read,
         inputSchema: ToolSchema.object([
             "sessionId": ToolSchema.sessionId,
@@ -34,7 +34,7 @@ enum InfoTools {
         let os = hw("OS version").map { v in hw("Platform").map { "\($0) \(v)" } ?? v }
         let device = [hw("Model"), os].compactMap { $0 }
         let cms: String = switch r.cms {
-        case .noToken: "Zapp CMS not asked: no Zapp token (the user can set one in the app menu → Zapp Access Token…)."
+        case .noToken: "Zapp CMS not asked: no Zapp token (the user can set one in Beaver → Settings… → Zapp)."
         case .noVersionId: "Zapp CMS not asked: the app's storage has no version_id."
         case .loaded: "Zapp CMS: build_params loaded."
         case .failed(let why): "Zapp CMS failed: \(why)"

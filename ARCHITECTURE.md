@@ -526,7 +526,7 @@ These are deliberately deferred until first running build:
 - **Crash-safe append batching.** Default 50 ms transaction window; if
   the app crashes mid-window we lose those events. Acceptable for a
   debug tool, revisit if it bites.
-- **Store growth.** Decided in D83: sessions older than 30 days (app menu,
+- **Store growth.** Decided in D83: sessions older than 30 days (Settings → General, D92;
   7 / 30 / 90 / Never) are deleted at launch and daily, except connected,
   imported and bookmarked ones, and the space goes back to the disk.
 - **Backup/restore.** Should sessions be exportable as a single archive

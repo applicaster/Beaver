@@ -17,11 +17,14 @@ struct BeaverApp: App {
     /// added", …). Lives at the App level so it survives every
     /// tab / window mutation.
     @State private var toasts: ToastCenter
+    /// The Settings window's own toasts: they show where the person is,
+    /// not in the main window too.
+    @State private var settingsToasts = ToastCenter()
 
-    /// App menu → Delete Sessions Older Than (D83), in days; 0 is Never.
+    /// Settings → General → Delete sessions older than (D83, D92), in days; 0 is Never.
     @AppStorage(SessionRetention.key) private var retentionDays = SessionRetention.default.rawValue
 
-    /// Agent Access (design §3.2): on by default, one toggle in the app menu.
+    /// Agent Access (design §3.2): on by default, a toggle in Settings → Agents (D92).
     @AppStorage(AgentAccess.enabledKey) private var agentAccessEnabled = true
     private let agentAccess: AgentAccess
 
@@ -45,14 +48,19 @@ struct BeaverApp: App {
     init() {
         // Build the environment synchronously on the main actor.
         let store: LogStore
+        let ranBefore: Bool
         do {
             let url = try LogStore.defaultStoreURL()
+            ranBefore = FileManager.default.fileExists(atPath: url.path)
             store = try LogStore(source: .onDisk(url))
         } catch {
             fatalError("Failed to open log store: \(error)")
         }
         let server = WSServer(port: 9080)
         let environment = AppEnvironment(store: store, server: server)
+        // D92: the first launch of a new version shows what changed since
+        // the last one seen; a fresh install shows nothing.
+        environment.whatsNew = WhatsNew.atLaunch(.bundled, current: Changelog.appVersion, ranBefore: ranBefore)
         // The Log feed's filter lives in env (D54); a launch starts with
         // the one last used, as LogFeedViewModel did on its own before,
         // or with the saved filter marked Default (D82).
@@ -100,12 +108,6 @@ struct BeaverApp: App {
                 .environment(env)
                 .environment(toasts)
                 .task { await scheduleAgentAccessApply() }
-                .onChange(of: agentAccessEnabled) { Task { await scheduleAgentAccessApply() } }
-                .onChange(of: retentionDays) {
-                    // A choice made in the menu is informed: no grace day (D83).
-                    UserDefaults.standard.set(Date(), forKey: SessionRetention.startsAtKey)
-                    Task { await Self.deleteOldSessions(env: env, toasts: toasts) }
-                }
                 // Hides the title but keeps a real title bar, so a double-click
                 // on the toolbar's empty space zooms. `.hiddenTitleBar` left only
                 // the sidebar's strip doing that.
@@ -116,6 +118,10 @@ struct BeaverApp: App {
             CommandGroup(replacing: .newItem) { /* disable new window */ }
             CommandGroup(after: .appInfo) {
                 CheckForUpdatesView(updater: updaterController.updater)
+                Button("What's New…") {
+                    NSApp.activate()
+                    env.whatsNew = WhatsNew.history(.bundled, current: Changelog.appVersion)
+                }
                 Button("Copy WebSocket Address") {
                     // Full ws://<ip>:9080 URL — matches the toolbar
                     // "Copy IP" button. Both forms (with / without
@@ -128,20 +134,7 @@ struct BeaverApp: App {
                     toasts.success("Copied \(url)")
                 }
                 .keyboardShortcut("c", modifiers: [.command, .shift])
-                // D79: the Info tab asks the Zapp CMS with the person's token.
-                Button("Zapp Access Token…") {
-                    if let changed = ZappTokenPrompt.run() { toasts.success(changed) }
-                }
-                Divider()
-                Picker("Delete Sessions Older Than", selection: $retentionDays) {
-                    ForEach(SessionRetention.allCases, id: \.self) { Text($0.title).tag($0.rawValue) }
-                }
-                if let size = env.storeSize {
-                    Text("Sessions on disk: \(size.formatted(.byteCount(style: .file)))")
-                }
-                Divider()
-                Toggle("Agent Access (MCP)", isOn: $agentAccessEnabled)
-                Text("MCP: \(env.agentAccessStatus)")
+                // Settings live in Settings… (D92); the actions stay here.
                 Button("Copy MCP Setup Command") {
                     let command = AgentAccess.setupCommand(port: env.agentAccessPort ?? AgentAccess.configuredPort())
                     NSPasteboard.general.clearContents()
@@ -149,14 +142,35 @@ struct BeaverApp: App {
                     toasts.success("Copied: \(command)")
                 }
                 .disabled(env.agentAccessPort == nil)
-                // Design M28: always the one action that works — opens the
-                // Agent panel, whose strip asks or points at System Settings.
-                Button(AgentNotifications.menuTitle(for: AgentNotifier.shared.state)) {
-                    NSApp.activate()
-                    AgentNotifier.shared.openPanel()
-                }
             }
         }
+
+        // D92 (amends D62): Beaver → Settings… (⌘,) and the sidebar's gear.
+        Settings {
+            SettingsView(retentionDays: retentionBinding, agentAccessEnabled: agentAccessBinding,
+                         applyAgentAccess: { await scheduleAgentAccessApply() },
+                         updater: updaterController.updater)
+                .environment(env)
+                .environment(settingsToasts)
+        }
+    }
+
+    /// Applies at once, not in an `.onChange` on the main window: Settings
+    /// works with that window closed.
+    private var agentAccessBinding: Binding<Bool> {
+        Binding(get: { agentAccessEnabled }, set: { on in
+            agentAccessEnabled = on
+            Task { await scheduleAgentAccessApply() }
+        })
+    }
+
+    private var retentionBinding: Binding<Int> {
+        Binding(get: { retentionDays }, set: { days in
+            retentionDays = days
+            // A choice made in Settings is informed: no grace day (D83).
+            UserDefaults.standard.set(Date(), forKey: SessionRetention.startsAtKey)
+            Task { await Self.deleteOldSessions(env: env, toasts: toasts) }
+        })
     }
 
     /// Wires the server's inbound stream into the store, and tracks
@@ -276,7 +290,7 @@ struct BeaverApp: App {
     }
 
     /// Starts or stops the MCP listener to match the toggle, and reports
-    /// the result in the app menu.
+    /// the result in Settings → Agents.
     @MainActor
     private func applyAgentAccess() async {
         guard agentAccessEnabled else {
@@ -313,7 +327,7 @@ struct BeaverApp: App {
                 // The first pass after upgrade only announces (D83).
                 let days = SessionRetention.current().rawValue
                 toasts.show(
-                    "From tomorrow Beaver deletes sessions older than \(days) days (\(pending) now). Set it in the Beaver menu.",
+                    "From tomorrow Beaver deletes sessions older than \(days) days (\(pending) now). Set it in Settings (⌘,).",
                     icon: "info.circle.fill", tint: .accentColor, duration: 15,
                     action: ToastAction(title: "Keep All") {
                         UserDefaults.standard.set(SessionRetention.never.rawValue, forKey: SessionRetention.key)
