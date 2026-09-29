@@ -124,6 +124,13 @@ public struct ZappHTTP: Sendable {
         self.token = token; self.buildParams = buildParams; self.get = get
     }
 
+    /// No token and no network: storage, captured requests and logs only.
+    public static let offline = ZappHTTP(
+        token: { nil },
+        buildParams: { _, _ in throw ZappError("offline") },
+        get: { _ in throw ZappError("offline") }
+    )
+
     public static let live = ZappHTTP(
         token: { ZappToken.read() },
         buildParams: { versionId, token in

@@ -295,14 +295,16 @@ takes focus, unless you pass `reveal: true`.
    compared by pattern (`Loaded <n> items in <n>ms`: numbers, UUIDs, hex
    ids, times and URL query values don't count), warnings and errors per
    subsystem (▲ = more in b), requests only in one side (`GET host/users/:id`),
-   and requests whose status class or median duration changed (×2 and
-   100 ms or more). `sections: ["network"]` for one part; `limit` for longer
-   lists.
+   requests whose status class or median duration changed (×2 and
+   100 ms or more), storage keys that differ between the two sessions'
+   latest snapshots (per layer, with the fields inside JSON values), and App
+   Info that differs (versions, Zapp ids, device, plugin versions).
+   `sections: ["storage"]` for one part; `limit` for longer lists.
 3. Each line has an id: `logs_get(ids: [<firstId>])`, `network_get(id: <firstId>)`,
    or `logs_query(sessionId: <b>, filter: {subsystems: ["<subsystem>"]})`
    for the context around it.
-4. Storage and App Info (versions, plugins, device) aren't compared yet:
-   `storage_snapshot(sessionId: …, refresh: false)` on each side.
+4. Storage within one session (what login wrote): `storage_diff(sessionId: <b>)`;
+   everything about one side: `app_info(sessionId: <b>)`.
 5. Tell the user what changed first, with ids; the user sees the same in
    Sessions → right-click a session → **Compare with**.
 

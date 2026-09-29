@@ -10,9 +10,6 @@ import Foundation
 
 public enum SessionCompare {
 
-    /// Storage and App Info are asked for but not compared yet: they come
-    /// with the storage diff engine (D80) and App Info (D79). Add them in
-    /// `run` and the result's `pending` empties itself.
     public enum Section: String, CaseIterable, Sendable {
         case logs, network, storage, appInfo
     }
@@ -22,8 +19,70 @@ public enum SessionCompare {
         public let b: Int64
         public var logs: Logs?
         public var network: Network?
-        /// Sections asked for that Beaver can't compare yet.
-        public var pending: [Section] = []
+        public var storage: Storage?
+        public var appInfo: AppInfoDiff?
+    }
+
+    // MARK: - Storage
+
+    /// Each layer's latest snapshot, A → B, key by key (D80's diff).
+    public struct StorageLayer: Sendable {
+        public let layer: StorageSnapshot.Namespace
+        public let changes: [StorageChange]
+        /// Why the layer isn't compared: a side has no snapshot of it.
+        public let missing: String?
+    }
+
+    public struct Storage: Sendable {
+        public let layers: [StorageLayer]
+    }
+
+    // MARK: - App Info
+
+    /// A value that differs between the two sessions' App Info (D79).
+    public struct ValueChange: Sendable, Hashable {
+        public let label: String
+        public let a: String?
+        public let b: String?
+    }
+
+    public struct PluginChange: Sendable, Hashable {
+        public let id: String
+        /// Nil when the plugin isn't in that session's list.
+        public let a: String?
+        public let b: String?
+    }
+
+    public struct AppInfoDiff: Sendable {
+        public let values: [ValueChange]
+        public let plugins: [PluginChange]
+        /// Where each side's plugin list came from.
+        public let pluginsSourceA: String
+        public let pluginsSourceB: String
+    }
+
+    /// Always differ between two sessions; not a finding.
+    static let noisyLabels: Set<String> = ["Session id (session_id)", "Session id (sessionId)", "Session start"]
+
+    static func compareAppInfo(_ a: AppInfoReport, _ b: AppInfoReport) -> AppInfoDiff {
+        func rows(_ r: AppInfoReport) -> [(String, String)] {
+            (r.identity + r.device.identity + r.device.hardware + r.device.advertising)
+                .filter { !noisyLabels.contains($0.label) }.map { ($0.label, $0.value) }
+        }
+        let ra = rows(a), rb = rows(b)
+        let va = Dictionary(ra, uniquingKeysWith: { first, _ in first })
+        let vb = Dictionary(rb, uniquingKeysWith: { first, _ in first })
+        var labels: [String] = []
+        for (label, _) in ra + rb where !labels.contains(label) { labels.append(label) }
+        let values = labels.compactMap { label -> ValueChange? in
+            va[label] == vb[label] ? nil : ValueChange(label: label, a: va[label], b: vb[label])
+        }
+        let pa = Dictionary(a.plugins.map { ($0.id, $0.version ?? "") }, uniquingKeysWith: { first, _ in first })
+        let pb = Dictionary(b.plugins.map { ($0.id, $0.version ?? "") }, uniquingKeysWith: { first, _ in first })
+        let plugins = Set(pa.keys).union(pb.keys).sorted().compactMap { id -> PluginChange? in
+            pa[id] == pb[id] ? nil : PluginChange(id: id, a: pa[id], b: pb[id])
+        }
+        return AppInfoDiff(values: values, plugins: plugins, pluginsSourceA: a.pluginsSource, pluginsSourceB: b.pluginsSource)
     }
 
     // MARK: - Logs
@@ -111,8 +170,11 @@ public enum SessionCompare {
         public let errorDescription: String?
     }
 
+    /// `zapp` reaches Zapp's CMS and config files for App Info; tests pass
+    /// `.offline`.
     public static func run(store: LogStore, a: Int64, b: Int64,
-                           sections: Set<Section> = Set(Section.allCases)) async throws -> Result {
+                           sections: Set<Section> = Set(Section.allCases),
+                           zapp: ZappHTTP = .offline) async throws -> Result {
         let sessions = try await store.sessions()
         if let sa = sessions.first(where: { $0.id == a }), let sb = sessions.first(where: { $0.id == b }),
            !sameApp(sa, sb) {
@@ -135,7 +197,27 @@ public enum SessionCompare {
             r.network = compareNetwork(try await store.networkEntries(sessionId: a),
                                        try await store.networkEntries(sessionId: b))
         }
-        r.pending = Section.allCases.filter { [.storage, .appInfo].contains($0) && sections.contains($0) }
+        if sections.contains(.storage) {
+            var layers: [StorageLayer] = []
+            for layer in StorageSnapshot.Namespace.allCases {
+                let sa = try await store.latestStorageSnapshot(sessionId: a, namespace: layer)
+                let sb = try await store.latestStorageSnapshot(sessionId: b, namespace: layer)
+                switch (sa, sb) {
+                case let (sa?, sb?):
+                    layers.append(StorageLayer(layer: layer, changes: StorageDiff.changes(from: sa.dataJSON, to: sb.dataJSON), missing: nil))
+                case (nil, nil):
+                    continue
+                default:
+                    layers.append(StorageLayer(layer: layer, changes: [],
+                                               missing: "only #\(sa == nil ? b : a) has a \(layer.displayName) snapshot"))
+                }
+            }
+            r.storage = Storage(layers: layers)
+        }
+        if sections.contains(.appInfo) {
+            r.appInfo = compareAppInfo(try await AppInfoReport.build(store: store, sessionId: a, http: zapp),
+                                       try await AppInfoReport.build(store: store, sessionId: b, http: zapp))
+        }
         return r
     }
 

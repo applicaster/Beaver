@@ -117,7 +117,7 @@ struct SessionCompareTests {
         #expect(net.durationChanged.map { "\($0.key) \($0.a.medianMs!)→\($0.b.medianMs!)" } == ["GET api.x.io/feed/:id 110→900"])
     }
 
-    @Test("sessions_compare: summary, lists, Next, pending sections, errors")
+    @Test("sessions_compare: summary, lists, Next, sections, errors")
     func tool() async throws {
         let (store, a, b) = try await sessions()
         try await seed(store, session: a, [(.info, "app", "", "Started in 120ms")])
@@ -126,7 +126,7 @@ struct SessionCompareTests {
         let r = try await SessionTools.compare.run(ToolArguments(["a": JSON(a), "b": JSON(b),
                                                                   "sections": ["logs", "storage"]]), ctx)
         #expect(r.summary.hasPrefix("Session #\(a) vs #\(b): logs: 0 pattern(s) only in #\(a), 1 only in #\(b)"))
-        #expect(r.summary.contains("storage: not compared yet"))
+        #expect(r.summary.contains("storage: 0 key(s) differ (no storage on either side)"))
         #expect(r.body.contains("error app: Crash <hex> ×1"))
         #expect(r.next.contains { $0.hasPrefix("logs_get(ids: [") })
         #expect(r.structured["network"] == nil)
@@ -145,6 +145,40 @@ struct SessionCompareTests {
                 #expect(error.message.contains(needle), "\(error.message)")
             }
         }
+    }
+
+    @Test("Storage: each layer's latest snapshot, A → B; a layer on one side only says so")
+    func storage() async throws {
+        let (store, a, b) = try await sessions()
+        try await store.recordStorageSnapshot(sessionId: a, namespace: .local, dataJSON:
+            #"{"applicaster.v2":{"token":"t1","plan":"free"},"player":"{\"quality\":\"auto\"}"}"#)
+        try await store.recordStorageSnapshot(sessionId: b, namespace: .local, dataJSON:
+            #"{"applicaster.v2":{"plan":"premium","userId":"u1"},"player":"{\"quality\":\"1080p\"}"}"#)
+        try await store.recordStorageSnapshot(sessionId: b, namespace: .keychain, dataJSON: #"{"applicaster.v2":{"authToken":"x"}}"#)
+        let r = try await SessionCompare.run(store: store, a: a, b: b, sections: [.storage])
+        let local = try #require(r.storage?.layers.first { $0.layer == .local })
+        #expect(Set(local.changes.map { "\($0.kind.rawValue) \($0.path)" })
+                == ["removed applicaster.v2/token", "changed applicaster.v2/plan", "added applicaster.v2/userId", "changed player"])
+        #expect(local.changes.first { $0.path == "player" }?.fields.map(\.path) == ["quality"])
+        let keychain = try #require(r.storage?.layers.first { $0.layer == .keychain })
+        #expect(keychain.missing == "only #\(b) has a Keychain snapshot")
+        #expect(r.storage?.layers.contains { $0.layer == .session } == false)
+    }
+
+    @Test("App Info: versions and plugins that differ; session ids aren't a finding")
+    func appInfo() async throws {
+        let (store, a, b) = try await sessions()
+        func storage(_ version: String, _ session: String) -> String {
+            #"{"applicaster.v2":{"app_name":"River","version_name":"\#(version)","sdk_version":"14.1","session_id":"\#(session)"},"login-plugin":{"k":"v"}}"#
+        }
+        try await store.recordStorageSnapshot(sessionId: a, namespace: .session, dataJSON: storage("4.5", "s1"))
+        try await store.recordStorageSnapshot(sessionId: b, namespace: .session, dataJSON:
+            storage("4.6", "s2").replacingOccurrences(of: #""login-plugin""#, with: #""iap-plugin""#))
+        let r = try await SessionCompare.run(store: store, a: a, b: b, sections: [.appInfo])
+        let info = try #require(r.appInfo)
+        #expect(info.values == [SessionCompare.ValueChange(label: "App version", a: "4.5", b: "4.6")])
+        #expect(info.plugins == [SessionCompare.PluginChange(id: "iap-plugin", a: nil, b: ""),
+                                 SessionCompare.PluginChange(id: "login-plugin", a: "", b: nil)])
     }
 
     /// Opt-in, like FeedBenchmark: BEAVER_BENCH=1 swift test --filter SessionCompareTests

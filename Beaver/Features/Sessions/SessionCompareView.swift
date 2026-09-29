@@ -42,7 +42,7 @@ struct SessionCompareView: View {
             result = nil
             failure = nil
             do {
-                result = try await SessionCompare.run(store: env.store, a: a, b: b)
+                result = try await SessionCompare.run(store: env.store, a: a, b: b, zapp: .live)
             } catch {
                 failure = error.localizedDescription
             }
@@ -69,15 +69,8 @@ struct SessionCompareView: View {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     if let logs = r.logs { logSections(logs) }
                     if let net = r.network { networkSections(net) }
-                    ForEach(r.pending, id: \.self) { section in
-                        CompareSection(title: section == .storage ? "Storage" : "App Info", count: nil) {
-                            Text(section == .storage
-                                 ? "Not compared yet: comes with the storage diff."
-                                 : "Not compared yet: comes with App Info (app, SDK and plugin versions, device).")
-                                .foregroundStyle(.secondary)
-                                .padding(.vertical, 4)
-                        }
-                    }
+                    if let info = r.appInfo { appInfoSections(info) }
+                    if let storage = r.storage { storageSections(storage) }
                 }
                 .padding(.horizontal, 16)
                 .padding(.bottom, 12)
@@ -85,6 +78,86 @@ struct SessionCompareView: View {
         } else {
             ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+    }
+
+    // MARK: - App Info
+
+    @ViewBuilder
+    private func appInfoSections(_ info: SessionCompare.AppInfoDiff) -> some View {
+        if !info.values.isEmpty {
+            CompareSection(title: "App Info, A → B", count: info.values.count) {
+                ForEach(info.values, id: \.self) { v in
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(v.label).foregroundStyle(.secondary).frame(width: 160, alignment: .leading)
+                        Text(v.a ?? "—").textSelection(.enabled)
+                        Image(systemName: "arrow.right").foregroundStyle(.secondary).font(.caption)
+                        Text(v.b ?? "—").textSelection(.enabled)
+                        Spacer()
+                    }
+                    .padding(.vertical, 3)
+                }
+            }
+        }
+        if !info.plugins.isEmpty {
+            CompareSection(title: "Plugins, A → B", count: info.plugins.count) {
+                Text("A: \(info.pluginsSourceA) · B: \(info.pluginsSourceB)")
+                    .font(.caption).foregroundStyle(.secondary).padding(.bottom, 2)
+                ForEach(info.plugins, id: \.self) { p in
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        changeMark(p.a == nil ? .added : p.b == nil ? .removed : .changed)
+                        Text(p.id)
+                        Spacer()
+                        Text("\(p.a ?? "—") → \(p.b ?? "—")").monospacedDigit().foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 3)
+                }
+            }
+        }
+    }
+
+    // MARK: - Storage
+
+    @ViewBuilder
+    private func storageSections(_ storage: SessionCompare.Storage) -> some View {
+        ForEach(storage.layers, id: \.layer) { layer in
+            if let missing = layer.missing {
+                CompareSection(title: "Storage · \(layer.layer.displayName)", count: nil) {
+                    Text("Not compared: \(missing).").foregroundStyle(.secondary).padding(.vertical, 3)
+                }
+            } else if !layer.changes.isEmpty {
+                CompareSection(title: "Storage · \(layer.layer.displayName), A → B", count: layer.changes.count) {
+                    ForEach(layer.changes, id: \.self) { c in
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            changeMark(c.kind)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(c.path).font(.callout.monospaced())
+                                if c.fields.isEmpty {
+                                    Text("\(c.old ?? "—") → \(c.new ?? "—")")
+                                        .font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(2).truncationMode(.middle)
+                                } else {
+                                    ForEach(c.fields.prefix(10), id: \.self) { f in
+                                        Text("\(f.path): \(f.old ?? "—") → \(f.new ?? "—")")
+                                            .font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                                    }
+                                }
+                            }
+                            .textSelection(.enabled)
+                            Spacer()
+                        }
+                        .padding(.vertical, 3)
+                    }
+                }
+            }
+        }
+    }
+
+    private func changeMark(_ kind: StorageChange.Kind) -> some View {
+        let (symbol, color): (String, Color) = switch kind {
+        case .added: ("+", .green)
+        case .removed: ("−", .red)
+        case .changed: ("~", .orange)
+        }
+        return Text(symbol).font(.body.monospaced().weight(.bold)).foregroundStyle(color)
     }
 
     // MARK: - Logs

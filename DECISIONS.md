@@ -2878,10 +2878,15 @@ and `sessions_compare` both do; the menus and pickers only offer them.
     at least 100 ms apart (both ends: 80 → 170 ms isn't news, 120 → 900 ms
     is; a request that got much faster is reported too, since it may have
     stopped doing its work).
-  - **Storage** (D80) and **App Info** (D79) are sections in
-    `SessionCompare.Section` that `run` doesn't fill yet: asked for, they
-    come back in `pending`, the sheet shows a placeholder and the tool
-    says "not compared yet". Each lands by filling its field in `run`.
+  - **Storage** (D80's diff): each layer's latest snapshot, A → B, key by
+    key with the fields inside JSON values; a layer only one side has is
+    named, not diffed. Values that always differ (tokens, session ids) do
+    show — it's the same diff as `storage_diff`, and a person skims past them.
+  - **App Info** (D79's report, both sides): identity, device and
+    advertising rows whose values differ — except session id and session
+    start, which always do — and plugins added, removed or at another
+    version. Plugin versions are Zapp's current lists for each app version,
+    not necessarily what was built (see D85).
 - **Why:** "works on 4.5, not on 4.6" is the most common support question,
   and eyeballing two 100k-line sessions finds nothing: every line differs
   in its numbers.

@@ -10,12 +10,12 @@ extension SessionTools {
     static let compare = MCPTool(
         name: "sessions_compare",
         title: "Compare two sessions",
-        description: "Use when something works in one session and not in another (app 4.5 vs 4.6, device A vs B): log lines only in one of them (numbers, ids, times and query values normalised), warnings and errors per subsystem A vs B, requests only in one, and requests whose status class or median duration changed. a is the session that works, b the one that doesn't. Both must be the same app (same bundle id, else the same app name); other versions and devices are fine.",
+        description: "Use when something works in one session and not in another (app 4.5 vs 4.6, device A vs B): log lines only in one of them (numbers, ids, times and query values normalised), warnings and errors per subsystem A vs B, requests only in one, requests whose status class or median duration changed, storage keys that differ (each layer's latest snapshot, with the fields inside JSON values), and App Info that differs (app/SDK/QuickBrick versions, Zapp ids, device, plugin versions). a is the session that works, b the one that doesn't. Both must be the same app (same bundle id, else the same app name); other versions and devices are fine.",
         kind: .read,
         inputSchema: ToolSchema.object([
             "a": ToolSchema.integer("The session that works (sessions_list shows ids)."),
             "b": ToolSchema.integer("The session that fails."),
-            "sections": ToolSchema.strings("Any of logs, network (default: both). storage and appInfo aren't compared yet."),
+            "sections": ToolSchema.strings("Any of logs, network, storage, appInfo (default: all four)."),
             "limit": ToolSchema.integer("Rows per list. Default 20, max 200."),
         ], required: ["a", "b"])
     ) { args, ctx in
@@ -25,7 +25,7 @@ extension SessionTools {
         }
         guard a != b else { throw ToolError("a and b are both session #\(a); pick two. \(example)") }
         for id in [a, b] { _ = try await ctx.resolveSession(ToolArguments(["sessionId": JSON(id)])) }
-        var sections: Set<SessionCompare.Section> = [.logs, .network]
+        var sections = Set(SessionCompare.Section.allCases)
         if let raw = try args.strings("sections"), !raw.isEmpty {
             sections = try Set(raw.map { name in
                 guard let s = SessionCompare.Section.allCases.first(where: { $0.rawValue.lowercased() == name.lowercased() }) else {
@@ -37,7 +37,7 @@ extension SessionTools {
         let limit = try args.limit(default: 20, max: 200)
         let r: SessionCompare.Result
         do {
-            r = try await SessionCompare.run(store: ctx.store, a: a, b: b, sections: sections)
+            r = try await SessionCompare.run(store: ctx.store, a: a, b: b, sections: sections, zapp: ctx.zapp)
         } catch let different as SessionCompare.DifferentApps {
             throw ToolError((different.errorDescription ?? "") + " sessions_list() shows each session's app; pick two of the same app (other versions or devices are fine). \(example)")
         }
@@ -123,12 +123,50 @@ extension SessionTools {
             ]
         }
 
-        if !r.pending.isEmpty {
-            parts.append(r.pending.map(\.rawValue).joined(separator: ", ") + ": not compared yet")
-            structured["pending"] = .array(r.pending.map { .string($0.rawValue) })
-            if r.pending.contains(.storage) {
-                next.append("storage_snapshot(sessionId: \(a), layer: \"all\", refresh: false), then the same for \(b)")
+        if let storage = r.storage {
+            let total = storage.layers.reduce(0) { $0 + $1.changes.count }
+            parts.append("storage: \(total) key(s) differ" + (storage.layers.isEmpty ? " (no storage on either side)" : ""))
+            for layer in storage.layers {
+                if let missing = layer.missing { lines.append("Storage \(layer.layer.displayName): not compared — \(missing)") }
+                list("Storage \(layer.layer.displayName), #\(a) → #\(b)", layer.changes) { c in
+                    let head = "\(c.kind == .added ? "+" : c.kind == .removed ? "−" : "~") \(c.path)"
+                    if !c.fields.isEmpty {
+                        return head + ": " + c.fields.prefix(5).map { "\($0.path) \($0.old ?? "∅") → \($0.new ?? "∅")" }.joined(separator: "; ")
+                            + (c.fields.count > 5 ? "; …" : "")
+                    }
+                    return head + ": \(ToolText.capped(c.old ?? "∅", maxBytes: 200).text) → \(ToolText.capped(c.new ?? "∅", maxBytes: 200).text)"
+                }
             }
+            if total > 0 { next.append("storage_diff(sessionId: \(b)) for what changed within #\(b)") }
+            structured["storage"] = .object(Dictionary(uniqueKeysWithValues: storage.layers.map { layer in
+                (layer.layer.rawValue, [
+                    "missing": JSON(layer.missing),
+                    "changeCount": JSON(layer.changes.count),
+                    "changes": .array(layer.changes.prefix(limit).map { c in
+                        ["path": .string(c.path), "kind": .string(c.kind.rawValue), "a": JSON(c.old), "b": JSON(c.new),
+                         "fields": .array(c.fields.prefix(20).map { ["path": .string($0.path), "kind": .string($0.kind.rawValue),
+                                                                     "a": JSON($0.old), "b": JSON($0.new)] })]
+                    }),
+                ] as JSON)
+            }))
+        }
+
+        if let info = r.appInfo {
+            parts.append("app info: \(info.values.count) value(s) and \(info.plugins.count) plugin(s) differ")
+            list("App Info, #\(a) → #\(b)", info.values) { "\($0.label): \($0.a ?? "∅") → \($0.b ?? "∅")" }
+            list("Plugins, #\(a) (\(info.pluginsSourceA)) → #\(b) (\(info.pluginsSourceB))", info.plugins) { p in
+                switch (p.a, p.b) {
+                case (nil, let v?): "+ \(p.id) \(v)"
+                case (let v?, nil): "− \(p.id) \(v)"
+                default: "~ \(p.id) \(p.a ?? "") → \(p.b ?? "")"
+                }
+            }
+            if !info.values.isEmpty || !info.plugins.isEmpty { next.append("app_info(sessionId: \(b)) for everything about #\(b)") }
+            structured["appInfo"] = [
+                "values": .array(info.values.prefix(limit).map { ["label": .string($0.label), "a": JSON($0.a), "b": JSON($0.b)] }),
+                "plugins": .array(info.plugins.prefix(limit).map { ["id": .string($0.id), "a": JSON($0.a), "b": JSON($0.b)] }),
+                "pluginsSourceA": .string(info.pluginsSourceA), "pluginsSourceB": .string(info.pluginsSourceB),
+            ]
         }
         if next.isEmpty { next.append("logs_facets(sessionId: \(b), filter: {minLevel: \"warning\"})") }
         return ToolResult(

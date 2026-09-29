@@ -15,6 +15,7 @@ When releasing:
 ## [Unreleased]
 
 ### Changed
+- Compare also compares **storage** (each layer's latest snapshot, key by key, with the fields inside JSON values) and **App Info** (versions, Zapp ids, device, plugin versions), in the sheet and in `sessions_compare` (default: all four sections).
 - Compare works only on sessions of the same app (same bundle id, else app name); the menus offer only those, and `sessions_compare` says why it refuses two different apps.
 
 ### Added
