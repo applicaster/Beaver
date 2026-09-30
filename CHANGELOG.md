@@ -18,9 +18,11 @@ does the same for a manual release.
   (`build.plugins`), and keeps the answer with the session.
   - Info shows **Built into the app**. For version, build, SDK, QuickBrick
     and layout id the app's own answer wins; a storage value that differs
-    shows under it, e.g. "Build number (storage)".
+    shows under it in orange, e.g. "Build number (storage)", with a ⚠ line
+    naming what differs.
   - **Plugins** lists each plugin's build version next to Zapp's current
-    one. A plugin whose version differs is marked "rebuild to pick it up":
+    one. Plugins that differ come first, in orange, under a ⚠ line saying
+    how many. A plugin whose version differs is marked "rebuild to pick it up":
     plugin versions change only with a rebuild, while their configuration
     comes from Zapp at launch.
   - When the build's list isn't known, Plugins shows Zapp's list marked
