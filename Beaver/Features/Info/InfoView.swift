@@ -152,6 +152,8 @@ struct InfoView: View {
 
     private func listsColumn(_ r: AppInfoReport) -> some View {
         VStack(alignment: .leading, spacing: 16) {
+            // First: what the build has and what needs a rebuild (D85).
+            pluginsCard(r)
             TableCard(title: "Screens (\(r.screens.count), \(r.screensSource))",
                       rows: r.screens.map { [$0.name, $0.id, $0.type ?? ""] }, copy: [1],
                       empty: "No screens found: the full list needs rivers.json or layout.json, and no visits were logged.")
@@ -171,7 +173,6 @@ struct InfoView: View {
                               [d.method, d.url, d.sends.map { "\($0.key) as \($0.as)" }.joined(separator: ", ")]
                           }, copy: [1], empty: "")
             }
-            pluginsCard(r)
             TableCard(title: "Cell styles (\(r.cellStyles.count), \(r.cellStylesSource))",
                       rows: r.cellStyles.map { [$0.plugin, $0.id] }, copy: [1], empty: "No cell styles found.")
             ConfigFilesCard(sessionId: sessionId, report: r)
