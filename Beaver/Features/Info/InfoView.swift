@@ -41,6 +41,8 @@ struct InfoView: View {
                     await load()
                 }
                 if case .configsSaved(let sid) = change, sid == sessionId { await load() }
+                // What the app says it was built with (D85) lands a moment after it connects.
+                if case .appBuildRecorded(let sid) = change, sid == sessionId { await load() }
             }
         }
     }
@@ -100,9 +102,31 @@ struct InfoView: View {
         }
     }
 
+    /// D85: the build's plugins beside Zapp's, or Zapp's alone, "build not confirmed".
+    @ViewBuilder
+    private func pluginsCard(_ r: AppInfoReport) -> some View {
+        if let why = r.pluginsNotConfirmed {
+            TableCard(title: "Plugins (\(r.plugins.count), \(r.pluginsSource)) — build not confirmed: \(why)",
+                      rows: r.plugins.map { [$0.id, $0.version ?? ""] }, copy: [0], empty: "No plugins found.")
+        } else {
+            let rebuild = r.pluginRows.filter { $0.status == .rebuildNeeded || $0.status == .onlyInZapp }.count
+            TableCard(title: "Plugins (\(r.pluginRows.count), built into the app; build · Zapp now)"
+                          + (rebuild == 0 ? "" : " — \(rebuild) need a rebuild to match Zapp"),
+                      rows: r.pluginRows.map { p in
+                          [p.id, p.name ?? "", p.build ?? "—", p.zapp ?? "—", p.status == .same ? "" : p.status.rawValue]
+                      },
+                      copy: [0], empty: "The build has no plugins.")
+        }
+    }
+
     private func identityColumn(_ r: AppInfoReport) -> some View {
         VStack(alignment: .leading, spacing: 16) {
             InfoCard(title: "Identity & versions", rows: r.identity)
+            InfoCard(title: "Built into the app" + (r.build.map { " (app.info, \($0.fetchedAt.formatted(date: .omitted, time: .standard)))" } ?? ""),
+                     rows: r.build?.rows ?? [],
+                     empty: r.build == nil
+                        ? "Not reported: Beaver asks the app when it connects with X-Ray's native sink."
+                        : "This app's X-Ray has no app.info.")
             InfoCard(title: "Device", rows: r.device.identity + r.device.hardware)
             if !r.device.userAgent.isEmpty { InfoCard(title: "User agent", rows: r.device.userAgent) }
             if !r.sentKeys.isEmpty {
@@ -134,8 +158,7 @@ struct InfoView: View {
                               [d.method, d.url, d.sends.map { "\($0.key) as \($0.as)" }.joined(separator: ", ")]
                           }, copy: [1], empty: "")
             }
-            TableCard(title: "Plugins (\(r.plugins.count), \(r.pluginsSource))",
-                      rows: r.plugins.map { [$0.id, $0.version ?? ""] }, copy: [0], empty: "No plugins found.")
+            pluginsCard(r)
             TableCard(title: "Cell styles (\(r.cellStyles.count), \(r.cellStylesSource))",
                       rows: r.cellStyles.map { [$0.plugin, $0.id] }, copy: [1], empty: "No cell styles found.")
             ConfigFilesCard(sessionId: sessionId, report: r)

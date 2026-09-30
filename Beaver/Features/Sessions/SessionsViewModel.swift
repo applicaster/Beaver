@@ -78,7 +78,8 @@ final class SessionsViewModel {
                     // next `reload()`.
                     break
                 case .storageUpdated, .bookmarksChanged, .savedFiltersChanged, .networkAppended,
-                     .networkBookmarksChanged, .writeFailed, .agentActivityChanged, .ignoredIssuesChanged, .configsSaved:
+                     .networkBookmarksChanged, .writeFailed, .agentActivityChanged, .ignoredIssuesChanged, .configsSaved,
+                     .appBuildRecorded:
                     break
                 }
             }

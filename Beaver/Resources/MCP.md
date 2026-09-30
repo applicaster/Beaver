@@ -117,7 +117,15 @@ port, notifications), Zapp (token), About (version, What's New, updates).
    file. An imported or older session says "in Zapp now" with **Save with
    Session**. Agents: "what's the layout id in the remote configuration?" →
    `app_config`. No Zapp token is needed (Beaver 4.19 removed it).
-16. What's New: the first launch of a new version shows "What's New in
+16. Build info: connect an app with X-Ray's **native** sink and open **Info**.
+   A few seconds later **Built into the app** lists its version, build, SDK,
+   QuickBrick and layout id; a storage value that differs shows under it as
+   "Build number (storage)". **Plugins** shows each plugin's build version
+   beside Zapp's now; one that differs says "rebuild to pick it up". An app
+   whose X-Ray or QuickBrick CLI is older, a JS-only sink, or an imported
+   session shows Zapp's list with "build not confirmed" and why. Agents: "what
+   plugins is this build on?" → `app_info`.
+17. What's New: the first launch of a new version shows "What's New in
    Beaver X.Y.Z" with every version since the last one you ran (nothing on
    a fresh install). Beaver → **What's New…** and Settings → About show it
    again.
@@ -165,7 +173,7 @@ port, notifications), Zapp (token), About (version, What's New, updates).
 | `ui_state` | What Beaver's window shows: tab, session, filters, selection, whether it is in front |
 | `ui_show` | Point the window at a tab, session, filter or row — in the background unless `reveal: true` |
 | `scheme_build` | Build a deep link into a Zapp app (Scheme Generator): open, present, web page, layout, X-Ray, native and plugin hosts, with the app's scheme from its storage; fill the form on screen, copy it, save its QR code |
-| `app_info` | What app and device a session is: app/SDK/QuickBrick versions, Zapp ids, screens, type mapping (entry type → screen), navigation (menu item → screen), data sources (feeds and the storage keys they send) with sign-in (whether those keys are stored, never their values), languages, cell styles, plugins, device model/OS/language/country/advertising id — each value with its source (the app's storage — the build it runs —, config files, logs); `configs` has the URL of every file the app loads at launch (layout, plugin/remote configurations, cell styles, presets mapping, pipes endpoints) and whether it is saved with the session. |
+| `app_info` | What app and device a session is: app/SDK/QuickBrick versions, Zapp ids, screens, the build's plugins beside Zapp's (`buildPlugins`, rebuild needed or not; "build not confirmed" when unknown), type mapping (entry type → screen), navigation (menu item → screen), data sources (feeds and the storage keys they send) with sign-in (whether those keys are stored, never their values), languages, cell styles, plugins, device model/OS/language/country/advertising id — each value with its source (the app's storage — the build it runs —, config files, logs); `configs` has the URL of every file the app loads at launch (layout, plugin/remote configurations, cell styles, presets mapping, pipes endpoints) and whether it is saved with the session. |
 | `app_config` | One of those config files as saved with the session when the device connected (Zapp as of then): the JSON at a dot path (`general_settings.layout_id`, `screens.0.name`), keys of objects, counts of arrays; without `kind` the saved files; `download: true` saves Zapp's current ones for a session that has none |
 | `beaver_guide` | These recipes, by topic |
 
@@ -258,7 +266,15 @@ and in zapp-support's web logger (Beaver 4.14.0 or later). Case never matters.
    device connected, so as Zapp had them then — a later publish doesn't change
    them. A debug build runs on the files bundled at build time instead. An older
    or imported session has none: `app_config(download: true)` saves Zapp's now.
-3. `ui_show(tab: "info")` to show it to the user.
+3. What the app was built with (Beaver 4.20+): `app_info`'s `build` (the app's
+   own `app.info`, asked when it connected) and `buildPlugins`: per plugin its
+   build version, Zapp's now, and `status`. "Zapp has another version: rebuild
+   to pick it up" means Zapp moved on and the app needs a rebuild; plugin
+   *configuration* is not in the build, it comes from Zapp at launch (read it
+   with `app_config(kind: "pluginConfigurations")`). `pluginsConfirmed: false`
+   means the build's list isn't known (`pluginsNotConfirmed` says why): the
+   versions are Zapp's. Don't call `tools_call(name: "build.plugins")` yourself.
+4. `ui_show(tab: "info")` to show it to the user.
 
 ### storage — read and change what the app has stored
 

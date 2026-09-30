@@ -12,7 +12,7 @@ enum InfoTools {
     static let appInfo = MCPTool(
         name: "app_info",
         title: "App and device info",
-        description: "Use to learn what app and device a session is: app, SDK and QuickBrick versions, Zapp ids, the layout's screens, type mapping (entry type → screen), navigation (menu items → screens), data sources (feeds and the storage keys they send, with whether each is stored — the login state), languages, cell styles and plugins, and the device's model, OS, language, country and advertising id — each value with where it came from (storage, a config file, logs) — the app's own storage, so the build it runs, not Zapp's latest. Config files come from Zapp's public bucket, at the URLs the app keeps in storage.",
+        description: "Use to learn what app and device a session is: app, SDK and QuickBrick versions, Zapp ids, the layout's screens, type mapping (entry type → screen), what the app was built with (its own app.info and build.plugins, asked when it connected: the build's plugin versions beside Zapp's now — a plugin whose version differs needs a rebuild to pick it up; without them, Zapp's list marked \"build not confirmed\"), navigation (menu items → screens), data sources (feeds and the storage keys they send, with whether each is stored — the login state), languages, cell styles and plugins, and the device's model, OS, language, country and advertising id — each value with where it came from (storage, a config file, logs) — the app's own storage, so the build it runs, not Zapp's latest. Config files come from Zapp's public bucket, at the URLs the app keeps in storage.",
         kind: .read,
         inputSchema: ToolSchema.object([
             "sessionId": ToolSchema.sessionId,
@@ -53,7 +53,19 @@ enum InfoTools {
             + r.dataSources.map { d in "  \(d.method) \(d.url)" + (d.sends.isEmpty ? "" : "  sends " + d.sends.map { "\($0.key) as \($0.as)" }.joined(separator: ", ")) }
                 .joined(separator: "\n"))
         sections.append(lines("Sign-in — storage keys the data sources send (stored or not; values never shown)", r.sentKeys))
-        sections.append("Plugins (\(r.plugins.count), \(r.pluginsSource)):\n" + pluginLines)
+        if let b = r.build, !b.rows.isEmpty {
+            sections.append("Built into the app (app.info, asked \(b.fetchedAt.ISO8601Format())):\n"
+                + b.rows.map { "  \($0.label): \($0.value)" }.joined(separator: "\n"))
+        }
+        if let why = r.pluginsNotConfirmed {
+            sections.append("Plugins (\(r.plugins.count), \(r.pluginsSource)) — build not confirmed: \(why):\n" + pluginLines)
+        } else {
+            sections.append("Plugins built into the app (\(r.pluginRows.count)) — build version, Zapp's now, status:\n"
+                + r.pluginRows.map { p in
+                    "  \(p.id)\(p.name.map { " (\($0))" } ?? ""): build \(p.build ?? "—"), Zapp \(p.zapp ?? "—")"
+                        + (p.status == .same ? "" : "  [\(p.status.rawValue)]")
+                }.joined(separator: "\n"))
+        }
         sections.append(r.cellStyles.isEmpty ? nil : "Cell styles (\(r.cellStyles.count), \(r.cellStylesSource)):\n" + cellLines)
         sections.append(lines("Device", r.device.identity + r.device.hardware))
         sections.append(lines("Advertising", r.device.advertising) ?? r.device.advertisingNote)
@@ -72,6 +84,15 @@ enum InfoTools {
                 "screensSource": .string(r.screensSource),
                 "plugins": .array(r.plugins.map { ["id": .string($0.id), "version": JSON($0.version)] }),
                 "pluginsSource": .string(r.pluginsSource),
+                "pluginsConfirmed": .bool(r.pluginsNotConfirmed == nil),
+                "pluginsNotConfirmed": JSON(r.pluginsNotConfirmed),
+                "buildPlugins": .array(r.pluginRows.map { p in
+                    ["id": .string(p.id), "name": JSON(p.name), "build": JSON(p.build), "zapp": JSON(p.zapp),
+                     "status": .string(p.status.rawValue)]
+                }),
+                "build": r.build.map { b in
+                    ["fetchedAt": .string(b.fetchedAt.ISO8601Format()), "identity": rows(b.rows)] as JSON
+                } ?? .null,
                 "cellStyles": .array(r.cellStyles.map { ["id": .string($0.id), "plugin": .string($0.plugin)] }),
                 "navigation": .array(r.navigation.map {
                     ["menu": .string($0.menu), "title": .string($0.title), "screenId": .string($0.screenId), "screenName": JSON($0.screenName)]
@@ -109,7 +130,12 @@ enum InfoTools {
         return ToolResult(
             summary: "App Info of session \(s.label): \(app)\(version.map { " " + $0 } ?? "")"
                 + (device.isEmpty ? "" : " on " + device.joined(separator: " ")) + ". "
-                + "\(r.screens.count) screens (\(r.screensSource)), \(r.plugins.count) plugins (\(r.pluginsSource)).",
+                + "\(r.screens.count) screens (\(r.screensSource)), "
+                + (r.pluginsNotConfirmed == nil
+                   ? "\(r.pluginRows.count) plugins built into the app"
+                     + { let n = r.pluginRows.filter { $0.status == .rebuildNeeded || $0.status == .onlyInZapp }.count
+                         return n == 0 ? "" : ", \(n) need a rebuild to match Zapp" }() + "."
+                   : "\(r.plugins.count) plugins (\(r.pluginsSource); build not confirmed)."),
             body: body,
             structured: structured,
             next: ["storage_snapshot(sessionId: \(s.id)) for the raw storage",

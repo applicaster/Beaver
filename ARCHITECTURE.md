@@ -220,6 +220,16 @@ CREATE TABLE agent_activity (
   seen INTEGER NOT NULL DEFAULT 0
 );
 
+-- Added in migration v14 (D85). What the app said it was built with, asked
+-- once per live session after its handshake: {"appInfo": {...}|null,
+-- "buildPlugins": [...]|null, "buildPluginsNote": "..."|null}. Not in
+-- session exports.
+CREATE TABLE session_app_build (
+  session_id INTEGER PRIMARY KEY REFERENCES session(id) ON DELETE CASCADE,
+  fetched_at INTEGER NOT NULL,           -- ms since epoch
+  json       TEXT NOT NULL
+);
+
 -- Added in migration v12 (D95). Issue signatures marked as known noise,
 -- per app: bundle id, else app name ('' when unknown), matched like
 -- SessionCompare.sameApp. Not tied to a session.

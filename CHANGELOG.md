@@ -12,6 +12,24 @@ does the same for a manual release.
 
 ## [Unreleased]
 
+### Added
+- **What the app was built with.** When an app with X-Ray's native sink
+  connects, Beaver asks it for its `app.info` and its build's plugins
+  (`build.plugins`), and keeps the answer with the session.
+  - Info shows **Built into the app**. For version, build, SDK, QuickBrick
+    and layout id the app's own answer wins; a storage value that differs
+    shows under it, e.g. "Build number (storage)".
+  - **Plugins** lists each plugin's build version next to Zapp's current
+    one. A plugin whose version differs is marked "rebuild to pick it up":
+    plugin versions change only with a rebuild, while their configuration
+    comes from Zapp at launch.
+  - When the build's list isn't known, Plugins shows Zapp's list marked
+    **build not confirmed**, with the reason: an older X-Ray, an app built
+    with an older QuickBrick CLI, or an app that wasn't connected with the
+    native sink.
+  - Agents get the same in `app_info`: `buildPlugins`, `pluginsConfirmed`
+    and `build`.
+
 ## [4.19.0] - 2026-09-29
 
 ### Added

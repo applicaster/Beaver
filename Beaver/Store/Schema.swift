@@ -335,6 +335,19 @@ enum Schema {
             """)
         }
 
+        // D85: what the app said it was built with (`app.info`,
+        // `build.plugins`), once per live session. It can't be asked again
+        // later, so it stays with the session.
+        migrator.registerMigration("v14_session_app_build", foreignKeyChecks: .immediate) { db in
+            try db.execute(sql: """
+                CREATE TABLE session_app_build (
+                    session_id  INTEGER PRIMARY KEY REFERENCES session(id) ON DELETE CASCADE,
+                    fetched_at  INTEGER NOT NULL,
+                    json        TEXT NOT NULL
+                );
+            """)
+        }
+
         return migrator
     }
 }

@@ -39,6 +39,8 @@ public actor LogStore {
         case ignoredIssuesChanged
         /// A session's config files were saved (D79).
         case configsSaved(sessionId: Int64)
+        /// The app said what it was built with, for this session (D85).
+        case appBuildRecorded(sessionId: Int64)
     }
 
     public enum Source {
@@ -2025,6 +2027,29 @@ extension LogStore {
     public func configData(sha256: String) async throws -> Data? {
         try await dbQueue.read { db in
             try Data.fetchOne(db, sql: "SELECT data FROM config_blob WHERE sha256 = ?", arguments: [sha256])
+        }
+    }
+}
+
+// MARK: - App build (D85)
+
+extension LogStore {
+    /// What the app said it was built with (`AppBuild.stored`); a later answer replaces it.
+    public func recordAppBuild(sessionId: Int64, json: String, at date: Date = Date()) async throws {
+        try await dbQueue.write { db in
+            try db.execute(
+                sql: "INSERT OR REPLACE INTO session_app_build (session_id, fetched_at, json) VALUES (?, ?, ?)",
+                arguments: [sessionId, Int64(date.timeIntervalSince1970 * 1000), json]
+            )
+        }
+        broadcast(.appBuildRecorded(sessionId: sessionId))
+    }
+
+    public func appBuild(sessionId: Int64) async throws -> (fetchedAt: Date, json: String)? {
+        try await dbQueue.read { db in
+            try Row.fetchOne(db, sql: "SELECT fetched_at, json FROM session_app_build WHERE session_id = ?",
+                             arguments: [sessionId])
+                .map { (Date(timeIntervalSince1970: Double($0["fetched_at"] as Int64) / 1000), $0["json"]) }
         }
     }
 }

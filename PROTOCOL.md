@@ -197,6 +197,15 @@ same socket as `handshake` and `command`, through `DeviceMCPClient`.
   If an app that sent no `handshake` (§4.4) never replies to `initialize`,
   Beaver treats it as having no toolboxes until it reconnects or sends one.
   After a handshake, a failed `initialize` is retried on the next request.
+- After a native `handshake` (§4.4), Beaver calls two X-Ray tools once per
+  session on its own (D85): `app.info` (the build's identity) and
+  `build.plugins`. It uses a 5 s timeout and makes up to three tries while
+  the line is busy or the app is slow, then stores the answers.
+  - `build.plugins` returns `[{id, name, version}]` (the plugins bundled at
+    build time) or `null` (an app built with a QuickBrick CLI that doesn't
+    record them).
+  - "Unknown tool" means an older X-Ray. Every outcome is fine: Info then
+    shows Zapp's plugin list as "build not confirmed".
 - Methods Beaver sends: `initialize`, `tools/list` (5 s timeout), `tools/call`
   (20 s timeout — the device's own React tools time out at 15 s).
 - Beaver sends one request at a time per app; each timeout counts from sending.
