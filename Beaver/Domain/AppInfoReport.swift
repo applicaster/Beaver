@@ -52,6 +52,13 @@ public struct AppInfoReport: Sendable {
     public var configsSavedAt: Date?
     /// When the newest storage snapshot was taken; nil without storage.
     public var storageAsOf: Date?
+    /// What the app said it was built with (D85); nil when it wasn't asked or couldn't be.
+    public var build: AppBuild?
+    /// The build's plugins beside Zapp's (D85). Without the build's list:
+    /// Zapp's, each "build not confirmed".
+    public var pluginRows: [AppBuild.PluginRow]
+    /// Why the build's plugin list isn't known; nil when it is.
+    public var pluginsNotConfirmed: String?
 
     /// The session's latest storage, both layers.
     struct Inputs {
@@ -146,6 +153,8 @@ public struct AppInfoReport: Sendable {
         if !languages.isEmpty {
             identity.append(InfoRow(label: "Languages", value: languages.joined(separator: ", "), source: "remote_configurations.json"))
         }
+        let build = try await store.appBuild(sessionId: sessionId).flatMap { AppBuild(json: $0.json, fetchedAt: $0.fetchedAt) }
+        if let build { identity = AppBuild.merge(identity, build) }
         if !identity.contains(where: { $0.label == "Account id" }),
            let account = AppInfo.accountId(fromConfigURLs: configs.values.map(\.url)) {
             identity.append(InfoRow(label: "Account id", value: account, source: "config file URL"))
@@ -180,7 +189,11 @@ public struct AppInfoReport: Sendable {
                     ?? "in Zapp now, may differ from the build",
             configs: configs,
             configsSavedAt: savedAt,
-            storageAsOf: [session?.takenAt, local?.takenAt].compactMap { $0 }.max()
+            storageAsOf: [session?.takenAt, local?.takenAt].compactMap { $0 }.max(),
+            build: build,
+            pluginRows: AppBuild.pluginRows(build: build?.plugins, zapp: pluginList),
+            pluginsNotConfirmed: build?.plugins != nil ? nil
+                : build?.pluginsNote ?? "the app wasn't asked: it wasn't connected with X-Ray's native sink (or the session is older than Beaver 4.20)"
         )
     }
 }

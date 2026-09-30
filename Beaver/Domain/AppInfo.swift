@@ -152,6 +152,8 @@ public enum AppInfo {
     public struct Plugin: Sendable, Equatable {
         public let id: String
         public let version: String?
+        /// Only the build's list (`build.plugins`, D85) names them.
+        public var name: String? = nil
     }
 
     public struct CellStyle: Sendable, Equatable {

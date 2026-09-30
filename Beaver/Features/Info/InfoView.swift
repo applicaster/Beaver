@@ -41,6 +41,8 @@ struct InfoView: View {
                     await load()
                 }
                 if case .configsSaved(let sid) = change, sid == sessionId { await load() }
+                // What the app says it was built with (D85) lands a moment after it connects.
+                if case .appBuildRecorded(let sid) = change, sid == sessionId { await load() }
             }
         }
     }
@@ -100,9 +102,44 @@ struct InfoView: View {
         }
     }
 
+    /// D85: the build's plugins beside Zapp's, or Zapp's alone, "build not confirmed".
+    @ViewBuilder
+    private func pluginsCard(_ r: AppInfoReport) -> some View {
+        if let why = r.pluginsNotConfirmed {
+            TableCard(title: "Plugins (\(r.plugins.count), \(r.pluginsSource)) — build not confirmed: \(why)",
+                      rows: r.plugins.map { [$0.id, $0.version ?? ""] }, copy: [0], empty: "No plugins found.")
+        } else {
+            // What needs a rebuild first, then what only the build has, then the rest.
+            let order: [AppBuild.PluginRow.Status: Int] = [.rebuildNeeded: 0, .onlyInZapp: 1, .onlyInBuild: 2]
+            let rows = r.pluginRows.enumerated()
+                .sorted { (order[$0.element.status] ?? 3, $0.offset) < (order[$1.element.status] ?? 3, $1.offset) }
+                .map(\.element)
+            let differ = rows.filter { $0.status != .same }.count
+            TableCard(title: "Plugins (\(rows.count), built into the app; build · Zapp now)",
+                      rows: rows.map { p in
+                          [p.id, p.name ?? "", p.build ?? "—", p.zapp ?? "—", p.status == .same ? "" : p.status.rawValue]
+                      },
+                      copy: [0],
+                      warn: Set(rows.indices.filter { rows[$0].status == .rebuildNeeded || rows[$0].status == .onlyInZapp }),
+                      warnFrom: 2,
+                      warning: differ == 0 ? nil
+                        : "\(differ) of \(rows.count) plugins differ from Zapp now — a rebuild picks up Zapp's versions",
+                      empty: "The build has no plugins.")
+        }
+    }
+
     private func identityColumn(_ r: AppInfoReport) -> some View {
         VStack(alignment: .leading, spacing: 16) {
-            InfoCard(title: "Identity & versions", rows: r.identity)
+            let contradicted = r.identity.filter { $0.label.hasSuffix(" (storage)") }
+            InfoCard(title: "Identity & versions", rows: r.identity,
+                     warning: contradicted.isEmpty ? nil
+                        : "The build differs from storage: " + contradicted.map { $0.label.replacingOccurrences(of: " (storage)", with: "") }
+                            .joined(separator: ", "))
+            InfoCard(title: "Built into the app" + (r.build.map { " (app.info, \($0.fetchedAt.formatted(date: .omitted, time: .standard)))" } ?? ""),
+                     rows: r.build?.rows ?? [],
+                     empty: r.build == nil
+                        ? "Not reported: Beaver asks the app when it connects with X-Ray's native sink."
+                        : "This app's X-Ray has no app.info.")
             InfoCard(title: "Device", rows: r.device.identity + r.device.hardware)
             if !r.device.userAgent.isEmpty { InfoCard(title: "User agent", rows: r.device.userAgent) }
             if !r.sentKeys.isEmpty {
@@ -115,6 +152,8 @@ struct InfoView: View {
 
     private func listsColumn(_ r: AppInfoReport) -> some View {
         VStack(alignment: .leading, spacing: 16) {
+            // First: what the build has and what needs a rebuild (D85).
+            pluginsCard(r)
             TableCard(title: "Screens (\(r.screens.count), \(r.screensSource))",
                       rows: r.screens.map { [$0.name, $0.id, $0.type ?? ""] }, copy: [1],
                       empty: "No screens found: the full list needs rivers.json or layout.json, and no visits were logged.")
@@ -134,8 +173,6 @@ struct InfoView: View {
                               [d.method, d.url, d.sends.map { "\($0.key) as \($0.as)" }.joined(separator: ", ")]
                           }, copy: [1], empty: "")
             }
-            TableCard(title: "Plugins (\(r.plugins.count), \(r.pluginsSource))",
-                      rows: r.plugins.map { [$0.id, $0.version ?? ""] }, copy: [0], empty: "No plugins found.")
             TableCard(title: "Cell styles (\(r.cellStyles.count), \(r.cellStylesSource))",
                       rows: r.cellStyles.map { [$0.plugin, $0.id] }, copy: [1], empty: "No cell styles found.")
             ConfigFilesCard(sessionId: sessionId, report: r)
@@ -160,6 +197,8 @@ private struct InfoCard: View {
     let title: String
     let rows: [InfoRow]
     var empty: String?
+    /// A line in orange above the rows, e.g. what differs.
+    var warning: String?
 
     var body: some View {
         if !rows.isEmpty || empty != nil {
@@ -168,8 +207,11 @@ private struct InfoCard: View {
                     Text(empty ?? "").font(.caption).foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
-                    Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 4) {
-                        ForEach(rows, id: \.label) { InfoGridRow(row: $0) }
+                    VStack(alignment: .leading, spacing: 6) {
+                        if let warning { WarningLine(text: warning) }
+                        Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 4) {
+                            ForEach(rows, id: \.label) { InfoGridRow(row: $0) }
+                        }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -186,10 +228,14 @@ private struct InfoGridRow: View {
     @State private var hovered = false
 
     var body: some View {
+        // D85: storage says otherwise than the app's own build.
+        let contradicted = row.label.hasSuffix(" (storage)")
         GridRow {
-            Text(row.label).foregroundStyle(.secondary)
+            Text(row.label).foregroundStyle(contradicted ? Color.orange : .secondary)
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text(row.value).font(.body.monospaced()).lineLimit(3).textSelection(.enabled)
+                    .foregroundStyle(contradicted ? Color.orange : .primary)
+                    .help(contradicted ? "Storage says this, but the app's build reports the value above" : "")
                 Button {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(row.value, forType: .string)
@@ -215,6 +261,12 @@ private struct TableCard: View {
     let title: String
     let rows: [[String]]
     var copy: Set<Int> = []
+    /// Rows to act on: their cells from column `warnFrom` on are orange
+    /// (the name before them stays readable).
+    var warn: Set<Int> = []
+    var warnFrom = 0
+    /// A line in orange above the rows.
+    var warning: String? = nil
     let empty: String
 
     var body: some View {
@@ -223,8 +275,11 @@ private struct TableCard: View {
                 Text(empty).font(.caption).foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
-                Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 3) {
-                    ForEach(rows.indices, id: \.self) { i in TableCardRow(cells: rows[i], copy: copy) }
+                VStack(alignment: .leading, spacing: 6) {
+                    if let warning { WarningLine(text: warning) }
+                    Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 3) {
+                        ForEach(rows.indices, id: \.self) { i in TableCardRow(cells: rows[i], copy: copy, warnFrom: warn.contains(i) ? warnFrom : nil) }
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -235,6 +290,8 @@ private struct TableCard: View {
 private struct TableCardRow: View {
     let cells: [String]
     let copy: Set<Int>
+    /// From which column the cells are orange; nil: none.
+    var warnFrom: Int?
     @Environment(ToastCenter.self) private var toasts
     @State private var hovered = false
 
@@ -244,7 +301,7 @@ private struct TableCardRow: View {
                 HStack(alignment: .firstTextBaseline, spacing: 4) {
                     Text(cells[c])
                         .font(c == 0 ? .body : .caption.monospaced())
-                        .foregroundStyle(c == 0 ? .primary : .secondary)
+                        .foregroundStyle(warnFrom.map { c >= $0 } == true ? Color.orange : c == 0 ? .primary : .secondary)
                         .lineLimit(2).truncationMode(.middle).textSelection(.enabled)
                     if copy.contains(c), !cells[c].isEmpty {
                         Button {
@@ -347,5 +404,16 @@ private struct ConfigFilesCard: View {
                 toasts.error("Couldn't save the config files: \(error.localizedDescription)")
             }
         }
+    }
+}
+
+/// ⚠ and a sentence in orange: something in the card to act on.
+private struct WarningLine: View {
+    let text: String
+    var body: some View {
+        Label(text, systemImage: "exclamationmark.triangle.fill")
+            .font(.callout.weight(.medium))
+            .foregroundStyle(.orange)
+            .textSelection(.enabled)
     }
 }

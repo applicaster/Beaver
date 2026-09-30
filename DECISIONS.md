@@ -2921,6 +2921,26 @@ and `sessions_compare` both do; the menus and pickers only offer them.
 - **More of the app** (2026-09-29): Navigation, from layout.json's `navigations`. Data sources, from the pipes endpoints file, which is now downloaded; it is 10 KB. Sign-in: every `namespace.key` a data source sends (`quick-brick-login-flow.access_token` as bearerHeader), and whether it is stored in the session, local or keychain layer. This is the login state as the app's own requests see it, with no per-plugin guessing, and values are never shown. Other context keys (`timeZoneOffset`) are filled at request time and left out. Languages, and a `localization` config kind: the strings file of the device's language, else the first one, from remote_configurations' `localizations`. The icon comes from its `assets`. Storage aliases: `urlScheme` (a JSON array), `zapp_account_id`, the locale keys, and the session counters.
 - **Saved with the session** (2026-09-29): the first storage of a live session that names the app downloads every file (uncached) and saves it (`session_config` per session and kind, bodies once by SHA-256 in `config_blob`, migration `v13_session_config`; a trigger drops a body with the last session that has it). App Info and `app_config` then read the saved copy, so a session keeps Zapp as of its connect — minutes after the app loaded them, not days. A session without one (older, imported) lists Zapp's current URLs, downloading only what the report parses, and can save them on request (Save with Session, `app_config(download: true)`). The exact copy the app loaded would need the app to report it (bucket versioning exists, but CloudFront ignores `?versionId=`). ~2.5 MB per distinct publish, uncompressed.
 
+## D85. What the app was built with: `app.info` and `build.plugins`
+
+**Status:** Accepted (2026-09-30). The first version (2026-09-28, #49) read plugins from `app.info`; X-Ray moved them to their own tool.
+
+- **Decision:** when a live app sends a native `handshake`, Beaver asks it once, in the background, through its MCP client (D75), for two X-Ray tools:
+  - `app.info`: the build's identity.
+  - `build.plugins`: the plugins bundled at build time, `[{id, name, version}]`, which zapplicaster-cli writes to `build_plugins.json` (QuickBrick #8859, Zapp-Frameworks #2887).
+
+  Each call has a 5 s timeout, with up to three tries while the line is busy or the app is slow. The answers, or why there is no list, are stored in `session_app_build` (v14, one row per session, cascade on delete). An app without MCP stores nothing. Nothing takes focus.
+- **Why versions, not configuration:** plugin versions change only with a rebuild. Plugin configuration comes from Zapp's `plugin_configurations.json` at every launch (`remoteContextReloader`), and D79 already saves it when the device connects. A build-time copy of the configuration was dropped in review ("otherwise this will be injected into all native builds").
+- **Display:** Info and `app_info` show:
+  - **Built into the app**, with every `app.info` field. For bundle id, version, build, SDK, QuickBrick and layout id the app's value wins in Identity; a storage value that differs stays under it, labelled "(storage)".
+  - **Plugins**: the build's version beside Zapp's now (from the saved plugin_configurations), by id. A different version means "rebuild to pick it up". "Only in Zapp" means rebuild to add it; "only in the build" means not in Zapp now. An unknown version isn't a difference.
+- **Build not confirmed:** in any of these cases Plugins shows Zapp's list marked "build not confirmed", with the reason:
+  - `build.plugins` returns `null` (a QuickBrick CLI before #8859);
+  - "Unknown tool" (an older X-Ray);
+  - the app wasn't asked (a JS-only sink, a logs-only TV, an imported session, or a session from before 4.20).
+- **Not exported:** session files (SESSION_FILE_FORMAT.md) don't carry it.
+- **Alternatives:** asking whenever Info opens (lost for past sessions, and it would queue behind an agent's calls); fetching an S3 version of plugin_configurations by `versionId` (CloudFront drops the parameter, and the build-time id isn't recorded anywhere).
+
 ## D86. Sessions: a click selects, Open opens
 
 **Status:** Accepted (2026-09-28).

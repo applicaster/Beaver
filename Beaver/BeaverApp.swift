@@ -396,6 +396,8 @@ struct BeaverApp: App {
             }
             await Self.markMCP(client, for: handshake)
             try? await env.store.applyHandshake(handshake, to: sessionId)
+            // D85: ask what the app was built with, once per session, in the background.
+            if !handshake.logsOnly { Task { await AppBuild.fetch(from: env, store: env.store, sessionId: sessionId) } }
         case .success(.mcp(let message)):
             // D75: an answer to Beaver's request; not a log line.
             let client = await MainActor.run { env.mcpClients[connection] }
@@ -445,6 +447,7 @@ private func replaceDeletedLiveSessions(env: AppEnvironment, viewed: Int64?,
         }
         if let handshake = env.live.handshake(for: connection) {
             try? await env.store.applyHandshake(handshake, to: fresh.id)
+            if !handshake.logsOnly { Task { await AppBuild.fetch(from: env, store: env.store, sessionId: fresh.id) } }
         }
         if connection == viewedConnection || (viewedConnection == nil && env.viewingSessionId == nil) {
             env.viewingSessionId = fresh.id
