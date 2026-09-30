@@ -285,7 +285,11 @@ enum StorageTools {
         let wire = StorageCommand.wireValue(given.string ?? given.text)
         let parent = try optionalWord(args, "namespace", example: example)
         if let problem = StorageCommand.valueProblem(wire, parent: parent) {
-            throw ToolError("Not sent. \(problem) \(example)")
+            // D97: the app's storage toolbox takes arguments as JSON, spaces and all.
+            let exact = "To store it exactly, an app with X-Ray's storage toolbox can: tools_call(name: \"storage.set\", "
+                + "arguments: {storageType: \"\(layer.wireKey)\", key: \"\(key)\", value: …"
+                + (parent.map { ", namespace: \"\($0)\"" } ?? "") + "}), then storage_snapshot() to see it."
+            throw ToolError("Not sent. \(problem) \(exact) \(example)")
         }
         return try await edit(.set, layer: layer, key: key, value: wire, parent: parent, args, ctx)
     }

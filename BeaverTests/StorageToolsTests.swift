@@ -78,6 +78,8 @@ struct StorageToolsTests {
             } catch let error as ToolError {
                 #expect(error.message.hasPrefix("Not sent."))
                 #expect(error.message.contains("storage_set(layer:"))
+                // D97: the app's storage toolbox sends it as is.
+                #expect(error.message.contains(#"tools_call(name: "storage.set", arguments: {storageType: "local", key: "k""#))
             }
         }
         await #expect(throws: ToolError.self) {

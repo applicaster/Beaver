@@ -79,7 +79,10 @@ enum ToolboxTools {
             return ToolResult(
                 summary: "\(on) has \(boxes.count) toolbox(es): "
                     + boxes.map { "\($0.name) (\($0.tools.count))" }.joined(separator: ", ") + ".",
-                body: boxes.map { "\($0.name) — " + $0.tools.map(\.name).joined(separator: ", ") }.joined(separator: "\n"),
+                body: boxes.map { "\($0.name) — " + $0.tools.map(\.name).joined(separator: ", ") }.joined(separator: "\n")
+                    + (deviceId == beaverId || !boxes.contains { $0.tools.contains { beaverAlternative($0.name) != nil } } ? ""
+                       : "\nLogs, storage and commands: prefer Beaver's own logs_query, storage_snapshot / storage_set and "
+                         + "commands_send; toolboxes_list(toolbox: …) says when the app's tool is the right one."),
                 structured: ["deviceId": .string(deviceId), "toolboxes": .array(boxes.map { box in
                     ["name": .string(box.name), "tools": .array(box.tools.map { .string($0.name) })]
                 })],
@@ -96,8 +99,10 @@ enum ToolboxTools {
             ?? "tools_call(deviceId: \"\(deviceId)\", name: \"\(box.name).…\", arguments: {…}) with a tool from the list above"
         return ToolResult(
             summary: "\(box.name) on \(on): \(box.tools.count) tool(s).",
-            body: box.tools.map { $0.signature + ($0.description.isEmpty ? "" : " — " + $0.description) }
-                .joined(separator: "\n"),
+            body: box.tools.map { t in
+                t.signature + (t.description.isEmpty ? "" : " — " + t.description)
+                    + (deviceId == beaverId ? "" : beaverAlternative(t.name).map { "\n    ↳ Beaver: " + $0 } ?? "")
+            }.joined(separator: "\n"),
             structured: ["deviceId": .string(deviceId), "toolbox": .string(box.name), "tools": .array(box.tools.map {
                 ["name": .string($0.name), "description": .string($0.description), "inputSchema": $0.inputSchema]
             })],
@@ -192,11 +197,46 @@ enum ToolboxTools {
             summary: "\(name) on \(label): " + (text.isEmpty ? "done (no text)" : String(firstLine.prefix(200))),
             body: body,
             structured: .object(structured),
-            next: ["logs_wait(sessionId: \(id), afterId: \(before), timeoutMs: 15000) for what the app logged "
+            next: (beaverNext(name, sessionId: id).map { [$0] } ?? [])
+                + ["logs_wait(sessionId: \(id), afterId: \(before), timeoutMs: 15000) for what the app logged "
                    + "(after a restart, beaver_status() shows its new session)"],
             sessionId: id,
             journalKind: risky ? .destructive : nil
         )
+    }
+
+    // MARK: Beaver's own tools for the same job (D97)
+
+    /// Where an app tool does what one of Beaver's own does: which to use,
+    /// and when the app's is the right one. Agents reach for the name they
+    /// see, so this shows where they choose — toolboxes_list, tools_call's
+    /// Next:, storage_set's refusal — not only in the instructions.
+    static func beaverAlternative(_ tool: String) -> String? {
+        let name = tool.lowercased()
+        if name.hasPrefix("logs.") {
+            return "the app's own in-memory buffer: use it only for what the app logged before it connected to Beaver; "
+                + "for the session use logs_query / logs_facets (every event, with ids, filters and links)"
+        }
+        if name == "storage.set" || name == "storage.setbatch" {
+            return "storage_set does this and checks the app applied it; use the app's for a value with spaces or line breaks, which storage_set can't send"
+        }
+        if name == "storage.delete" { return "storage_delete does this and checks the app applied it" }
+        if name.hasPrefix("storage.") { return "storage_snapshot reads every layer, with its time and earlier snapshots" }
+        if name.hasPrefix("console.") { return "commands_send runs a command and collects what the app logs (collectLogsMs)" }
+        if name == "app.info" || name == "build.plugins" { return "Beaver asked this when the app connected: app_info" }
+        return nil
+    }
+
+    /// The Beaver call to suggest after an app tool that overlaps one of Beaver's.
+    static func beaverNext(_ tool: String, sessionId: Int64) -> String? {
+        let name = tool.lowercased()
+        if name.hasPrefix("logs.") { return "logs_query(sessionId: \(sessionId), since: \"10m\") for the session's logs in Beaver" }
+        if name.hasPrefix("storage.set") || name == "storage.delete" {
+            return "storage_snapshot(sessionId: \(sessionId)) so Beaver (and the user's Storages tab) sees the change"
+        }
+        if name.hasPrefix("console.") { return "commands_send(deviceId: \"\(sessionId)\", command: …, collectLogsMs: 5000) next time: it collects the logs" }
+        if name == "app.info" || name == "build.plugins" { return "app_info(sessionId: \(sessionId)): Beaver keeps this with the session" }
+        return nil
     }
 
     // MARK: Helpers

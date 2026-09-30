@@ -12,6 +12,19 @@ does the same for a manual release.
 
 ## [Unreleased]
 
+### Changed
+- **Agents pick Beaver's tools over the app's own for the same job.** The
+  app's X-Ray toolboxes also read logs, change storage and run commands.
+  Beaver now tells agents which tool to use, right where they choose:
+  - `toolboxes_list` marks each overlapping tool with Beaver's own and when
+    the app's is the right one: `logs.tail` only for logs from before the
+    app connected, `storage.set` for a value with spaces;
+  - `tools_call` suggests Beaver's call next (`logs_query`, or
+    `storage_snapshot` so the Storages tab sees a change);
+  - `storage_set`, refusing a value with spaces, shows the exact
+    `tools_call(storage.set …)` that sends it;
+  - the MCP instructions state the rule.
+
 ## [4.20.1] - 2026-09-30
 
 No user-facing changes.

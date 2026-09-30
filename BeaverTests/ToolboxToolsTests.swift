@@ -514,4 +514,42 @@ struct ToolboxToolsTests {
                                    store, ui, device)
         #expect(!beaver.next.joined().contains("devices.disconnect"))
     }
+
+    // MARK: Beaver's own tools for the same job (D97)
+
+    @Test("D97: overlapping app tools point at Beaver's — in the list, the overview and after a call")
+    func beaverAlternatives() async throws {
+        let (store, a, ui, device) = try await alpha { method, _ in
+            if method == "tools/list" {
+                return ["tools": [
+                    ["name": "logs.tail", "inputSchema": ["type": "object"]],
+                    ["name": "storage.set", "inputSchema": ["type": "object"]],
+                    ["name": "debugfeatures.flags", "inputSchema": ["type": "object"]],
+                ]]
+            }
+            return ["content": [["type": "text", "text": "ok"]]]
+        }
+        let logs = try await run(ToolboxTools.toolboxesList, ["toolbox": "logs"], store, ui, device)
+        #expect(logs.body.contains("↳ Beaver: the app's own in-memory buffer"))
+        #expect(logs.body.contains("logs_query / logs_facets"))
+
+        let storage = try await run(ToolboxTools.toolboxesList, ["toolbox": "storage"], store, ui, device)
+        #expect(storage.body.contains("value with spaces"))
+
+        let flags = try await run(ToolboxTools.toolboxesList, ["toolbox": "debugfeatures"], store, ui, device)
+        #expect(!flags.body.contains("↳ Beaver"))
+
+        let overview = try await run(ToolboxTools.toolboxesList, [:], store, ui, device)
+        #expect(overview.body.contains("prefer Beaver's own logs_query"))
+
+        let tail = try await run(ToolboxTools.toolsCall, ["name": "logs.tail"], store, ui, device)
+        #expect(tail.next.first == "logs_query(sessionId: \(a.id), since: \"10m\") for the session's logs in Beaver")
+        let set = try await run(ToolboxTools.toolsCall, ["name": "storage.set", "arguments": ["key": "k", "value": "a b"]],
+                                store, ui, device)
+        #expect(set.next.first?.hasPrefix("storage_snapshot(sessionId: \(a.id))") == true)
+
+        // Beaver's own toolboxes are Beaver's: no hint about themselves.
+        let own = try await run(ToolboxTools.toolboxesList, ["deviceId": "beaver", "toolbox": "logs"], store, ui, device)
+        #expect(!own.body.contains("↳ Beaver"))
+    }
 }

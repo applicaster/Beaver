@@ -3294,3 +3294,25 @@ the step order of D90.
   values shown next to it (built, then dropped: a setting for one hint);
   keep the CMS first (wrong values).
 
+## D97. Beaver's tools first when an app toolbox does the same job
+
+**Status:** Accepted (2026-09-30).
+
+- **Decision:** X-Ray's native toolboxes overlap Beaver's own tools:
+  - `logs.tail` / `logs.facets` overlap `logs_query` / `logs_facets`;
+  - `storage.*` overlaps `storage_snapshot` / `storage_set` / `storage_delete`;
+  - `console.*` overlaps `commands_send`;
+  - `app.info` / `build.plugins` overlap `app_info`.
+
+  Beaver's are the default: they cover the whole session, check that a change applied, journal it, and show it to the user. The app's are right in two cases:
+  - its logs from before it connected (its in-memory buffer);
+  - a storage value with spaces or line breaks (the command channel splits on spaces; the toolbox takes JSON).
+- **Where it's said:** where the agent chooses, not only up front.
+  - `ToolboxTools.beaverAlternative` adds a "↳ Beaver: …" line under each overlapping tool in `toolboxes_list(toolbox:)`, and the overview gets a one-line rule.
+  - `beaverNext` puts Beaver's call first in `tools_call`'s `Next:` (`storage_snapshot` after `storage.set`, so the Storages tab sees it).
+  - `storage_set`'s whitespace refusal spells out the `tools_call(storage.set …)` that sends it.
+  - The MCP instructions carry the rule in two sentences, and MCP.md's toolboxes recipe the details.
+- **Why:** the names nearly match (`logs.facets` / `logs_facets`), and an agent reaches for what it sees. The app's buffer has no ids or links, and a change made through a toolbox doesn't show in Beaver until storage is read again.
+- **Alternatives:**
+  - hiding the overlapping tools from `toolboxes_list`: loses the two cases where they're the right one;
+  - instructions only: read once, forgotten by the time of the call.

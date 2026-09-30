@@ -359,6 +359,13 @@ over the Chrome DevTools Protocol. The TV's developer mode must be on.
 
 1. `beaver_status()` — pick the app; with several, `devices_set_default(deviceId: "14")` so you can omit `deviceId`.
 2. `toolboxes_list()` — its toolboxes, e.g. `storage (7)`, `app (3)`, `debugfeatures (2)`.
+   Some do what Beaver's own tools do. Use Beaver's first:
+   - **Logs:** `logs_query` / `logs_facets` read the whole session, with ids, filters and links. The app's `logs.tail` / `logs.facets` read only its in-memory buffer; use them for what it logged before it connected.
+   - **Storage:** `storage_snapshot` / `storage_set` / `storage_delete` check the app applied a change and show it to the user. The app's `storage.set` is the one for a value with spaces or line breaks, which `storage_set` can't send; then call `storage_snapshot()` so Beaver sees it.
+   - **Commands:** `commands_send` collects the logs a command causes (`collectLogsMs`); the app's `console.*` doesn't.
+   - `app.info` / `build.plugins`: Beaver asked when the app connected, see `app_info`.
+
+   `toolboxes_list(toolbox: …)` marks each such tool with "↳ Beaver: …", and `tools_call`'s `Next:` names Beaver's call.
 3. `toolboxes_list(toolbox: "storage")` — each tool's arguments.
 4. `tools_call(name: "storage.get", arguments: {key: "volume"})` — the app's answer. The summary names the app (`(default)` when the default picked it); Next's `logs_wait(sessionId: …)` reads that app's logs. `tools_call` is marked destructive, so clients that honor destructiveHint ask the user to confirm: app tools can delete data or restart the app.
 5. `tools_call(name: "app.restart")` may time out or report a disconnect: the app drops the connection first, so it may still have run. `beaver_status()` shows it back in a new session; the default follows it. The Agent panel notes the drop. An error that says the call didn't reach the app is different: nothing ran, so the same call can be sent again.
