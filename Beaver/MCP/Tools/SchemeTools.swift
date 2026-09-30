@@ -8,9 +8,9 @@
 import Foundation
 
 enum SchemeTools {
-    static let all = [build]
+    static let all: [MCPTool] = [build]
 
-    static let build = MCPTool(
+    static let build: MCPTool = MCPTool(
         name: "scheme_build",
         title: "Build a deep link",
         description: "Use to build a deep link (URL scheme) into a Zapp app, like Beaver's Scheme Generator: open a screen or feed entry (myapp://open?type=movie&id=42), present a feed, web page or layout (myapp://present?…), X-Ray actions like connecting remote assistance to this Beaver (myapp://xray?remoteAssistance=ws://…), reset the device id, or any plugin host; web index.html?… links too. Without scheme it uses the app's own, from the session's storage (applicaster.v2.urlScheme). Returns the URL. show: true puts it in the Scheme Generator form on screen (in the background); copy: true puts it on the clipboard; qrFile saves its QR code as PNG.",

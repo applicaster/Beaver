@@ -33,13 +33,13 @@ enum AgentGuide {
 }
 
 enum GuideTool {
-    static let tool = MCPTool(
+    static let tool: MCPTool = MCPTool(
         name: "beaver_guide",
         title: "How to use Beaver",
         description: "Use when unsure how to do something with Beaver: step-by-step recipes with real calls. No topic lists the topics.",
         kind: .read,
         inputSchema: ToolSchema.object(["topic": ToolSchema.string("A topic from the list; omit for the list.")])
-    ) { args, _ in
+    ) { (args: ToolArguments, _: ToolContext) async throws -> ToolResult in
         let topics = AgentGuide.topics(in: AgentGuide.markdown)
         guard !topics.isEmpty else {
             throw ToolError("Beaver's guide is missing from this build. Report it with the Beaver version; meanwhile call beaver_status().")

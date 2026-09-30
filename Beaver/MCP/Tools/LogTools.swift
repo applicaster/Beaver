@@ -10,7 +10,7 @@ enum LogTools {
 
     static let maxWaitMillis = 60_000
 
-    static let facets = MCPTool(
+    static let facets: MCPTool = MCPTool(
         name: "logs_facets",
         title: "Log facets",
         description: "Use before logs_query, and to see what arrived in a time range: counts per level, subsystem and category. Subsystem names are namespaced strings you will not guess, so read them here first.",
@@ -18,7 +18,7 @@ enum LogTools {
         inputSchema: ToolSchema.object(
             ["sessionId": ToolSchema.sessionId, "filter": ToolSchema.filter]
                 .merging(ToolSchema.range) { first, _ in first })
-    ) { args, ctx in
+    ) { (args: ToolArguments, ctx: ToolContext) async throws -> ToolResult in
         let s = try await ctx.resolveSession(args)
         let f = try await ctx.resolveFilter(args, sessionId: s.id)
         let r = try await ctx.resolveRange(args, sessionId: s.id)
@@ -57,7 +57,7 @@ enum LogTools {
         )
     }
 
-    static let query = MCPTool(
+    static let query: MCPTool = MCPTool(
         name: "logs_query",
         title: "Query logs",
         description: "Use to read log lines: filter by level, text, regex, exclusions, subsystem and category, id range or time (since: \"5m\"). One line per event, ids first; newest first by default. Full payloads: logs_get.",
@@ -69,7 +69,7 @@ enum LogTools {
             "order": ToolSchema.string("newest (default) or oldest first.", oneOf: ["newest", "oldest"]),
             "includeData": ToolSchema.boolean("Add each event's data payload, cut at 2 KB. Default false; logs_get gives it in full."),
         ].merging(ToolSchema.range) { first, _ in first })
-    ) { args, ctx in
+    ) { (args: ToolArguments, ctx: ToolContext) async throws -> ToolResult in
         let s = try await ctx.resolveSession(args)
         let f = try await ctx.resolveFilter(args, sessionId: s.id)
         let r = try await ctx.resolveRange(args, sessionId: s.id)
@@ -125,13 +125,13 @@ enum LogTools {
         )
     }
 
-    static let get = MCPTool(
+    static let get: MCPTool = MCPTool(
         name: "logs_get",
         title: "Get events",
         description: "Use when a log line needs its full message, data and context payloads. Up to 50 ids from logs_query or logs_wait. Payloads over 256 KB are cut, with truncated: true.",
         kind: .read,
         inputSchema: ToolSchema.object(["ids": ToolSchema.integers("Event ids, at most 50.")], required: ["ids"])
-    ) { args, ctx in
+    ) { (args: ToolArguments, ctx: ToolContext) async throws -> ToolResult in
         let ids = try args.int64s("ids") ?? []
         guard !ids.isEmpty else {
             throw ToolError("ids is required. Example: logs_get(ids: [48211]) — ids are the #numbers in logs_query rows.")
@@ -177,7 +177,7 @@ enum LogTools {
         )
     }
 
-    static let wait = MCPTool(
+    static let wait: MCPTool = MCPTool(
         name: "logs_wait",
         title: "Wait for logs",
         description: "Use after you or the user do something on the device, to wait until a matching event is logged. Returns as soon as one arrives, or when timeoutMs passes (default 15000, max 60000). Pass afterId from an earlier result; without it, only events from now on count. Without sessionId it follows the device: if the app restarts it carries on in the new session and says so (sessionChanged). For minutes or longer, use watch_start.",
@@ -189,7 +189,7 @@ enum LogTools {
             "timeoutMs": ToolSchema.integer("How long to wait. Default 15000, max 60000."),
             "limit": ToolSchema.integer("Most events to return. Default 50, max 500."),
         ])
-    ) { args, ctx in
+    ) { (args: ToolArguments, ctx: ToolContext) async throws -> ToolResult in
         let s = try await ctx.resolveSession(args)
         let f = try await ctx.resolveFilter(args, sessionId: s.id)
         let requested = try args.int("timeoutMs") ?? 15_000
@@ -234,7 +234,7 @@ enum LogTools {
         )
     }
 
-    static let clear = MCPTool(
+    static let clear: MCPTool = MCPTool(
         name: "logs_clear",
         title: "Clear the log view",
         description: "Use when the user wants a clean screen before reproducing something: hides the events up to now in Beaver's Log feed, like its Clear button (⌘K). Deletes nothing — logs_query still sees every event. Acts on the session the user is viewing.",
@@ -242,7 +242,7 @@ enum LogTools {
         inputSchema: ToolSchema.object([
             "sessionId": ToolSchema.integer("The session the user is viewing (the default). Clear only acts on that one."),
         ])
-    ) { args, ctx in
+    ) { (args: ToolArguments, ctx: ToolContext) async throws -> ToolResult in
         let host = await ctx.ui.snapshot()
         guard let viewing = host.viewingSessionId else {
             throw ToolError("The user isn't viewing a session, so there's nothing on screen to clear. beaver_status() shows what is connected.")

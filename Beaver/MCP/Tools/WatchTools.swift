@@ -8,11 +8,11 @@
 import Foundation
 
 enum WatchTools {
-    static let all = [start, status, stop]
+    static let all: [MCPTool] = [start, status, stop]
 
     static let startExample = "Example: watch_start(name: \"player errors\", filter: {minLevel: \"error\", subsystems: [\"player*\"]}, notify: {atCount: 10})."
 
-    static let start = MCPTool(
+    static let start: MCPTool = MCPTool(
         name: "watch_start",
         title: "Start a watch",
         description: "Use to keep an eye on something for minutes or hours (while the user tests), instead of looping logs_wait: counts events matching filter from now on. With notify, the user gets an attention note and a notification at the first match or at a count — you are not woken; check watch_status later. Without sessionId it follows the device into new sessions.",
@@ -24,7 +24,7 @@ enum WatchTools {
             "notify": ["type": "object",
                        "description": "Tell the user: {onFirst: true} at the first match, or {atCount: 10}. Fires once."],
         ], required: ["name"])
-    ) { args, ctx in
+    ) { (args: ToolArguments, ctx: ToolContext) async throws -> ToolResult in
         guard let name = try args.string("name").flatMap(ToolContext.trimmedNonEmpty) else {
             throw ToolError("name is required. \(startExample)")
         }
@@ -53,13 +53,13 @@ enum WatchTools {
         )
     }
 
-    static let status = MCPTool(
+    static let status: MCPTool = MCPTool(
         name: "watch_status",
         title: "Watch status",
         description: "Use to see what a watch caught since it started: matches, first and last matching event, counts per level, subsystem and category, the sessions it covered, and whether notify fired. No name: every watch.",
         kind: .read,
         inputSchema: ToolSchema.object(["name": ToolSchema.string("The watch; omit for all.")])
-    ) { args, ctx in
+    ) { (args: ToolArguments, ctx: ToolContext) async throws -> ToolResult in
         let list: [Watches.Watch]
         if let name = try args.string("name").flatMap(ToolContext.trimmedNonEmpty) {
             guard let w = await ctx.watches.get(name) else {
@@ -78,7 +78,7 @@ enum WatchTools {
         return report(statuses, stopped: false, ctx)
     }
 
-    static let stop = MCPTool(
+    static let stop: MCPTool = MCPTool(
         name: "watch_stop",
         title: "Stop a watch",
         description: "Use when a watch is no longer needed: returns its final status and forgets it. all: true stops every watch. The events stay; logs_query(afterId: startId) still reads them.",
@@ -88,7 +88,7 @@ enum WatchTools {
             "name": ToolSchema.string("The watch to stop."),
             "all": ToolSchema.boolean("Stop every watch."),
         ])
-    ) { args, ctx in
+    ) { (args: ToolArguments, ctx: ToolContext) async throws -> ToolResult in
         if try args.bool("all") == true {
             let gone = await ctx.watches.removeAll()
             let statuses = try await gone.asyncMap { try await ctx.status(of: $0) }

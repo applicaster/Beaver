@@ -6,15 +6,15 @@
 import Foundation
 
 enum StatusTools {
-    static let all = [status, sessionsList]
+    static let all: [MCPTool] = [status, sessionsList]
 
-    static let status = MCPTool(
+    static let status: MCPTool = MCPTool(
         name: "beaver_status",
         title: "Beaver status",
         description: "Use first, and whenever you are unsure what is connected: which apps are connected (each with the deviceId to pass to device tools), their live and the viewed session ids, the latest event id (a starting point for afterId), where the device should connect, and how long old sessions are kept.",
         kind: .read,
         inputSchema: ToolSchema.object([:])
-    ) { _, ctx in
+    ) { (_: ToolArguments, ctx: ToolContext) async throws -> ToolResult in
         let host = await ctx.ui.snapshot()
         let sessions = try await ctx.store.sessions()
         var devices: [JSON] = []
@@ -95,7 +95,7 @@ enum StatusTools {
         )
     }
 
-    static let sessionsList = MCPTool(
+    static let sessionsList: MCPTool = MCPTool(
         name: "sessions_list",
         title: "List sessions",
         description: "Use when you need a session other than the live one, or to see what Beaver has stored: every session, newest first, with its app, device, and event and request counts.",
@@ -104,7 +104,7 @@ enum StatusTools {
             "limit": ToolSchema.integer("How many, newest first. Default 20, max 200."),
             "source": ToolSchema.string("Only live or only imported sessions.", oneOf: ["live", "imported", "any"]),
         ])
-    ) { args, ctx in
+    ) { (args: ToolArguments, ctx: ToolContext) async throws -> ToolResult in
         let limit = try args.limit(default: 20, max: 200)
         let sourceStr = try args.string("source")
         let source: Session.Source?

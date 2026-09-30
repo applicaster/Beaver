@@ -9,7 +9,7 @@ import Foundation
 enum IssueTools {
     static var all: [MCPTool] { [list, ignore] }
 
-    static let list = MCPTool(
+    static let list: MCPTool = MCPTool(
         name: "issues_list",
         title: "Issues",
         description: "Use first when asked what's broken in a session: its warnings and errors grouped by signature (subsystem + message with numbers, ids and times normalised, as sessions_compare does), each with level, count, first/last event id and time, and whether the user ignored it as known noise for this app. Errors first, then most frequent.",
@@ -20,7 +20,7 @@ enum IssueTools {
             "includeIgnored": ToolSchema.boolean("Also list the signatures the user ignored (marked ignored: true). Default false."),
             "limit": ToolSchema.integer("Issues to list. Default 30, max 500."),
         ])
-    ) { args, ctx in
+    ) { (args: ToolArguments, ctx: ToolContext) async throws -> ToolResult in
         let s = try await ctx.resolveSession(args)
         var minLevel = LogLevel.warning
         if let raw = args["minLevel"] {
@@ -81,7 +81,7 @@ enum IssueTools {
         ["minLevel": .string(minLevel.rawValue), "subsystems": [.string(g.subsystem)], "pattern": .string(g.pattern)]
     }
 
-    static let ignore = MCPTool(
+    static let ignore: MCPTool = MCPTool(
         name: "issues_ignore",
         title: "Ignore an issue",
         description: "Use only when the user asks to mark an issue as known noise (or to unignore it with ignored: false). It is their setting: the signature is hidden from the Issues tab and issues_list in every session of this app, now and later. Pass the signature from issues_list.",
@@ -92,7 +92,7 @@ enum IssueTools {
             "ignored": ToolSchema.boolean("true to ignore (default), false to show it again."),
             "sessionId": ToolSchema.integer("A session of the app the ignore is for. Default: live, viewed, most recent."),
         ], required: ["signature"])
-    ) { args, ctx in
+    ) { (args: ToolArguments, ctx: ToolContext) async throws -> ToolResult in
         let example = "Example: issues_ignore(signature: \"com.app/quick_brick/Player ␟ Buffer low <n>%\")."
         guard let raw = try args.string("signature"), let sig = Issues.parse(signature: raw) else {
             throw ToolError("signature is required, as issues_list gives it (subsystem, \" ␟ \", pattern). \(example)")

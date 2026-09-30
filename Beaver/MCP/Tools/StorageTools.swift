@@ -8,7 +8,7 @@
 import Foundation
 
 enum StorageTools {
-    static let all = [snapshot, diff, set, delete]
+    static let all: [MCPTool] = [snapshot, diff, set, delete]
 
     static func layers(_ raw: String?) throws -> [StorageSnapshot.Namespace] {
         switch raw?.lowercased() {
@@ -21,7 +21,7 @@ enum StorageTools {
         }
     }
 
-    static let snapshot = MCPTool(
+    static let snapshot: MCPTool = MCPTool(
         name: "storage_snapshot",
         title: "Storage snapshot",
         description: "Use to read the app's session, local and keychain (secure) storage. With a device connected it first asks the app for fresh storage (refresh, default true); otherwise, or with refresh: false, it reads the latest snapshot Beaver stored for the session, with its time. Top-level keys inside a layer are the SDK's namespaces (applicaster.v2 by default).",
@@ -33,7 +33,7 @@ enum StorageTools {
             "refresh": ToolSchema.boolean("Ask the connected app for fresh storage first. Default true; past and imported sessions are read as stored."),
             "timeoutMs": ToolSchema.integer("How long to wait for the app's answer. Default 5000, max 30000."),
         ])
-    ) { args, ctx in
+    ) { (args: ToolArguments, ctx: ToolContext) async throws -> ToolResult in
         let s = try await ctx.resolveSession(args)
         let wanted = try layers(try args.string("layer"))
         let refreshNote = try await refreshIfLive(args, session: s, layers: wanted, ctx)
@@ -104,7 +104,7 @@ enum StorageTools {
 
     /// Two snapshots of each layer, key by key (D80). Beaver keeps a new
     /// snapshot only when a layer's content changes.
-    static let diff = MCPTool(
+    static let diff: MCPTool = MCPTool(
         name: "storage_diff",
         title: "Storage changes",
         description: "Use to see what changed in the app's storage during a session, e.g. what login wrote. Compares two snapshots of each layer key by key: added, removed, changed with old and new value; a JSON value (also JSON text in a string) lists the fields that changed inside it. Default: the session's earliest snapshot against the latest, fresh from the app when connected. since or beforeEventId start from the last snapshot before that time or event; fromId / toId pick snapshots by id — the result lists each layer's snapshot ids and times.",
@@ -120,7 +120,7 @@ enum StorageTools {
             "refresh": ToolSchema.boolean("Ask the connected app for fresh storage first, unless toId is given. Default true."),
             "timeoutMs": ToolSchema.integer("How long to wait for the app's answer. Default 5000, max 30000."),
         ])
-    ) { args, ctx in
+    ) { (args: ToolArguments, ctx: ToolContext) async throws -> ToolResult in
         let s = try await ctx.resolveSession(args)
         let example = "Example: storage_diff(sessionId: \(s.id), layer: \"local\", since: \"5m\")."
 
@@ -263,7 +263,7 @@ enum StorageTools {
                 })]
     }
 
-    static let set = MCPTool(
+    static let set: MCPTool = MCPTool(
         name: "storage_set",
         title: "Set a storage value",
         description: "Use to change a value in the connected app's storage (session, local or secure/keychain), like editing it in Beaver's Storages tab. Beaver then re-reads storage and says whether the app applied it (applied, notApplied, or noAnswer when the app didn't send storage back). The key, value and namespace can't contain spaces, tabs or line breaks: the app splits commands on spaces.",
@@ -275,7 +275,7 @@ enum StorageTools {
             "namespace": ToolSchema.string("The SDK namespace inside the layer. Default applicaster.v2."),
             "deviceId": ToolSchema.deviceId,
         ], required: ["layer", "key", "value"])
-    ) { args, ctx in
+    ) { (args: ToolArguments, ctx: ToolContext) async throws -> ToolResult in
         let example = "Example: storage_set(layer: \"local\", key: \"onboardingDone\", value: \"false\")."
         let layer = try oneLayer(args, example: example)
         let key = try word(args, "key", example: example)
@@ -290,7 +290,7 @@ enum StorageTools {
         return try await edit(.set, layer: layer, key: key, value: wire, parent: parent, args, ctx)
     }
 
-    static let delete = MCPTool(
+    static let delete: MCPTool = MCPTool(
         name: "storage_delete",
         title: "Delete a storage key",
         description: "Use to remove a key from the connected app's storage (session, local or secure/keychain), like Delete in Beaver's Storages tab. Beaver then re-reads storage and says whether the app applied it.",
@@ -301,7 +301,7 @@ enum StorageTools {
             "namespace": ToolSchema.string("The SDK namespace inside the layer. Default applicaster.v2."),
             "deviceId": ToolSchema.deviceId,
         ], required: ["layer", "key"])
-    ) { args, ctx in
+    ) { (args: ToolArguments, ctx: ToolContext) async throws -> ToolResult in
         let example = "Example: storage_delete(layer: \"local\", key: \"onboardingDone\")."
         let layer = try oneLayer(args, example: example)
         let key = try word(args, "key", example: example)

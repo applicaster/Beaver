@@ -6,7 +6,7 @@
 import Foundation
 
 enum NetworkTools {
-    static let all = [query, get, copy]
+    static let all: [MCPTool] = [query, get, copy]
 
     /// `errors`, `2xx`…`5xx`, `failed`, `noStatus`, or a code.
     static func statusPick(_ raw: String) throws -> NetworkFilter.StatusPick {
@@ -39,7 +39,7 @@ enum NetworkTools {
         return "#\(e.id) \(e.method) \(status) \(duration) \(size) \(url)"
     }
 
-    static let query = MCPTool(
+    static let query: MCPTool = MCPTool(
         name: "network_query",
         title: "Query network requests",
         description: "Use to find HTTP requests the app made: filter by status (errors, 4xx, 401…), method, host (globs work) and text in the URL, headers or bodies. One line per request: id, method, status, duration, size, URL. Details: network_get.",
@@ -53,7 +53,7 @@ enum NetworkTools {
             "afterId": ToolSchema.integer("Only requests with a larger id; returns the oldest first."),
             "limit": ToolSchema.integer("Rows. Default 100, max 500."),
         ])
-    ) { args, ctx in
+    ) { (args: ToolArguments, ctx: ToolContext) async throws -> ToolResult in
         let s = try await ctx.resolveSession(args)
         let afterId = try args.int64("afterId")
         let limit = try args.limit(default: 100, max: 500)
@@ -113,7 +113,7 @@ enum NetworkTools {
         )
     }
 
-    static let get = MCPTool(
+    static let get: MCPTool = MCPTool(
         name: "network_get",
         title: "Get a request",
         description: "Use to read one request in full: method, URL, status, timing, the SDK's requestId, request and response headers and bodies. Bodies are as the SDK sent them (capped at 100 KB by the SDK, and at 256 KB here).",
@@ -122,7 +122,7 @@ enum NetworkTools {
             "id": ToolSchema.integer("Request id from network_query."),
             "includeBodies": ToolSchema.boolean("Default true."),
         ], required: ["id"])
-    ) { args, ctx in
+    ) { (args: ToolArguments, ctx: ToolContext) async throws -> ToolResult in
         guard let id = try args.int64("id") else {
             throw ToolError("id is required. Example: network_get(id: 391) — ids come from network_query().")
         }
@@ -172,7 +172,7 @@ enum NetworkTools {
         )
     }
 
-    static let copy = MCPTool(
+    static let copy: MCPTool = MCPTool(
         name: "network_copy",
         title: "Copy a request",
         description: "Use to reproduce a request outside the app: the same cURL, fetch() or JSON text as Beaver's Copy menu, with what may make a replay fail (redacted headers, cut bodies).",
@@ -181,7 +181,7 @@ enum NetworkTools {
             "id": ToolSchema.integer("Request id from network_query."),
             "format": ToolSchema.string("curl (default), fetch or json.", oneOf: ["curl", "fetch", "json"]),
         ], required: ["id"])
-    ) { args, ctx in
+    ) { (args: ToolArguments, ctx: ToolContext) async throws -> ToolResult in
         guard let id = try args.int64("id") else {
             throw ToolError("id is required. Example: network_copy(id: 391, format: \"curl\").")
         }

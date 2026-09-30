@@ -8,7 +8,7 @@
 import Foundation
 
 enum ToolboxTools {
-    static let all = [setDefault, toolboxesList, toolsCall]
+    static let all: [MCPTool] = [setDefault, toolboxesList, toolsCall]
 
     /// Not reachable through "beaver": no recursion.
     static let gatewayNames: Set<String> = ["devices_set_default", "toolboxes_list", "tools_call"]
@@ -17,7 +17,7 @@ enum ToolboxTools {
 
     // MARK: devices_set_default
 
-    static let setDefault = MCPTool(
+    static let setDefault: MCPTool = MCPTool(
         name: "devices_set_default",
         title: "Set the default device",
         description: "Use when several apps are connected and you will work with one of them: device tools (commands_send, storage_set, toolboxes_list, tools_call, …) then use it when you omit deviceId. It follows the app when it restarts. Pass deviceId: null to clear it. The user can set it too, in the device popover.",
@@ -26,7 +26,7 @@ enum ToolboxTools {
         inputSchema: ToolSchema.object([
             "deviceId": ToolSchema.string("The app's deviceId from beaver_status, or null to clear the default."),
         ])
-    ) { args, ctx in
+    ) { (args: ToolArguments, ctx: ToolContext) async throws -> ToolResult in
         guard let raw = args.values["deviceId"] else {
             throw ToolError("deviceId is required. Example: devices_set_default(deviceId: \"12\"), or devices_set_default(deviceId: null) to clear it.")
         }
@@ -57,7 +57,7 @@ enum ToolboxTools {
 
     // MARK: toolboxes_list
 
-    static let toolboxesList = MCPTool(
+    static let toolboxesList: MCPTool = MCPTool(
         name: "toolboxes_list",
         title: "List an app's toolboxes",
         description: "Use to see what a connected app lets you do beyond commands: its toolboxes (storage, app, logs, debugfeatures, React ones…) and, with toolbox, each tool's arguments. deviceId \"beaver\" lists Beaver's own tools the same way. Then call one with tools_call.",
@@ -66,7 +66,7 @@ enum ToolboxTools {
             "deviceId": ToolSchema.deviceId,
             "toolbox": ToolSchema.string("One toolbox's tools with their arguments, e.g. \"storage\"."),
         ])
-    ) { args, ctx in
+    ) { (args: ToolArguments, ctx: ToolContext) async throws -> ToolResult in
         let (deviceId, label, tools) = try await tools(args, ctx)
         let boxes = Toolboxes.group(tools)
         let on = deviceId == beaverId ? "Beaver" : label
@@ -107,7 +107,7 @@ enum ToolboxTools {
 
     // MARK: tools_call
 
-    static let toolsCall = MCPTool(
+    static let toolsCall: MCPTool = MCPTool(
         name: "tools_call",
         title: "Call an app's tool",
         description: "Use to run one tool from toolboxes_list on a connected app (e.g. storage.set, app.restart) and get its answer. deviceId \"beaver\" runs Beaver's own tool by its dotted name (logs.query). Omit deviceId for the default device, or the only connected one. It is marked destructive, so clients that honor destructiveHint ask the user to confirm, because app tools can delete data or restart the app.",
@@ -118,7 +118,7 @@ enum ToolboxTools {
             "name": ToolSchema.string("The tool's full name from toolboxes_list, e.g. \"storage.set\"."),
             "arguments": ["type": "object", "description": "The tool's arguments, as its inputSchema in toolboxes_list says."],
         ], required: ["name"])
-    ) { args, ctx in
+    ) { (args: ToolArguments, ctx: ToolContext) async throws -> ToolResult in
         guard let name = try args.string("name").flatMap(ToolContext.trimmedNonEmpty) else {
             throw ToolError("name is required. Example: tools_call(name: \"storage.get\", arguments: {key: \"volume\"}) — toolboxes_list() shows the names.")
         }

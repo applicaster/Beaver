@@ -8,11 +8,11 @@
 import Foundation
 
 enum JournalTools {
-    static let all = [note]
+    static let all: [MCPTool] = [note]
 
     static let linksExample = "Example: links: [{eventId: 48211}, {networkId: 391}]."
 
-    static let note = MCPTool(
+    static let note: MCPTool = MCPTool(
         name: "journal_note",
         title: "Note for the user",
         description: "Use to tell the user what you found, in Beaver's Agent panel, with links they can click (events, requests, sessions, saved filters). level attention also shows a toast in Beaver and a macOS notification when Beaver is in the background — use it only for what they must look at now (a cause found, a decision needed, something broken). If the result says notified: false, tell the user and pass on howToEnable.",
@@ -24,7 +24,7 @@ enum JournalTools {
             "links": ["type": "array", "items": ["type": "object"],
                       "description": "What the note points at: objects like {eventId: 48211}, {networkId: 391}, {sessionId: 13}, {savedFilter: \"Auth\"}. The first is what Show opens. At most 10."],
         ], required: ["text"])
-    ) { args, ctx in
+    ) { (args: ToolArguments, ctx: ToolContext) async throws -> ToolResult in
         guard let text = try args.string("text").flatMap(ToolContext.trimmedNonEmpty) else {
             throw ToolError("text is required. Example: journal_note(text: \"Login fails: the refresh token expired\", links: [{eventId: 48211}]).")
         }
