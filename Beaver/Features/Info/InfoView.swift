@@ -121,6 +121,7 @@ struct InfoView: View {
                       },
                       copy: [0],
                       warn: Set(rows.indices.filter { rows[$0].status == .rebuildNeeded || rows[$0].status == .onlyInZapp }),
+                      warnFrom: 2,
                       warning: differ == 0 ? nil
                         : "\(differ) of \(rows.count) plugins differ from Zapp now — a rebuild picks up Zapp's versions",
                       empty: "The build has no plugins.")
@@ -259,8 +260,10 @@ private struct TableCard: View {
     let title: String
     let rows: [[String]]
     var copy: Set<Int> = []
-    /// Rows drawn in orange: something to act on.
+    /// Rows to act on: their cells from column `warnFrom` on are orange
+    /// (the name before them stays readable).
     var warn: Set<Int> = []
+    var warnFrom = 0
     /// A line in orange above the rows.
     var warning: String? = nil
     let empty: String
@@ -274,7 +277,7 @@ private struct TableCard: View {
                 VStack(alignment: .leading, spacing: 6) {
                     if let warning { WarningLine(text: warning) }
                     Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 3) {
-                        ForEach(rows.indices, id: \.self) { i in TableCardRow(cells: rows[i], copy: copy, warn: warn.contains(i)) }
+                        ForEach(rows.indices, id: \.self) { i in TableCardRow(cells: rows[i], copy: copy, warnFrom: warn.contains(i) ? warnFrom : nil) }
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -286,7 +289,8 @@ private struct TableCard: View {
 private struct TableCardRow: View {
     let cells: [String]
     let copy: Set<Int>
-    var warn = false
+    /// From which column the cells are orange; nil: none.
+    var warnFrom: Int?
     @Environment(ToastCenter.self) private var toasts
     @State private var hovered = false
 
@@ -296,7 +300,7 @@ private struct TableCardRow: View {
                 HStack(alignment: .firstTextBaseline, spacing: 4) {
                     Text(cells[c])
                         .font(c == 0 ? .body : .caption.monospaced())
-                        .foregroundStyle(warn ? Color.orange : c == 0 ? .primary : .secondary)
+                        .foregroundStyle(warnFrom.map { c >= $0 } == true ? Color.orange : c == 0 ? .primary : .secondary)
                         .lineLimit(2).truncationMode(.middle).textSelection(.enabled)
                     if copy.contains(c), !cells[c].isEmpty {
                         Button {
