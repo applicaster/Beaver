@@ -81,12 +81,21 @@ struct BeaverApp: App {
         // every launch. Updates download on their own and the
         // delegate asks to restart. Users can also check via the
         // "Check for Updates…" menu item below.
+        // D97: a Debug build never starts the updater, so it can't replace
+        // itself with a release; Check for Updates… stays disabled.
+        #if DEBUG
+        let startUpdater = false
+        #else
+        let startUpdater = true
+        #endif
         updaterController = SPUStandardUpdaterController(
-            startingUpdater: true,
+            startingUpdater: startUpdater,
             updaterDelegate: updaterDelegate,
             userDriverDelegate: nil
         )
-        updaterController.updater.checkForUpdatesInBackground()
+        if startUpdater {
+            updaterController.updater.checkForUpdatesInBackground()
+        }
 
         // Start the server and wire up the inbound pipeline.
         Task { [env = _env.wrappedValue] in
