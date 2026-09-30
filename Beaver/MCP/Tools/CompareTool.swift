@@ -7,7 +7,7 @@
 import Foundation
 
 extension SessionTools {
-    static let compare = MCPTool(
+    static let compare: MCPTool = MCPTool(
         name: "sessions_compare",
         title: "Compare two sessions",
         description: "Use when something works in one session and not in another (app 4.5 vs 4.6, device A vs B): log lines only in one of them (numbers, ids, times and query values normalised), warnings and errors per subsystem A vs B, requests only in one, requests whose status class or median duration changed, storage keys that differ (each layer's latest snapshot, with the fields inside JSON values), and App Info that differs (app/SDK/QuickBrick versions, Zapp ids, device, plugin versions). a is the session that works, b the one that doesn't. Both must be the same app (same bundle id, else the same app name); other versions and devices are fine.",
@@ -18,7 +18,7 @@ extension SessionTools {
             "sections": ToolSchema.strings("Any of logs, network, storage, appInfo (default: all four)."),
             "limit": ToolSchema.integer("Rows per list. Default 20, max 200."),
         ], required: ["a", "b"])
-    ) { args, ctx in
+    ) { (args: ToolArguments, ctx: ToolContext) async throws -> ToolResult in
         let example = "Example: sessions_compare(a: 12, b: 14, sections: [\"logs\", \"network\"])."
         guard let a = try args.int64("a"), let b = try args.int64("b") else {
             throw ToolError("a and b are required: the session that works and the one that fails; sessions_list() shows the ids. \(example)")

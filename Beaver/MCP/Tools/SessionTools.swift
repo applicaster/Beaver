@@ -8,7 +8,7 @@
 import Foundation
 
 enum SessionTools {
-    static let all = [importFile, exportFile, delete, compare]
+    static let all: [MCPTool] = [importFile, exportFile, delete, compare]
 
     static func requiredPath(_ args: ToolArguments, example: String) throws -> URL {
         guard let raw = try args.string("path").flatMap(ToolContext.trimmedNonEmpty) else {
@@ -17,7 +17,7 @@ enum SessionTools {
         return try ToolInput.fileURL(raw)
     }
 
-    static let importFile = MCPTool(
+    static let importFile: MCPTool = MCPTool(
         name: "sessions_import",
         title: "Import a session file",
         description: "Use when the user or a customer has a log file: opens a Beaver or zapp-support JSON export, or a HAR file from a browser or proxy, as a new imported session (like Beaver's Import button). The window stays on what the user is viewing. path must be absolute or start with ~.",
@@ -25,7 +25,7 @@ enum SessionTools {
         inputSchema: ToolSchema.object([
             "path": ToolSchema.string("The file, e.g. ~/Downloads/customer.json or /Users/me/Desktop/app.har."),
         ], required: ["path"])
-    ) { args, ctx in
+    ) { (args: ToolArguments, ctx: ToolContext) async throws -> ToolResult in
         let url = try requiredPath(args, example: "Example: sessions_import(path: \"~/Downloads/customer.json\").")
         guard FileManager.default.fileExists(atPath: url.path) else {
             throw ToolError("No file at \(url.path). Example: sessions_import(path: \"~/Downloads/customer.json\").")
@@ -48,7 +48,7 @@ enum SessionTools {
         )
     }
 
-    static let exportFile = MCPTool(
+    static let exportFile: MCPTool = MCPTool(
         name: "sessions_export",
         title: "Export a session file",
         description: "Use to save a session to a file the user can send or open elsewhere: JSON (default, the same file as Beaver's Export button, readable by zapp-support; filter narrows the events) or HAR (the network requests). Never replaces an existing file unless overwrite: true. path must be absolute or start with ~.",
@@ -60,7 +60,7 @@ enum SessionTools {
             "filter": ToolSchema.filter,
             "overwrite": ToolSchema.boolean("Replace the file if it exists. Default false."),
         ], required: ["path"])
-    ) { args, ctx in
+    ) { (args: ToolArguments, ctx: ToolContext) async throws -> ToolResult in
         let example = "Example: sessions_export(path: \"~/Desktop/session.json\", filter: {minLevel: \"error\"})."
         let s = try await ctx.resolveSession(args)
         let url = try requiredPath(args, example: example)
@@ -111,7 +111,7 @@ enum SessionTools {
         )
     }
 
-    static let delete = MCPTool(
+    static let delete: MCPTool = MCPTool(
         name: "sessions_delete",
         title: "Delete sessions",
         description: "Use when the user asks to delete a stored session, or every session (all: true): its logs, requests, storage snapshots and bookmarks go. Say which explicitly; there is no default. The agent journal keeps its entries.",
@@ -120,7 +120,7 @@ enum SessionTools {
             "sessionId": ToolSchema.integer("The session to delete (sessions_list shows them)."),
             "all": ToolSchema.boolean("Delete every session."),
         ])
-    ) { args, ctx in
+    ) { (args: ToolArguments, ctx: ToolContext) async throws -> ToolResult in
         let all = try args.bool("all") ?? false
         let id = try args.int64("sessionId")
         let sessions = try await ctx.store.sessions()

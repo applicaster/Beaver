@@ -6,15 +6,15 @@
 import Foundation
 
 enum StateTools {
-    static let all = [commandsList, bookmarksList, bookmarksSet, filtersList, filtersSave, filtersDelete]
+    static let all: [MCPTool] = [commandsList, bookmarksList, bookmarksSet, filtersList, filtersSave, filtersDelete]
 
-    static let commandsList = MCPTool(
+    static let commandsList: MCPTool = MCPTool(
         name: "commands_list",
         title: "Device commands",
         description: "Use to see which commands a connected app accepts, with syntax where Beaver knows it. The app reports them when it connects (cmdlist).",
         kind: .read,
         inputSchema: ToolSchema.object(["deviceId": ToolSchema.deviceId])
-    ) { args, ctx in
+    ) { (args: ToolArguments, ctx: ToolContext) async throws -> ToolResult in
         let none = ToolResult(summary: "No command list yet: no device is connected, or it hasn't answered cmdlist.",
                               structured: ["commands": []], next: ["beaver_status()"])
         guard await ctx.ui.snapshot().deviceConnected else { return none }
@@ -35,13 +35,13 @@ enum StateTools {
         )
     }
 
-    static let bookmarksList = MCPTool(
+    static let bookmarksList: MCPTool = MCPTool(
         name: "bookmarks_list",
         title: "Bookmarks",
         description: "Use to see what the user bookmarked in a session: events and network requests they marked as important.",
         kind: .read,
         inputSchema: ToolSchema.object(["sessionId": ToolSchema.sessionId])
-    ) { args, ctx in
+    ) { (args: ToolArguments, ctx: ToolContext) async throws -> ToolResult in
         let s = try await ctx.resolveSession(args)
         let events = try await ctx.store.bookmarks(sessionId: s.id).map(\.event)
         let requestIds = try await ctx.store.networkBookmarkIds(sessionId: s.id)
@@ -59,13 +59,13 @@ enum StateTools {
         )
     }
 
-    static let filtersList = MCPTool(
+    static let filtersList: MCPTool = MCPTool(
         name: "filters_list",
         title: "Saved filters",
         description: "Use to see the filters the user saved in Beaver, with what each one matches, its ⌘1…⌘9 shortcut in the Log feed, and which one is the default new sessions start from.",
         kind: .read,
         inputSchema: ToolSchema.object([:])
-    ) { _, ctx in
+    ) { (_: ToolArguments, ctx: ToolContext) async throws -> ToolResult in
         let saved = try await ctx.store.savedFilters()
         func line(_ index: Int, _ f: SavedFilter) -> String {
             let marks = [SavedFilter.shortcut(at: index), f.isDefault ? "default" : nil].compactMap { $0 }
@@ -93,7 +93,7 @@ enum StateTools {
         )
     }
 
-    static let bookmarksSet = MCPTool(
+    static let bookmarksSet: MCPTool = MCPTool(
         name: "bookmarks_set",
         title: "Bookmark",
         description: "Use to mark an event or a network request for the user (a star in Beaver, and in bookmarks_list), or to remove the mark with on: false. Pass eventId or networkId.",
@@ -104,7 +104,7 @@ enum StateTools {
             "networkId": ToolSchema.integer("A request id from network_query."),
             "on": ToolSchema.boolean("true to bookmark (default), false to remove the bookmark."),
         ])
-    ) { args, ctx in
+    ) { (args: ToolArguments, ctx: ToolContext) async throws -> ToolResult in
         let on = try args.bool("on") ?? true
         let eventId = try args.int64("eventId")
         let networkId = try args.int64("networkId")
@@ -156,7 +156,7 @@ enum StateTools {
         return false
     }
 
-    static let filtersSave = MCPTool(
+    static let filtersSave: MCPTool = MCPTool(
         name: "filters_save",
         title: "Save a filter",
         description: "Use to save a named log filter the user can pick in Beaver's Log feed (filters_list shows them). Saving under an existing name replaces it. Subsystem and category patterns are resolved to exact names first. default: true makes it the filter new sessions start from; to change only that on a saved filter, pass name and default without filter.",
@@ -168,7 +168,7 @@ enum StateTools {
             "default": ToolSchema.boolean("true: launches and newly connected devices start from this filter (one default at most); false: it stops being the default. Omit to leave it as is."),
             "sessionId": ToolSchema.integer("Resolve subsystem / category patterns against this session. Default: live, viewed, most recent."),
         ], required: ["name"])
-    ) { args, ctx in
+    ) { (args: ToolArguments, ctx: ToolContext) async throws -> ToolResult in
         let example = "Example: filters_save(name: \"Auth problems\", filter: {minLevel: \"warning\", subsystems: [\"*auth*\"]})."
         guard let name = try args.string("name").flatMap(ToolContext.trimmedNonEmpty) else {
             throw ToolError("name is required. \(example)")
@@ -232,13 +232,13 @@ enum StateTools {
         )
     }
 
-    static let filtersDelete = MCPTool(
+    static let filtersDelete: MCPTool = MCPTool(
         name: "filters_delete",
         title: "Delete a saved filter",
         description: "Use when the user asks to remove one of their saved filters, by name (filters_list shows them).",
         kind: .destructive,
         inputSchema: ToolSchema.object(["name": ToolSchema.string("The saved filter's name.")], required: ["name"])
-    ) { args, ctx in
+    ) { (args: ToolArguments, ctx: ToolContext) async throws -> ToolResult in
         let saved = try await ctx.store.savedFilters()
         let names = saved.map(\.name).joined(separator: ", ")
         guard let name = try args.string("name").flatMap(ToolContext.trimmedNonEmpty) else {

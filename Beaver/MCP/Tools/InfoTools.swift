@@ -7,9 +7,9 @@
 import Foundation
 
 enum InfoTools {
-    static let all = [appInfo, appConfig]
+    static let all: [MCPTool] = [appInfo, appConfig]
 
-    static let appInfo = MCPTool(
+    static let appInfo: MCPTool = MCPTool(
         name: "app_info",
         title: "App and device info",
         description: "Use to learn what app and device a session is: app, SDK and QuickBrick versions, Zapp ids, the layout's screens, type mapping (entry type → screen), navigation (menu items → screens), data sources (feeds and the storage keys they send, with whether each is stored — the login state), languages, cell styles and plugins, and the device's model, OS, language, country and advertising id — each value with where it came from (storage, a config file, logs) — the app's own storage, so the build it runs, not Zapp's latest. Config files come from Zapp's public bucket, at the URLs the app keeps in storage.",
@@ -17,7 +17,7 @@ enum InfoTools {
         inputSchema: ToolSchema.object([
             "sessionId": ToolSchema.sessionId,
         ])
-    ) { args, ctx in
+    ) { (args: ToolArguments, ctx: ToolContext) async throws -> ToolResult in
         let s = try await ctx.resolveSession(args)
         let r = try await AppInfoReport.build(store: ctx.store, sessionId: s.id, http: ctx.zapp)
         let isLive = await ctx.ui.snapshot().liveSessionIds.contains(s.id)
@@ -118,7 +118,7 @@ enum InfoTools {
         )
     }
 
-    static let appConfig = MCPTool(
+    static let appConfig: MCPTool = MCPTool(
         name: "app_config",
         title: "Read an app config file",
         description: "Use to read the app's launch-time config files (layout, pluginConfigurations, remoteConfigurations, cellStyles, presetsMapping, pipesEndpoints, styles, their tablet variants, rivers) as saved with the session: Beaver downloads them from Zapp when the device connects, so they are Zapp's as of then, not after a later publish (the app itself may still run a debug build's bundled copy). Without kind: the saved files. With kind: the JSON at path (dot-separated keys and array indexes, e.g. \"general_settings.layout_id\" or \"screens.0.name\"); objects also list their keys, arrays their count. Files are large (cell styles 1–2 MB): walk down with path.",
@@ -130,7 +130,7 @@ enum InfoTools {
             "maxChars": ToolSchema.integer("Characters of JSON to return. Default 20000, max 200000."),
             "download": ToolSchema.boolean("Session has no saved copy (connected before Beaver 4.19, or imported): download the files from Zapp now and save them with it. Default false."),
         ])
-    ) { args, ctx in
+    ) { (args: ToolArguments, ctx: ToolContext) async throws -> ToolResult in
         let s = try await ctx.resolveSession(args)
         var saved = try await ctx.store.savedConfigs(sessionId: s.id)
         if saved.isEmpty, try args.bool("download") == true {

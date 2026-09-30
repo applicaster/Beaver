@@ -9,7 +9,7 @@
 import Foundation
 
 enum UITools {
-    static let all = [state, show]
+    static let all: [MCPTool] = [state, show]
 
     /// What `select` names.
     enum Pick: Equatable {
@@ -18,19 +18,19 @@ enum UITools {
 
     // MARK: - ui_state
 
-    static let state = MCPTool(
+    static let state: MCPTool = MCPTool(
         name: "ui_state",
         title: "What Beaver shows",
         description: "Use to see what the user is looking at in Beaver: the tab, the session, the log and network filters, the storage layer and search, the selected event or request, the Scheme Generator's link, and whether Beaver is in front.",
         kind: .read,
         inputSchema: ToolSchema.object([:])
-    ) { _, ctx in
+    ) { (_: ToolArguments, ctx: ToolContext) async throws -> ToolResult in
         stateResult(await ctx.ui.snapshot())
     }
 
     // MARK: - ui_show
 
-    static let show = MCPTool(
+    static let show: MCPTool = MCPTool(
         name: "ui_show",
         title: "Show in Beaver",
         description: "Use to point the user at something in Beaver's window: a tab, a session, a log or network filter, a storage layer, a selected event or request. It works in the background — nothing takes focus. reveal: true brings Beaver forward; use it only when the user asks to see it.",
@@ -54,7 +54,7 @@ enum UITools {
             "select": ["description": "{eventId: 48211}, {networkId: 391}, or \"first\" / \"last\": the first or last row the filter shows."],
             "reveal": ToolSchema.boolean("Bring Beaver forward and focus it. Default false; only when the user asks to see it."),
         ])
-    ) { args, ctx in
+    ) { (args: ToolArguments, ctx: ToolContext) async throws -> ToolResult in
         try await run(args, ctx, inContext: false)
     }
 
