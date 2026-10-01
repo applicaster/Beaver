@@ -80,7 +80,7 @@ struct TVConnectTests {
         #expect(CDP.event(Data(#"{"id":1,"result":{}}"#.utf8), now: 7) == nil)
     }
 
-    @Test("zapp-xray-companion registers with connectionRole companion-console: it reads commands, so not logs-only")
+    @Test("A register that isn't a DevTools bridge (zapp-xray-companion) reads commands, so not logs-only")
     func companionTakesCommands() {
         let frame = Data(#"{"type":"register","id":"1","data":{"deviceId":"c-1","appName":"XRay Companion Console","platform":"tizen","connectionRole":"companion-console"}}"#.utf8)
         guard case .success(.clientHandshake(let h)) = ProtocolDecoder.decode(frame) else { Issue.record("register"); return }

@@ -15,8 +15,8 @@ does the same for a manual release.
 ### Fixed
 - **Commands reach zapp-xray-companion.** The companion app on a TV
   registers like a DevTools bridge, so Beaver treated it as logs-only and
-  refused every command. It now registers with `connectionRole:
-  "companion-console"` and gets commands, `cmdlist` and storage like any
+  refused every command. Only a DevTools bridge (`platform: "tv-cdp"`) is
+  logs-only now; the companion gets commands, `cmdlist` and storage like any
   device. Agent-visible: `commands_send` works for it.
 
 ## [4.20.1] - 2026-09-30
