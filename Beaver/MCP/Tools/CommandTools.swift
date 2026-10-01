@@ -120,7 +120,7 @@ enum CommandTools {
         let session = try await ctx.liveSession(id)
         return ToolResult(
             summary: "Connected the TV \(StatusTools.describeDevice(session.session)) as device \"\(id)\"; it only sends logs.",
-            structured: ["deviceId": .string(String(id)), "sessionId": JSON(id), "platform": "tv-cdp"],
+            structured: ["deviceId": .string(String(id)), "sessionId": JSON(id), "platform": .string(CDP.platform)],
             next: ["logs_query(sessionId: \(id), since: \"5m\") for what it logged",
                    "logs_wait(sessionId: \(id), filter: {minLevel: \"error\"}, timeoutMs: 30000) for its next error",
                    "devices_disconnect(deviceId: \"\(id)\") to stop reading it"],

@@ -187,13 +187,13 @@ public enum ProtocolDecoder {
         }
         let platform = str("platform")
         // A TV bridged over the Chrome DevTools Protocol names no model.
-        let model = str("deviceModel") ?? (platform == "tv-cdp" ? "TV (DevTools)" : nil)
+        let model = str("deviceModel") ?? (platform == CDP.platform ? "TV (DevTools)" : nil)
         let platformLine = [platform, str("osVersion")].compactMap { $0 }.joined(separator: " ")
         return ClientHandshake(deviceId: str("deviceId"), deviceName: str("deviceName"), model: model,
                                platform: platformLine.isEmpty ? nil : platformLine,
                                version: str("versionName"),
                                appName: str("appName") ?? str("deviceName"),
-                               logsOnly: platform == "tv-cdp")
+                               logsOnly: platform == CDP.platform)
     }
 
     // MARK: - MCP
