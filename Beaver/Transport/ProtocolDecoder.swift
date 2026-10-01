@@ -175,6 +175,9 @@ public enum ProtocolDecoder {
     /// zapp-support's `register` (PROTOCOL.md §4.6, D89): the fields in
     /// `event`, a JSON string (or in `data`, an object), as zapp-support's
     /// server reads them. A bad payload still registers, with nothing known.
+    /// Logs-only only for a DevTools bridge (`platform: tv-cdp`), which ignores
+    /// every inbound frame. Any other `register` client (zapp-xray-companion)
+    /// reads commands.
     private static func decodeRegister(envelope: [String: Any]) -> ClientHandshake {
         let info = (envelope["event"] as? String)
             .flatMap { try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any] }
@@ -189,7 +192,8 @@ public enum ProtocolDecoder {
         return ClientHandshake(deviceId: str("deviceId"), deviceName: str("deviceName"), model: model,
                                platform: platformLine.isEmpty ? nil : platformLine,
                                version: str("versionName"),
-                               appName: str("appName") ?? str("deviceName"), logsOnly: true)
+                               appName: str("appName") ?? str("deviceName"),
+                               logsOnly: platform == "tv-cdp")
     }
 
     // MARK: - MCP

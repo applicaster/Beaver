@@ -49,8 +49,9 @@ struct TVBridgeTests {
         #expect(h.platformParts.name == "vidaa")
         #expect(h.platformParts.version == "7")
         #expect(h.version == "2.1")
+        #expect(!h.logsOnly)  // only platform tv-cdp is logs-only
         let bad = try JSONSerialization.data(withJSONObject: ["type": "register", "event": "not json"])
-        #expect(try decodeHandshake(bad) == ClientHandshake(logsOnly: true))
+        #expect(try decodeHandshake(bad) == ClientHandshake(logsOnly: false))
     }
 
     @Test("Every frame the bridge sends lands in the store with its level, time and text")

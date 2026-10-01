@@ -80,6 +80,14 @@ struct TVConnectTests {
         #expect(CDP.event(Data(#"{"id":1,"result":{}}"#.utf8), now: 7) == nil)
     }
 
+    @Test("A register that isn't a DevTools bridge (zapp-xray-companion) reads commands, so not logs-only")
+    func companionTakesCommands() {
+        let frame = Data(#"{"type":"register","id":"1","data":{"deviceId":"c-1","appName":"XRay Companion Console","platform":"tizen","connectionRole":"companion-console"}}"#.utf8)
+        guard case .success(.clientHandshake(let h)) = ProtocolDecoder.decode(frame) else { Issue.record("register"); return }
+        #expect(h.deviceId == "c-1")
+        #expect(!h.logsOnly)
+    }
+
     @Test("Frames decode in Beaver like the script's: a TV that only sends logs")
     func framesDecode() throws {
         let register = Data(CDP.frame("register", ["deviceId": "cdp-10.0.0.5:9555", "appName": "Zapp @ 10.0.0.5:9555",

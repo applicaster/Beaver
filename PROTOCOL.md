@@ -463,6 +463,9 @@ page, and after every reconnect.
   follows), so a repeated `register` on the same connection overwrites
   them — the bridge re-registers with `"<page title> @ <host:port>"` once it
   finds the app's page, unless `--name` was given.
+- **Only `platform: "tv-cdp"` is logs-only** (next point). Any other `register`
+  client, such as zapp-xray-companion's TV app, reads commands and is treated
+  as a normal device: `cmdlist` on connect, commands, storage. Beaver 4.20.2.
 - **A register client sends logs only.** It doesn't read what Beaver sends
   (the bridge ignores every inbound frame), so Beaver sends it no `command`
   frames at all (not even `cmdlist` / `storage.list` on connect) — only its
