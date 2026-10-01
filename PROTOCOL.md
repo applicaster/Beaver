@@ -523,7 +523,10 @@ page, and after every reconnect.
    Disconnect in Beaver), Beaver stores every frame that arrived before
    the close, then sets that connection's session `ended_at`; other
    connections are unaffected. A half-open connection
-   is noticed by TCP keepalive within ~20 s.
+   is noticed by TCP keepalive within ~20 s. A connection that sends
+   nothing at all (no frame, no ping) within 15 s of the handshake is closed
+   by Beaver: the SDK sends its `handshake` at once, and a mute socket that
+   still answers keepalive would stay a live session forever.
 5. New connections after a close start a new session.
    A client may identify itself with `handshake` (§4.4, the SDK) or
    `register` (§4.6, zapp-support's TV bridge).

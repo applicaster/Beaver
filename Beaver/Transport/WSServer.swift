@@ -42,6 +42,9 @@ public actor WSServer {
     private var connections: [UUID: NWConnection] = [:]
     /// Connections past the handshake; `State.clientConnected` counts these.
     private var ready = Set<UUID>()
+    /// Ready connections that have not sent a thing yet, not even a ping.
+    private var silent = Set<UUID>()
+    private let silenceTimeout: Duration
 
     /// Pending re-bind after the listener failed. `nil` when the server
     /// is either healthy or deliberately stopped.
@@ -60,7 +63,11 @@ public actor WSServer {
 
     // MARK: - Init
 
-    public init(port: UInt16 = 9080) {
+    /// - Parameter silenceTimeout: how long a connection may stay mute after
+    ///   the handshake before it is closed. The SDK sends its own handshake
+    ///   at once, so a socket mute for this long is a zombie (see `closeIfSilent`).
+    public init(port: UInt16 = 9080, silenceTimeout: Duration = .seconds(15)) {
+        self.silenceTimeout = silenceTimeout
         guard let nwPort = NWEndpoint.Port(rawValue: port) else {
             preconditionFailure("Invalid port: \(port)")
         }
@@ -236,11 +243,16 @@ public actor WSServer {
                 send(payload, on: connection)
             }
             ready.insert(id)
+            silent.insert(id)
+            Task { [silenceTimeout] in
+                try? await Task.sleep(for: silenceTimeout)
+                self.closeIfSilent(id)
+            }
             stateContinuation.yield(.clientConnected(count: ready.count))
             inboundContinuation.yield(.connected(id))
             // Read only after `.connected` is out: a frame the client
             // sends at once would otherwise be yielded first.
-            receive(on: connection, id: id)
+            receive(on: connection, id: id, heard: false)
         case .failed(let error):
             // Once reading, `receive` still gets the frames buffered before
             // the failure, then cancels and ends the session after the last
@@ -261,8 +273,21 @@ public actor WSServer {
         }
     }
 
+    private func heard(_ id: UUID) { silent.remove(id) }
+
+    /// An iPhone whose sink loses its ping/pong opens a fresh socket every
+    /// ~30 s and never closes the old one; each passes TCP keepalive and
+    /// would stay a live session for good. Closing ends it through
+    /// `receive`, like `disconnect`.
+    private func closeIfSilent(_ id: UUID) {
+        guard silent.remove(id) != nil else { return }
+        print("[WSServer] connection \(id) sent nothing in \(silenceTimeout), closing")
+        connections[id]?.cancel()
+    }
+
     private func drop(_ id: UUID, reason: String) {
         connections[id] = nil
+        silent.remove(id)
         guard ready.remove(id) != nil else { return }
         stateContinuation.yield(ready.isEmpty
             ? .clientDisconnected(reason: reason)
@@ -285,16 +310,17 @@ public actor WSServer {
     /// until a callback brings no data — the SDK flushes its buffer right
     /// after connecting, and stopping early lost those logs. `.disconnected`
     /// is yielded after the last frame, never before it.
-    private nonisolated func receive(on connection: NWConnection, id: UUID) {
+    private nonisolated func receive(on connection: NWConnection, id: UUID, heard: Bool) {
         connection.receiveMessage { [weak self] data, context, _, error in
             guard let self else { return }
+            if !heard { Task { await self.heard(id) } }
             let opcode = (context?.protocolMetadata(definition: NWProtocolWebSocket.definition)
                 as? NWProtocolWebSocket.Metadata)?.opcode
             if let data, !data.isEmpty, opcode == .text || opcode == .binary {
                 self.inboundContinuation.yield(.frame(id, data))
             }
             if context?.isFinal != true, error == nil || data?.isEmpty == false {
-                self.receive(on: connection, id: id)
+                self.receive(on: connection, id: id, heard: true)
             } else {
                 connection.cancel()
                 Task { await self.drop(id, reason: error?.localizedDescription ?? "closed") }
