@@ -12,6 +12,14 @@ does the same for a manual release.
 
 ## [Unreleased]
 
+### Fixed
+- **No more piles of empty live sessions.** A device whose connection said
+  nothing at all after the handshake (an iPhone sink losing its ping/pong
+  opens a new socket every ~30 s and never closes the old one) stayed a live
+  session for good. Beaver now closes a connection that sends no frame, not
+  even a ping, within 15 s. Agent-visible: `beaver_status` and
+  `sessions_list` stop listing those ghosts.
+
 ## [4.20.2] - 2026-10-01
 
 ### Fixed
