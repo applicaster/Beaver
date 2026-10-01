@@ -42,6 +42,9 @@ public enum TVBridgeError: Error, Equatable, LocalizedError {
 /// The pure part of the bridge: what a TV's DevTools answers mean.
 public enum CDP {
 
+    /// The `platform` a DevTools bridge registers with: the one client that sends logs only.
+    public static let platform = "tv-cdp"
+
     /// One entry of the TV's `/json/list`.
     public struct Page: Equatable, Sendable {
         public var type: String
@@ -226,7 +229,7 @@ public actor TVBridge {
 
     private func registerFrame(_ page: CDP.Page) -> String {
         let shown = name ?? (page.title.isEmpty ? target : "\(page.title) @ \(target)")
-        return CDP.frame("register", ["deviceId": deviceId, "appName": shown, "deviceName": shown, "platform": "tv-cdp"])
+        return CDP.frame("register", ["deviceId": deviceId, "appName": shown, "deviceName": shown, "platform": CDP.platform])
     }
 
     private func send(_ e: CDP.Event) async {
