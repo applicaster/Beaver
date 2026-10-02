@@ -20,6 +20,10 @@ does the same for a manual release.
   before it closed left an empty "Ended" session in the list. Such a
   session is now dropped when its connection closes. A connection that sent
   at least one frame keeps its session, even with no events.
+- **A silent connection no longer pulls the view away.** A new device took
+  the window the moment it connected; now it does so on its first frame, so
+  a backgrounded app retrying its socket doesn't switch you off the past
+  session you are reading.
 
 ## [4.20.3] - 2026-10-01
 

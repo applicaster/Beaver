@@ -120,15 +120,19 @@ public final class AppEnvironment {
     }
 
     /// Called when a connection opens and its session row is created.
-    ///
-    /// Shows the new device over a past or imported session the user
-    /// opened, but not over another live device (D73): that one stays,
-    /// and the new one waits in the device menu.
     public func didConnect(_ connection: UUID, session: Int64) {
-        if live.connect(connection, session: session, viewing: viewingSessionId) {
-            viewingSessionId = session
-            startFromDefaultFilter()
-        }
+        _ = live.connect(connection, session: session, viewing: viewingSessionId)
+    }
+
+    /// Called on a connection's first frame. Shows the device over a past
+    /// or imported session the user opened, but not over another live
+    /// device (D73): that one stays, and the new one waits in the device
+    /// menu. Not at connect: an app in the background retries its socket
+    /// every ~30 s, and those silent connections would pull the view away.
+    public func didSpeak(session: Int64) {
+        guard !live.isLive(viewingSessionId) else { return }
+        viewingSessionId = session
+        startFromDefaultFilter()
     }
 
     /// D82: a launch and a newly connected device's session start from the
