@@ -526,7 +526,9 @@ page, and after every reconnect.
    is noticed by TCP keepalive within ~20 s. A connection that sends
    nothing at all (no frame, no ping) within 15 s of the handshake is closed
    by Beaver: the SDK sends its `handshake` at once, and a mute socket that
-   still answers keepalive would stay a live session forever.
+   still answers keepalive would stay a live session forever. A
+   connection that closes without ever sending a frame leaves no session
+   behind: Beaver deletes it instead of setting `ended_at`.
 5. New connections after a close start a new session.
    A client may identify itself with `handshake` (§4.4, the SDK) or
    `register` (§4.6, zapp-support's TV bridge).
