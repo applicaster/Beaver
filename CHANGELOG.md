@@ -12,6 +12,12 @@ does the same for a manual release.
 
 ## [Unreleased]
 
+### Fixed
+- **The Sessions list counts events as they arrive.** The "N events" line of
+  a live session stayed where it was until something else reloaded the list;
+  it now follows the log, redrawn at most twice a second, and drops to 0 when
+  the log is cleared.
+
 ## [4.21.0] - 2026-10-02
 
 ### Added
