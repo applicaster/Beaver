@@ -348,6 +348,12 @@ enum Schema {
             """)
         }
 
+        // D97: the SDK's per-launch id, from its handshake. A reconnect of the
+        // same launch continues the session it left.
+        migrator.registerMigration("v15_session_launch_id", foreignKeyChecks: .immediate) { db in
+            try db.execute(sql: "ALTER TABLE session ADD COLUMN launch_id TEXT;")
+        }
+
         return migrator
     }
 }

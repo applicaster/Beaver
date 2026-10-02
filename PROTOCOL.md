@@ -394,10 +394,11 @@ handshake's fields when it arrives.
 ```json
 {"type": "handshake", "deviceId": "<installation uuid, falls back to model>",
  "deviceName": "Apple iPhone15,2", "model": "iPhone15,2", "platform": "iOS 18.6",
- "appPackage": "com.example.app", "version": "11.0.1"}
+ "appPackage": "com.example.app", "version": "11.0.1",
+ "launchId": "<uuid, one per app process>"}
 ```
 
-- All six fields are optional; an empty string counts as missing. Beaver
+- All seven fields are optional; an empty string counts as missing. Beaver
   ignores a `deviceId` equal to `model` (the SDK's fallback).
 - Beaver stores `deviceId` as `session.device_uid`, `appPackage` as
   `session.app_package`, `model` as `device_model`, `version` as
@@ -405,6 +406,10 @@ handshake's fields when it arrives.
   `platform` / `os_version`. Each is written through `COALESCE`, so the
   `applicaster.v2` storage harvest, which arrives later, still wins where it
   has a value.
+- `launchId` (D97) is generated once when the app process starts (the page
+  load on the web) and sent on every connection of that process. It is how
+  Beaver tells a reconnect of the same run from a restart. Beaver stores it as
+  `session.launch_id`. Beaver 4.21.0 or later only.
 - `device_uid` identifies the device across a restart (D77); D73's
   fingerprint heuristic is the fallback for a connection without one.
 - Sent by iOS and Android's native WebSocket sink (#2848). The JS-only sink
@@ -529,7 +534,14 @@ page, and after every reconnect.
    still answers keepalive would stay a live session forever. A
    connection that closes without ever sending a frame leaves no session
    behind: Beaver deletes it instead of setting `ended_at`.
-5. New connections after a close start a new session.
+5. New connections after a close start a new session, except one whose
+   `handshake` is its first frame and carries a `launchId` (and `deviceId`)
+   that an ended session already has (D97): it continues that session, which
+   Beaver reopens, and the empty one it opened is deleted. A reconnect of the
+   same app run is one session; a restart (a new `launchId`) is a new one. The
+   logs sent while the socket was down are lost (the SDK doesn't buffer them),
+   which Beaver notes in the session with an info line. An SDK that sends no
+   `launchId`, or logs before its handshake, keeps one session per connection.
    A client may identify itself with `handshake` (§4.4, the SDK) or
    `register` (§4.6, zapp-support's TV bridge).
 6. **Reconnect behavior is not symmetric across platforms.** iOS/tvOS's

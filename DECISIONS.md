@@ -3296,3 +3296,26 @@ the step order of D90.
   values shown next to it (built, then dropped: a setting for one hint);
   keep the CMS first (wrong values).
 
+## D97. One app launch, one session
+
+**Status:** Accepted (2026-10-02).
+
+- **Decision:** the SDK's handshake carries `launchId`, a UUID made once per
+  app process (PROTOCOL.md §4.4). When a handshake that is a connection's
+  first frame has a `launchId` and a `deviceId` that an ended session already
+  holds (`session.launch_id`, `device_uid`), Beaver reopens that session,
+  moves the connection onto it and deletes the empty one the connection
+  opened. A restart makes a new `launchId`, so it is a new session. The new
+  session is deleted only after the connection moved, so D75's replacement of
+  a deleted live session doesn't fire.
+- **Why:** an app sent to the background or on a network blip reconnects, and
+  each reconnect was a new session: one run showed as three short sessions
+  (16 events, 438, 1). The device id is stable across runs, so it can't tell a
+  reconnect from a restart; only an id per process can.
+- **Lost:** the events sent while the socket was down (the SDK doesn't
+  buffer); Beaver adds an info line to the session where the gap is.
+- **Alternatives:** merge by time (sessions of one device within a minute) —
+  also glues a quick relaunch onto the last run; continue when the new
+  session already holds rows — moving rows between sessions, and an SDK that
+  logs before its handshake has no safe first frame; skip the empty-session
+  delete — leaves an empty row per reconnect.

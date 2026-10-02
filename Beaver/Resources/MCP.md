@@ -181,7 +181,10 @@ Conventions: omitting `sessionId` means the live session (with several
 devices, the viewed one if it is live, else the newest), else the viewed one,
 else the most recent — and during a wait it follows the device into its new
 session if the app restarts (`sessionChanged`); a given `sessionId` stays put
-(`sessionEnded`). Subsystem and category values accept `*` globs, name
+(`sessionEnded`). With an SDK that sends a launch id (Beaver 4.21.0 or
+later), an app that only reconnected keeps its session, so a wait can see
+`sessionEnded` and the same session go live again; only a restart is
+`sessionChanged`. Subsystem and category values accept `*` globs, name
 fragments and any case; results say what they matched. A filter's `search`
 is a query in the Log feed's syntax, the same as zapp-support's web logger
 (recipe `query`); `searchIsRegex: true` takes it as one regular expression
