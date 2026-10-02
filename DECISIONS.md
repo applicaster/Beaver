@@ -3294,3 +3294,22 @@ the step order of D90.
   values shown next to it (built, then dropped: a setting for one hint);
   keep the CMS first (wrong values).
 
+
+## D97. A Debug build never updates itself
+
+**Status:** Accepted (2026-09-30). Amends D13.
+
+- **Decision:** in Debug (`#if DEBUG`) `BeaverApp` creates Sparkle's
+  controller with `startingUpdater: false` and skips the launch check. No
+  scheduled check, no background download, no install on quit; Beaver →
+  Check for Updates… stays disabled. Release is unchanged.
+- **Why:** a Debug build carries the project's `MARKETING_VERSION`, which
+  is behind the newest release as soon as CI tags one. On 2026-09-30 a
+  4.20.0 Debug build found 4.20.1, replaced
+  `DerivedData/…/Debug/Beaver.app` with the signed release and relaunched:
+  every device dropped and the change under test was gone.
+- **Alternatives:** `updater.automaticallyChecksForUpdates = false` in
+  Debug (Sparkle saves it in user defaults, and Debug and Release share the
+  bundle ID, so it would turn off updates for the installed release too);
+  a Debug-only `SUEnableAutomaticChecks = NO` (a value already saved in
+  user defaults wins over Info.plist, and the launch check ignores it).
