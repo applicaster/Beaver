@@ -12,6 +12,8 @@ does the same for a manual release.
 
 ## [Unreleased]
 
+## [4.21.0] - 2026-10-02
+
 ### Added
 - **A reconnect of the same app launch continues its session.** The SDK now
   sends a launch id in its handshake (one per app process). When an app's
@@ -877,7 +879,7 @@ end-to-end. No code-visible changes versus 1.0.0.
 
 Initial Beaver release. See `DECISIONS.md` D1–D20 for the design history.
 
-[Unreleased]: https://github.com/applicaster/Beaver/compare/4.20.5...HEAD
+[Unreleased]: https://github.com/applicaster/Beaver/compare/4.21.0...HEAD
 [2.0.1]: https://github.com/applicaster/Beaver/releases/tag/2.0.1
 [2.0.0]: https://github.com/applicaster/Beaver/releases/tag/2.0.0
 [1.0.2]: https://github.com/applicaster/Beaver/releases/tag/1.0.2
