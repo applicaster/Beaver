@@ -45,6 +45,14 @@ public struct LiveDevices: Sendable, Equatable {
         return takesWindow
     }
 
+    /// D97: the connection carries on in a session it left earlier.
+    public mutating func rebind(_ connection: UUID, to session: Int64) {
+        guard let previous = sessions[connection] else { return }
+        sessions[connection] = session
+        commands[previous] = nil
+        quietCmdlists.remove(previous)
+    }
+
     @discardableResult
     public mutating func disconnect(_ connection: UUID) -> Int64? {
         handshakes[connection] = nil

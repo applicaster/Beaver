@@ -18,6 +18,9 @@ public struct ClientHandshake: Sendable, Equatable {
     public var platform: String?
     public var appPackage: String?
     public var version: String?
+    /// One per app process, the same on every reconnect of it (D97). Nil
+    /// for an SDK that doesn't send one.
+    public var launchId: String?
     /// Only `register` carries it; the SDK's handshake leaves the name to applicaster.v2.
     public var appName: String?
     /// A `register` client (D89): it sends logs and nothing else — no
@@ -26,10 +29,10 @@ public struct ClientHandshake: Sendable, Equatable {
 
     public init(deviceId: String? = nil, deviceName: String? = nil, model: String? = nil,
                 platform: String? = nil, appPackage: String? = nil, version: String? = nil,
-                appName: String? = nil, logsOnly: Bool = false) {
+                launchId: String? = nil, appName: String? = nil, logsOnly: Bool = false) {
         self.deviceId = deviceId; self.deviceName = deviceName; self.model = model
         self.platform = platform; self.appPackage = appPackage; self.version = version
-        self.appName = appName; self.logsOnly = logsOnly
+        self.launchId = launchId; self.appName = appName; self.logsOnly = logsOnly
     }
 
     /// `"iOS 18.6"` → `("iOS", "18.6")`; `"tvOS"` → `("tvOS", nil)`.

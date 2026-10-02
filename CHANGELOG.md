@@ -12,6 +12,16 @@ does the same for a manual release.
 
 ## [Unreleased]
 
+### Added
+- **A reconnect of the same app launch continues its session.** The SDK now
+  sends a launch id in its handshake (one per app process). When an app's
+  socket drops and comes back (background and foreground, a network blip) and
+  the id is the same, Beaver carries on in the session it left instead of
+  opening a second one; a restart is still a new session. Needs an SDK that
+  sends the id; older ones keep one session per connection. Agent-visible:
+  after a reconnect `sessionChanged` isn't reported, the same session goes
+  live again.
+
 ## [4.20.5] - 2026-10-02
 
 No user-facing changes.

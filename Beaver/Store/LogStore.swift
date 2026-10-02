@@ -292,15 +292,42 @@ public actor LogStore {
                         \(fill),
                         app_name     = COALESCE(?, app_name),
                         device_uid   = COALESCE(?, device_uid),
-                        app_package  = COALESCE(?, app_package)
+                        app_package  = COALESCE(?, app_package),
+                        launch_id    = COALESCE(?, launch_id)
                     WHERE id = ?
                 """,
                 arguments: [h.version, h.model, platform.name, platform.version, h.appName, h.deviceId,
-                            h.appPackage, sessionId]
+                            h.appPackage, h.launchId, sessionId]
             )
             return try Self.fetchSession(id: sessionId, db: db)
         }
         if let updated { broadcast(.sessionUpdated(updated)) }
+    }
+
+    /// D97: the app launch behind `fresh` already had a session, ended when its
+    /// socket dropped. Reopens that one and returns its id; the caller moves the
+    /// connection onto it and then deletes `fresh`. Nil when no such session
+    /// exists, or when `fresh` already holds data (an SDK that logs before its
+    /// handshake): its rows stay where they are and the launch simply gets a
+    /// second session.
+    public func reopenSession(launchId: String, deviceUID: String, replacing fresh: Int64) async throws -> Int64? {
+        let reopened: Session? = try await dbQueue.write { db in
+            let rows = try Int.fetchOne(db, sql: """
+                SELECT (SELECT COUNT(*) FROM event WHERE session_id = ?1)
+                     + (SELECT COUNT(*) FROM network_entry WHERE session_id = ?1)
+            """, arguments: [fresh]) ?? 0
+            guard rows == 0, let old = try Int64.fetchOne(db, sql: """
+                SELECT id FROM session
+                WHERE launch_id = ? AND device_uid = ? AND source = 'live'
+                  AND ended_at IS NOT NULL AND id != ?
+                ORDER BY id DESC LIMIT 1
+            """, arguments: [launchId, deviceUID, fresh]) else { return nil }
+            try db.execute(sql: "UPDATE session SET ended_at = NULL WHERE id = ?", arguments: [old])
+            return try Self.fetchSession(id: old, db: db)
+        }
+        guard let reopened else { return nil }
+        broadcast(.sessionUpdated(reopened))
+        return reopened.id
     }
 
     /// `receivedFrames: false` drops the session instead: a socket that never

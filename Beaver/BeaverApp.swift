@@ -243,7 +243,8 @@ struct BeaverApp: App {
                         continue
                     }
                     if firstFrame { env.didSpeak(session: sessionId) }
-                    await Self.handleInbound(frame: frame, connection: connection, sessionId: sessionId, env: env)
+                    await Self.handleInbound(frame: frame, connection: connection, sessionId: sessionId,
+                                        firstFrame: firstFrame, env: env)
                 case .disconnected(let connection):
                     await env.mcpClients.removeValue(forKey: connection)?.close()
                     if let sessionId = env.didDisconnect(connection) {
@@ -360,7 +361,36 @@ struct BeaverApp: App {
         if handshake.logsOnly { await client?.markLogsOnly() } else { await client?.markNative() }
     }
 
-    private static func handleInbound(frame: Data, connection: UUID, sessionId: Int64, env: AppEnvironment) async {
+    /// D97: a handshake from an app launch that already had a session (its
+    /// socket dropped and came back) carries on in that session; the empty one
+    /// this connection opened is deleted. Returns the session to write to, nil
+    /// to stay in the new one. The connection moves first, so deleting the new
+    /// session doesn't look like a deleted live session to replace (D75). Only
+    /// when the handshake is the connection's first frame: nothing was written to
+    /// the new session yet, so deleting it loses nothing.
+    @MainActor
+    private static func continueLaunch(connection: UUID, fresh: Int64, handshake: ClientHandshake,
+                                       env: AppEnvironment) async -> Int64? {
+        guard let launchId = handshake.launchId, let deviceUID = handshake.deviceId, !handshake.logsOnly,
+              let old = try? await env.store.reopenSession(launchId: launchId, deviceUID: deviceUID, replacing: fresh)
+        else { return nil }
+        env.live.rebind(connection, to: old)
+        if env.viewingSessionId == fresh { env.viewingSessionId = old }
+        try? await env.store.deleteSession(id: fresh)
+        await env.store.append(
+            .syntheticInfo(subsystem: "loggernext.session",
+                           message: "Reconnected: same app launch. Logs sent while it was disconnected are lost."),
+            to: old
+        )
+        Task {
+            await env.sendQuietCmdlist(to: old)
+            await env.send(command: "storage.list", to: old)
+        }
+        return old
+    }
+
+    private static func handleInbound(frame: Data, connection: UUID, sessionId: Int64, firstFrame: Bool,
+                                     env: AppEnvironment) async {
         switch ProtocolDecoder.decode(frame) {
         case .success(.event(let event)):
             // Side-channel: detect cmdlist responses and populate the
@@ -398,9 +428,12 @@ struct BeaverApp: App {
                 return env.mcpClients[connection]
             }
             await Self.markMCP(client, for: handshake)
-            try? await env.store.applyHandshake(handshake, to: sessionId)
+            let target = firstFrame
+                ? await Self.continueLaunch(connection: connection, fresh: sessionId, handshake: handshake, env: env) ?? sessionId
+                : sessionId
+            try? await env.store.applyHandshake(handshake, to: target)
             // D85: ask what the app was built with, once per session, in the background.
-            if !handshake.logsOnly { Task { await AppBuild.fetch(from: env, store: env.store, sessionId: sessionId) } }
+            if !handshake.logsOnly { Task { await AppBuild.fetch(from: env, store: env.store, sessionId: target) } }
         case .success(.mcp(let message)):
             // D75: an answer to Beaver's request; not a log line.
             let client = await MainActor.run { env.mcpClients[connection] }

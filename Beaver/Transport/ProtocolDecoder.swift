@@ -169,7 +169,8 @@ public enum ProtocolDecoder {
         let model = str("model")
         let deviceId = str("deviceId").flatMap { $0 == model ? nil : $0 }
         return ClientHandshake(deviceId: deviceId, deviceName: str("deviceName"), model: model,
-                               platform: str("platform"), appPackage: str("appPackage"), version: str("version"))
+                               platform: str("platform"), appPackage: str("appPackage"), version: str("version"),
+                               launchId: str("launchId"))
     }
 
     /// zapp-support's `register` (PROTOCOL.md §4.6, D89): the fields in
