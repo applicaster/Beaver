@@ -59,6 +59,34 @@ final class SessionsViewModel {
         }
     }
 
+    /// Sessions whose event count changed since the list last read it.
+    private var dirty: Set<Int64> = []
+    private var refreshScheduled = false
+
+    /// Batches land many times a second while an app logs; a counter needs a
+    /// redraw twice a second. The count is read again, not added to, so a
+    /// `reload()` in between can't count an event twice.
+    private func markDirty(_ sessionId: Int64) {
+        dirty.insert(sessionId)
+        guard !refreshScheduled else { return }
+        refreshScheduled = true
+        Task {
+            try? await Task.sleep(for: .milliseconds(500))
+            await refreshDirtyCounts()
+        }
+    }
+
+    private func refreshDirtyCounts() async {
+        refreshScheduled = false
+        let ids = dirty
+        dirty = []
+        for id in ids {
+            guard let count = try? await store.eventCount(sessionId: id, filter: .none),
+                  let index = sessions.firstIndex(where: { $0.id == id }) else { continue }
+            sessions[index] = SessionListItem(session: sessions[index].session, eventCount: count)
+        }
+    }
+
     private func subscribe() async {
         let stream = await store.changes()
         subscription = Task { [weak self] in
@@ -72,11 +100,8 @@ final class SessionsViewModel {
                     // (see LogStore.harvestDeviceInfo) — refreshing
                     // the list picks up the new app / device labels.
                     await self.reload()
-                case .appended, .cleared:
-                    // Counts change; refresh in a debounced way later.
-                    // For now, do nothing — counts are recomputed on
-                    // next `reload()`.
-                    break
+                case .appended(let sessionId, _), .cleared(let sessionId):
+                    await self.markDirty(sessionId)
                 case .storageUpdated, .bookmarksChanged, .savedFiltersChanged, .networkAppended,
                      .networkBookmarksChanged, .writeFailed, .agentActivityChanged, .ignoredIssuesChanged, .configsSaved,
                      .appBuildRecorded:
