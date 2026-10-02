@@ -12,6 +12,10 @@ does the same for a manual release.
 
 ## [Unreleased]
 
+## [4.20.5] - 2026-10-02
+
+No user-facing changes.
+
 ## [4.20.4] - 2026-10-02
 
 ### Fixed
@@ -863,7 +867,7 @@ end-to-end. No code-visible changes versus 1.0.0.
 
 Initial Beaver release. See `DECISIONS.md` D1–D20 for the design history.
 
-[Unreleased]: https://github.com/applicaster/Beaver/compare/4.20.4...HEAD
+[Unreleased]: https://github.com/applicaster/Beaver/compare/4.20.5...HEAD
 [2.0.1]: https://github.com/applicaster/Beaver/releases/tag/2.0.1
 [2.0.0]: https://github.com/applicaster/Beaver/releases/tag/2.0.0
 [1.0.2]: https://github.com/applicaster/Beaver/releases/tag/1.0.2
