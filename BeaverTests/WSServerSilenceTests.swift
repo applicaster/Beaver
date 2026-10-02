@@ -59,3 +59,21 @@ struct WSServerSilenceTests {
         await server.stop()
     }
 }
+
+@Suite("Ending a session that never heard from its device")
+struct EmptySessionTests {
+
+    @Test("A session with no frames is dropped when its connection ends")
+    func silentSessionIsDropped() async throws {
+        let store = try LogStore(source: .inMemory)
+        let silent = try await store.createSession(source: .live)
+        let talked = try await store.createSession(source: .live)
+
+        try await store.endSession(silent.id, receivedFrames: false)
+        try await store.endSession(talked.id)
+
+        let sessions = try await store.sessions()
+        #expect(sessions.map(\.id) == [talked.id])
+        #expect(sessions.first?.endedAt != nil)
+    }
+}

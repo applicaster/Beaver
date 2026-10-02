@@ -12,6 +12,13 @@ does the same for a manual release.
 
 ## [Unreleased]
 
+### Fixed
+- **No empty sessions from a silent connection.** An app in the background
+  keeps retrying its socket every ~30 s; each attempt that sent nothing
+  before it closed left an empty "Ended" session in the list. Such a
+  session is now dropped when its connection closes. A connection that sent
+  at least one frame keeps its session, even with no events.
+
 ## [4.20.3] - 2026-10-01
 
 ### Fixed

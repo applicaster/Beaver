@@ -203,6 +203,7 @@ struct BeaverApp: App {
         // last one. Driven from `server.state` instead, frames sent right
         // after the handshake were dropped.
         Task { @MainActor in
+            var spoke: Set<UUID> = []
             for await item in env.server.inbound {
                 switch item {
                 case .connected(let connection):
@@ -224,6 +225,7 @@ struct BeaverApp: App {
                         await env.send(command: "storage.list", to: session.id)
                     }
                 case .frame(let connection, let frame):
+                    spoke.insert(connection)
                     guard let sessionId = env.live.session(for: connection) else {
                         // D75: while a deleted live session is being replaced,
                         // an MCP reply still reaches its request, and a
@@ -244,7 +246,7 @@ struct BeaverApp: App {
                 case .disconnected(let connection):
                     await env.mcpClients.removeValue(forKey: connection)?.close()
                     if let sessionId = env.didDisconnect(connection) {
-                        try? await env.store.endSession(sessionId)
+                        try? await env.store.endSession(sessionId, receivedFrames: spoke.remove(connection) != nil)
                     }
                 }
             }

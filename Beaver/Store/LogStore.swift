@@ -303,7 +303,11 @@ public actor LogStore {
         if let updated { broadcast(.sessionUpdated(updated)) }
     }
 
-    public func endSession(_ id: Int64) async throws {
+    /// `receivedFrames: false` drops the session instead: a socket that never
+    /// sent a thing (a sink retrying while its app is in the background) is
+    /// not a session worth listing.
+    public func endSession(_ id: Int64, receivedFrames: Bool = true) async throws {
+        guard receivedFrames else { return try await deleteSession(id: id) }
         let now = Date()
         let endedSession: Session? = try await dbQueue.write { db in
             try db.execute(
