@@ -2581,7 +2581,9 @@ won't decode, and the feed starts unfiltered once.
 - **Why:** the user debugs several apps side by side, like zapp-support's
   emitter switcher. The session was already the unit of viewing, so no second
   "selected device" state.
-- **A new device** takes the window only when the viewed session isn't live.
+- **A new device** takes the window only when the viewed session isn't live,
+  and only on its first frame: a connection that never sends one (an app in
+  the background retrying its socket) never pulls the view away.
 - **Disconnect** (the red button on a live row in Sessions, the pill's
   menu, `devices_disconnect`)
   closes that one connection; the session ends as on any drop. Beaver
