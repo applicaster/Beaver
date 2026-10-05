@@ -124,6 +124,28 @@ struct TVConnectTests {
         #expect(CDP.pages(Data(#"{"Browser": "x"}"#.utf8)) == nil)
     }
 
+    @Test("The app's page wins over the TV's own pages; a busy app isn't swapped for a free system page")
+    func pickPrefersTheApp() throws {
+        let list = try #require(CDP.pages(Data("""
+            [{"type": "page", "title": "", "url": "about:blank", "webSocketDebuggerUrl": "ws://tv/1"},
+             {"type": "page", "title": "Home", "url": "chrome://newtab/", "webSocketDebuggerUrl": "ws://tv/2"},
+             {"type": "page", "title": "Zapp App", "url": "file:///apps/zapp/index.html", "webSocketDebuggerUrl": "ws://tv/3"}]
+            """.utf8)))
+        #expect(try CDP.pick(list).title == "Zapp App")
+        #expect(try CDP.pick(Array(list.prefix(2))).url == "about:blank")
+        var busy = list
+        busy[2].socket = nil
+        #expect(throws: TVBridgeError.pageBusy) { try CDP.pick(busy) }
+    }
+
+    @Test("Replies to the bridge's own commands")
+    func replies() {
+        #expect(CDP.reply(Data(#"{"id":1,"result":{}}"#.utf8))?.id == 1)
+        #expect(CDP.reply(Data(#"{"id":1,"result":{}}"#.utf8))?.error == nil)
+        #expect(CDP.reply(Data(#"{"id":1,"error":{"message":"nope"}}"#.utf8))?.error == "nope")
+        #expect(CDP.reply(Data(#"{"method":"Runtime.consoleAPICalled","params":{}}"#.utf8)) == nil)
+    }
+
     @Test("Addresses: the target and device id are host:port, like the script's")
     func addresses() throws {
         let tv = try TVBridge(host: " 192.168.1.40 ", port: 9555)
@@ -151,7 +173,8 @@ struct TVConnectTests {
         defer { drain.cancel(); tv.stop() }
 
         let bridge = try TVBridge(host: "127.0.0.1", port: Int(tv.httpPort),
-                                  beaver: URL(string: "ws://127.0.0.1:19090")!, retryDelay: .milliseconds(100))
+                                  beaver: URL(string: "ws://127.0.0.1:19090")!, retryDelay: .milliseconds(100),
+                                  ping: .milliseconds(100), timeout: .seconds(2))
         try await bridge.start()
         #expect(await bridge.isRunning)
 
@@ -180,6 +203,14 @@ struct TVConnectTests {
         try await until { tv.methods.count == 4 }
         #expect(inbound.events.contains { $0.category == "bridge" && $0.level == .warning })
 
+        // The same page replays "boom" on Runtime.enable: Beaver gets it once, and what's new.
+        tv.push(#"{"method":"Runtime.consoleAPICalled","params":{"type":"log","timestamp":\#(at + 500),"args":[{"type":"string","value":"after"}]}}"#)
+        _ = try await inbound.first { $0.event?.message == "after" }
+        #expect(inbound.events.filter { $0.message == "boom" }.count == 1)
+        #expect(inbound.events.contains { $0.category == "bridge" && $0.message.hasPrefix("Reattached to \"Zapp App 2\"") })
+        // Pings were answered all along: no "stopped answering".
+        #expect(!inbound.events.contains { $0.message.contains("stopped answering") })
+
         // Disconnect in Beaver closes the connection: the bridge stops and lets go of the TV.
         guard case .frame(let connection, _) = register else { Issue.record("no connection"); return }
         await server.disconnect(connection)
@@ -194,7 +225,10 @@ struct TVConnectTests {
         defer { tv.stop() }
         func start(_ port: Int = 0, beaver: String = "ws://127.0.0.1:19091") async throws {
             try await TVBridge(host: "127.0.0.1", port: port == 0 ? Int(tv.httpPort) : port,
-                               beaver: URL(string: beaver)!).start()
+                               beaver: URL(string: beaver)!, timeout: .milliseconds(300)).start()
+        }
+        func error(_ port: Int = 0) async -> TVBridgeError? {
+            do { try await start(port); return nil } catch { return error as? TVBridgeError }
         }
         tv.pages = { _ in "[]" }
         await #expect(throws: TVBridgeError.noPage) { try await start() }
@@ -204,10 +238,102 @@ struct TVConnectTests {
         await #expect(throws: TVBridgeError.noDevTools(target: "127.0.0.1:\(tv.httpPort)")) { try await start() }
         // Nothing listens on port 1: the port is wrong.
         await #expect(throws: TVBridgeError.noDevTools(target: "127.0.0.1:1")) { try await start(1) }
-        // The TV is fine but Beaver isn't listening.
+        // The page is listed but doesn't answer Runtime.enable: the first attach fails, nothing "connects".
         tv.pages = FakeTV.onePage
-        await #expect(throws: TVBridgeError.beaverUnavailable) { try await start() }
-        #expect(tv.openPages == 0)
+        tv.answers = false
+        guard case .attachFailed(_, let reason) = await error() else { Issue.record("attachFailed"); return }
+        #expect(reason == "no answer in 0 s")
+        tv.answers = true
+        // The TV is fine but Beaver isn't listening: the reason, and where to look.
+        guard case .beaverUnavailable(let why) = await error() else { Issue.record("beaverUnavailable"); return }
+        #expect(why.contains("didn't take the connection"))
+        #expect(TVBridgeError.beaverUnavailable(reason: why).localizedDescription.contains("connection pill"))
+        try await until { tv.openPages == 0 }
+    }
+
+    @Test("Refused is a closed port; timeouts and unreachable hosts are a TV that's off or elsewhere")
+    func errorMapping() {
+        func urlError(_ code: URLError.Code, posix: Int? = nil) -> URLError {
+            URLError(code, userInfo: posix.map { ["_kCFStreamErrorDomainKey": 1, "_kCFStreamErrorCodeKey": $0] } ?? [:])
+        }
+        let t = "10.0.0.5:9222"
+        #expect(CDP.discoveryError(urlError(.cannotConnectToHost, posix: Int(ECONNREFUSED)), target: t) as? TVBridgeError
+                == .noDevTools(target: t))
+        for unreachable in [urlError(.cannotConnectToHost, posix: Int(EHOSTDOWN)), urlError(.cannotConnectToHost),
+                            urlError(.timedOut), urlError(.networkConnectionLost)] {
+            guard case .unreachable(t, _)? = CDP.discoveryError(unreachable, target: t) as? TVBridgeError else {
+                Issue.record("\(unreachable.code) should be unreachable"); continue
+            }
+        }
+        #expect(CDP.discoveryError(urlError(.timedOut), target: t).localizedDescription.contains("Is it on"))
+        #expect(CDP.discoveryError(urlError(.cancelled), target: t) is CancellationError)
+    }
+
+    @Test("A TV that stops answering pings is found again: the bridge reattaches when it wakes")
+    func sleepingTV() async throws {
+        let server = WSServer(port: 19_092)
+        try await server.start()
+        _ = await race(timeout: .seconds(10)) {
+            for await state in server.state { if case .listening = state { return } }
+        }
+        let inbound = Inbox()
+        let drain = Task { for await item in server.inbound { inbound.add(item) } }
+        let tv = try await FakeTV.start()
+        defer { drain.cancel(); tv.stop() }
+        let bridge = try TVBridge(host: "127.0.0.1", port: Int(tv.httpPort), beaver: URL(string: "ws://127.0.0.1:19092")!,
+                                  retryDelay: .milliseconds(100), ping: .milliseconds(100), timeout: .milliseconds(300))
+        try await bridge.start()
+        try await until { tv.methods.count == 2 }
+
+        tv.asleep = true
+        _ = try await inbound.first { $0.event?.message.contains("The TV stopped answering") == true }
+        _ = try await inbound.first { $0.event?.message.contains("Can't reach the TV") == true }
+        tv.title = "Zapp App (woke up)"
+        tv.asleep = false
+        _ = try await inbound.first { $0.handshake?.appName == "Zapp App (woke up) @ 127.0.0.1:\(tv.httpPort)" }
+        #expect(tv.methods.count == 4)
+        #expect(await bridge.isRunning)
+        await bridge.stop()
+        await server.stop()
+    }
+
+    @Test("Cancelling a Connect after the bridge started stops it: no TV appears")
+    func cancelStops() async throws {
+        let server = WSServer(port: 19_093)
+        try await server.start()
+        _ = await race(timeout: .seconds(10)) {
+            for await state in server.state { if case .listening = state { return } }
+        }
+        let drain = Task { for await _ in server.inbound {} }
+        let tv = try await FakeTV.start()
+        defer { drain.cancel(); tv.stop() }
+        let bridge = try TVBridge(host: "127.0.0.1", port: Int(tv.httpPort), beaver: URL(string: "ws://127.0.0.1:19093")!)
+        let connect = Task { try await bridge.connect(wait: .seconds(30)) { nil } }
+        try await until { await bridge.isRunning }
+        connect.cancel()
+        await #expect(throws: CancellationError.self) { try await connect.value }
+        #expect(await !bridge.isRunning)
+        try await until { tv.openPages == 0 }
+        await server.stop()
+    }
+
+    @Test("Two Connects of the same TV at once make one bridge; both get its device")
+    @MainActor func oneConnectPerTV() async throws {
+        let connects = TVConnects()
+        let runs = Mutex(0)
+        let work: @MainActor () async throws -> Int64 = {
+            runs.withLock { $0 += 1 }
+            try await Task.sleep(for: .milliseconds(200))
+            return 42
+        }
+        async let a = connects.run("cdp-10.0.0.5:9222", work)
+        async let b = connects.run("cdp-10.0.0.5:9222", work)
+        #expect(try await [a, b] == [42, 42])
+        #expect(runs.withLock { $0 } == 1)
+        // Done: the next Connect runs again.
+        #expect(try await connects.run("cdp-10.0.0.5:9222", work) == 42)
+        #expect(runs.withLock { $0 } == 2)
+        #expect(try TVBridge(host: "TV.Local", port: 9222).deviceId == TVBridge(host: "tv.local", port: 9222).deviceId)
     }
 
     // MARK: - MCP
@@ -295,6 +421,12 @@ private final class FakeTV: Sendable {
         var methods: [String] = []
         var page: NWConnection?
         var open = 0
+        /// Answers commands (`{"id":n,"result":{}}`), as DevTools does.
+        var answers = true
+        /// Asleep or off the network: answers nothing — no HTTP, no pong, no command.
+        var asleep = false
+        /// What the page logged; `Runtime.enable` replays it, as Chrome does.
+        var history: [String] = []
     }
     private let state = Mutex(State())
     private let http: NWListener
@@ -311,6 +443,14 @@ private final class FakeTV: Sendable {
         get { state.withLock { $0.title } }
         set { state.withLock { $0.title = newValue } }
     }
+    var answers: Bool {
+        get { state.withLock { $0.answers } }
+        set { state.withLock { $0.answers = newValue } }
+    }
+    var asleep: Bool {
+        get { state.withLock { $0.asleep } }
+        set { state.withLock { $0.asleep = newValue } }
+    }
     var methods: [String] { state.withLock { $0.methods } }
     var openPages: Int { state.withLock { $0.open } }
 
@@ -323,7 +463,7 @@ private final class FakeTV: Sendable {
         let http = try NWListener(using: .tcp, on: .any)
         let params = NWParameters.tcp
         let options = NWProtocolWebSocket.Options()
-        options.autoReplyPing = true
+        options.autoReplyPing = false  // receive() answers pings, unless asleep
         params.defaultProtocolStack.applicationProtocols.insert(options, at: 0)
         let ws = try NWListener(using: params, on: .any)
         let queue = DispatchQueue(label: "FakeTV.start")
@@ -349,7 +489,7 @@ private final class FakeTV: Sendable {
     private func serveHTTP(_ c: NWConnection) {
         c.start(queue: queue)
         c.receive(minimumIncompleteLength: 1, maximumLength: 65_536) { [weak self] _, _, _, _ in
-            guard let self else { return }
+            guard let self, !asleep else { return }
             let body = state.withLock { s in s.pages(wsPort).replacingOccurrences(of: "Zapp App", with: s.title) }
             let head = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n"
             c.send(content: Data((head + body).utf8), completion: .contentProcessed { _ in c.cancel() })
@@ -372,19 +512,29 @@ private final class FakeTV: Sendable {
     private func receive(_ c: NWConnection) {
         c.receiveMessage { [weak self] data, context, _, error in
             guard let self else { return }
-            if let data, let m = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-               let method = m["method"] as? String {
+            let (asleep, answers, history) = state.withLock { ($0.asleep, $0.answers, $0.history) }
+            let opcode = (context?.protocolMetadata(definition: NWProtocolWebSocket.definition) as? NWProtocolWebSocket.Metadata)?.opcode
+            if opcode == .ping, !asleep {
+                Self.send(data ?? Data(), opcode: .pong, on: c)
+            } else if !asleep, let data, let m = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+                      let method = m["method"] as? String {
                 state.withLock { $0.methods.append(method) }
+                if method == "Runtime.enable" { history.forEach { Self.send(Data($0.utf8), on: c) } }
+                if answers, let id = m["id"] as? Int { Self.send(Data(#"{"id":\#(id),"result":{}}"#.utf8), on: c) }
             }
             if error == nil, context?.isFinal != true { receive(c) } else { c.cancel() }
         }
     }
 
+    private static func send(_ data: Data, opcode: NWProtocolWebSocket.Opcode = .text, on c: NWConnection) {
+        let context = NWConnection.ContentContext(identifier: "cdp", metadata: [NWProtocolWebSocket.Metadata(opcode: opcode)])
+        c.send(content: data, contentContext: context, isComplete: true, completion: .idempotent)
+    }
+
     /// A CDP notification from the TV.
     func push(_ text: String) {
-        guard let c = state.withLock({ $0.page }) else { return }
-        let context = NWConnection.ContentContext(identifier: "cdp", metadata: [NWProtocolWebSocket.Metadata(opcode: .text)])
-        c.send(content: Data(text.utf8), contentContext: context, isComplete: true, completion: .idempotent)
+        guard let c = state.withLock({ $0.history.append(text); return $0.page }) else { return }
+        Self.send(Data(text.utf8), on: c)
     }
 
     /// The app reloads: its page's socket closes.

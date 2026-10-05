@@ -22,6 +22,18 @@ does the same for a manual release.
   closes (a silent socket, restarting the server) don't use the code, so
   apps come back after them as before. Agents: `devices_disconnect`'s
   description and Next say so.
+### Fixed
+- **Connect a TV is more reliable.** A TV that goes to sleep or drops off
+  the network is now noticed within about 15 seconds and picked up again
+  when it wakes, instead of looking connected while nothing arrives.
+  Reconnecting to the same page no longer repeats lines Beaver already
+  has. "Connected" appears only once Beaver actually reads the TV, and
+  Cancel while connecting really stops (no TV shows up afterwards).
+  Connecting the same TV twice at once makes one device. A TV that's off
+  now says "Can't reach the TV … Is it on?" rather than "no DevTools on
+  that port", which is kept for a closed port; when Beaver itself can't
+  take the TV, the message says why. With several pages open, the app's
+  page is preferred over the TV's own (about:blank, chrome://).
 
 ## [4.21.1] - 2026-10-02
 

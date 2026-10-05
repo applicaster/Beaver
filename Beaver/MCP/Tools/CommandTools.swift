@@ -97,7 +97,7 @@ enum CommandTools {
     static let connectTV: MCPTool = MCPTool(
         name: "devices_connect_tv",
         title: "Connect a smart TV",
-        description: "Use when the user wants logs from a smart TV app (Vizio, Vidaa, other web TVs with remote debugging on): Beaver reads the TV over the Chrome DevTools Protocol and it shows up as a device that only sends logs — console lines, exceptions, log entries. Pass the TV's IP address and its DevTools port (Vizio 9555, Vidaa 9226, others usually 9222). An already connected TV returns its device. devices_disconnect stops reading it.",
+        description: "Use when the user wants logs from a smart TV app (Vizio, Vidaa, other web TVs with remote debugging on): Beaver reads the TV over the Chrome DevTools Protocol and it shows up as a device that only sends logs — console lines, exceptions, log entries. Pass the TV's IP address and its DevTools port (Vizio 9555, Vidaa 9226, others usually 9222). An already connected (or still connecting) TV returns its device. Once connected, a TV that sleeps, reloads its app or drops off the network is picked up again on its own; category \"bridge\" lines say so. devices_disconnect stops reading it.",
         kind: .change,
         inputSchema: ToolSchema.object([
             "host": ToolSchema.string("The TV's IP address, e.g. \"192.168.1.40\"."),

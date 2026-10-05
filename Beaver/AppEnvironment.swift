@@ -203,29 +203,33 @@ extension AppEnvironment: DeviceLink {
         try await connectTVOnMain(host: host, port: port, name: name)
     }
 
+    /// Connects in flight, by device id: the same TV twice at once is one bridge.
+    private static let tvConnects = TVConnects()
+
     /// D94: the bridge is a `register` client of our own server, so the TV
     /// is the device zapp-support's bridge makes (D89): the inbound loop
     /// opens its session, Disconnect closes its socket and that stops it.
     private func connectTVOnMain(host: String, port: Int, name: String?) async throws -> Int64 {
         let bridge = try TVBridge(host: host, port: port, name: name)
-        // Already connected, here or by zapp-support's script.
-        if let id = live.session(deviceId: bridge.deviceId) { return id }
-        switch serverState {
-        case .listening, .clientConnected, .clientDisconnected: break
-        case .stopped, .failed: throw TVBridgeError.beaverUnavailable
-        }
-        try await bridge.start()
-        // The session opens, then the register lands in the store: wait for both.
-        for _ in 0..<100 {
-            if let id = live.session(deviceId: bridge.deviceId),
-               try await store.sessions().first(where: { $0.id == id })?.deviceUID == bridge.deviceId {
-                RecentTVs.remember(RecentTV(host: host.trimmingCharacters(in: .whitespaces), port: port, name: name))
+        return try await Self.tvConnects.run(bridge.deviceId) { [self] in
+            // Already connected, here or by zapp-support's script.
+            if let id = live.session(deviceId: bridge.deviceId) { return id }
+            switch serverState {
+            case .listening, .clientConnected, .clientDisconnected: break
+            case .stopped: throw TVBridgeError.beaverUnavailable(reason: "Beaver's WebSocket server hasn't started")
+            case .failed(let reason): throw TVBridgeError.beaverUnavailable(reason: "Beaver's WebSocket server failed: \(reason)")
+            }
+            // The session opens, then the register lands in the store: wait for both.
+            // A cancel or a timeout in here stops the bridge.
+            let id = try await bridge.connect { @MainActor [self] in
+                guard let id = live.session(deviceId: bridge.deviceId),
+                      try await store.sessions().first(where: { $0.id == id })?.deviceUID == bridge.deviceId
+                else { return nil }
                 return id
             }
-            try await Task.sleep(for: .milliseconds(50))
+            RecentTVs.remember(RecentTV(host: host.trimmingCharacters(in: .whitespaces), port: port, name: name))
+            return id
         }
-        await bridge.stop()
-        throw TVBridgeError.beaverUnavailable
     }
 
     nonisolated public func mcp(_ method: String, params: JSON, to sessionId: Int64, timeout: Duration,
