@@ -20,6 +20,8 @@ this doc gets corrected.
 | TLS             | Not used                                        |
 | Auto-ping       | Server replies to client pings automatically    |
 | Control frames  | Ping, pong and close are never read as frames   |
+| Data frames     | Text and binary both carry a frame (iOS sends binary) |
+| Message size    | Up to 64 MiB per message (the SDKs cap at 16 MiB) |
 | Subprotocols    | None negotiated                                 |
 | Origin          | Not checked                                     |
 
@@ -548,7 +550,10 @@ page, and after every reconnect.
    Disconnect in Beaver), Beaver stores every frame that arrived before
    the close, then sets that connection's session `ended_at`; other
    connections are unaffected. A half-open connection
-   is noticed by TCP keepalive within ~20 s. A connection that sends
+   is noticed by TCP keepalive within ~20 s, and a peer that stops
+   acknowledging data Beaver sent (keepalive waits while data is
+   unacknowledged) is dropped after 20 s. A TCP connection that doesn't
+   finish the WebSocket upgrade within 10 s is closed. A connection that sends
    nothing at all (no frame, no ping) within 15 s of the handshake is closed
    by Beaver: the SDK sends its `handshake` at once, and a mute socket that
    still answers keepalive would stay a live session forever. A

@@ -50,6 +50,10 @@ public final class AppEnvironment {
     /// Latest server state for the connection indicator.
     public var serverState: WSServer.State = .stopped
 
+    /// The last connections that went wrong before they became devices
+    /// (`WSServer.recentProblems`), for the placeholder and `beaver_status`.
+    public var connectionProblems: [WSServer.ConnectionProblem] = []
+
     /// Number of events in the *viewing* session. Drives toolbar
     /// button availability (Export / Clear / Bookmarks) — those
     /// actions only make sense when there's something to act on.

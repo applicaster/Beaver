@@ -129,8 +129,10 @@ struct BeaverApp: App {
                     // "Copy IP" button. Both forms (with / without
                     // scheme) work in the SDK; the prefixed form is
                     // more directly pasteable.
-                    let host = NetworkInterface.bestAddress() ?? "localhost"
-                    let url = "ws://\(host):9080"
+                    guard let url = NetworkInterface.deviceURLs().first else {
+                        toasts.error(NetworkInterface.noAddressMessage)
+                        return
+                    }
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(url, forType: .string)
                     toasts.success("Copied \(url)")
@@ -183,20 +185,19 @@ struct BeaverApp: App {
     /// Wires the server's inbound stream into the store, and tracks
     /// connection state for the UI. Spawned once at app launch.
     private static func bootstrap(env: AppEnvironment) async {
-        // Start listening.
-        do {
-            try await env.server.start()
-        } catch {
-            env.serverState = .failed(reason: error.localizedDescription)
-            return
-        }
-
-        // Track server state on the main actor.
+        // Track server state on the main actor. A state is published again
+        // when a connection problem is recorded, so read those with it.
         Task { @MainActor in
             for await state in env.server.state {
                 env.serverState = state
+                env.connectionProblems = await env.server.recentProblems
             }
         }
+
+        // Start listening. Never gives up: a listener that can't bind is
+        // reported on `state` and retried by the server itself. Both streams
+        // buffer, so the inbound loop below misses nothing started here.
+        try? await env.server.start()
 
         // Open and end live sessions in the same loop that stores frames,
         // so the session exists before the first frame and outlives the

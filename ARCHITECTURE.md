@@ -335,9 +335,11 @@ every `Inbound` item with the connection's id. `AppEnvironment.live`
 there, and `AppEnvironment.send(command:to:)` routes a command to the
 connection of a session. The toolbar device menu switches `viewingSessionId`.
 
-**IPv4 + IPv6.** Today's listener forces IPv4. We accept both; the
-"Copy URL" command picks the best available address (IPv6 if reachable,
-IPv4 otherwise).
+**IPv4 + IPv6.** The listener accepts both. The addresses Beaver offers a
+device (Copy IP, the empty-state placeholder, `beaver_status`) are IPv4 only,
+from `NetworkInterface.usableAddresses`: the default-route interface first,
+skipping interfaces that are down, loopback, 169.254.x, VPN tunnels, bridges
+and AirDrop links. A LAN IPv6 is mostly link-local, which a URL can't carry.
 
 **Inbound flow.**
 1. `NWConnection.receiveMessage` → `Data` → published to `inbound` as
@@ -352,16 +354,22 @@ IPv4 otherwise).
    session exists before the first frame; `state` is for the UI only.
 
 **Outbound flow.**
-- `send(command: String) async throws` encodes a `WSCommand` and writes
-  to the current connection. No-op (or specific error) if no connection
-  is active.
+- `send(command:to:)` encodes a `WSCommand` and writes it to one
+  connection; `send(data:to:)` writes a ready-made frame. Both are no-ops
+  once that connection is gone.
 
 **Error handling.**
-- Listener `.failed` → publish to a `serverState: AsyncStream<ServerState>`
-  the UI subscribes to for the connection indicator.
-- Connection drops are logged to the store as a synthetic event (level:
-  info, subsystem: "loggernext.transport") so the developer sees them in
-  context.
+- `state` is derived from the listener's health and the connected devices,
+  kept apart: a listener failure (`.failed`, re-bound with backoff by the
+  server itself, also when the very first bind throws) wins over any
+  device count, and no single connection changes it. The toolbar pill shows
+  it even with devices connected.
+- Connections that go wrong before they become devices (fail before the
+  handshake, don't finish the upgrade in 10 s, stay mute 15 s after it) are
+  kept, the last five, in `recentProblems`, shown in the empty-state
+  placeholder and `beaver_status`, and logged to the macOS log (category
+  `WSServer`). A device's own disconnect ends its session; nothing is
+  written to the store for it.
 
 **`DeviceMCPClient` (D75).** One per connection, created on connect and
 closed on disconnect by `BeaverApp.bootstrap`, held in

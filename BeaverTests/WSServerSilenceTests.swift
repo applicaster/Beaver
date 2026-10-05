@@ -34,6 +34,7 @@ struct WSServerSilenceTests {
             return
         }
         #expect(items == [.connected(id), .disconnected(id)])
+        #expect(await server.recentProblems.last?.reason.contains("sent nothing") == true)
         client.cancel(with: .normalClosure, reason: nil)
         await server.stop()
     }

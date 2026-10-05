@@ -47,7 +47,8 @@ struct WSServerRebindTests {
         }
         // The message has to say what to do about it, and that the
         // server hasn't given up.
-        #expect(reason.contains("Port in use"))
+        #expect(reason.contains("Port 19080 is in use"))
+        #expect(reason.contains("the old Logger app"))
         #expect(reason.contains("retrying"))
 
         await blocked.stop()

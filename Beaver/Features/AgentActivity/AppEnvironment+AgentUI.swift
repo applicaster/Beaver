@@ -20,7 +20,7 @@ extension AppEnvironment: AgentUI {
                 serverState: state,
                 liveSessionIds: live.sessionIds,
                 commandsBySession: live.commands,
-                deviceURL: NetworkInterface.bestAddress().map { "ws://\($0):9080" },
+                deviceURL: nil,
                 beaverVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev",
                 mcpPort: agentAccessPort ?? 0,
                 ui: uiState,
@@ -31,6 +31,8 @@ extension AppEnvironment: AgentUI {
                 retention: SessionRetention.current()
             )
             host.logsOnly = live.logsOnlySessions
+            host.deviceURLs = NetworkInterface.deviceURLs()
+            host.connectionProblems = connectionProblems
             return host
         }
     }

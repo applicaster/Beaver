@@ -581,8 +581,10 @@ struct MainWindow: View {
         // both forms, but the prefixed form is what users paste into
         // browser address bars / SDK init code, so it's the more
         // useful default.
-        let host = NetworkInterface.bestAddress() ?? "localhost"
-        let url = "ws://\(host):9080"
+        guard let url = NetworkInterface.deviceURLs().first else {
+            toasts.error(NetworkInterface.noAddressMessage)
+            return
+        }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(url, forType: .string)
         toasts.success("Copied \(url)")
@@ -775,6 +777,9 @@ private struct DeviceSwitcher: View {
 
     var body: some View {
         Menu {
+            if let failure = env.serverState.failure {
+                Section("Beaver can't accept devices") { Text(failure) }
+            }
             Section("Connected") {
                 if sections.connected.isEmpty {
                     Text("No device connected")
@@ -810,7 +815,7 @@ private struct DeviceSwitcher: View {
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
-        .help("Switch device")
+        .help(env.serverState.failure.map { "Beaver can't accept devices: \($0)" } ?? "Switch device")
     }
 
     private static func item(_ s: Session, suffix: String) -> String {
@@ -860,6 +865,14 @@ struct ToolbarButtonLabel: View {
     }
 }
 
+extension WSServer.State {
+    /// Why the listener is down and no device can connect, if it is.
+    var failure: String? {
+        guard case .failed(let reason) = self else { return nil }
+        return reason
+    }
+}
+
 private struct ConnectionPlaceholder: View {
     let state: WSServer.State
     @Environment(AppEnvironment.self) private var env
@@ -868,7 +881,10 @@ private struct ConnectionPlaceholder: View {
         ContentUnavailableView {
             Label(title, systemImage: iconName)
         } description: {
-            Text(descriptionText)
+            VStack(spacing: 10) {
+                Text(descriptionText)
+                if showsHelp { connectHelp }
+            }
         } actions: {
             // D94: a TV has no SDK to connect with; Beaver reads it.
             switch state {
@@ -886,7 +902,7 @@ private struct ConnectionPlaceholder: View {
         case .listening:              "Waiting for a client to connect"
         case .clientConnected:        "Loading session…"
         case .clientDisconnected:     "Disconnected"
-        case .failed:                 "Server error"
+        case .failed:                 "Beaver can't accept devices"
         }
     }
 
@@ -902,10 +918,6 @@ private struct ConnectionPlaceholder: View {
     }
 
     private var descriptionText: String {
-        // Keep these single-line so the placeholder centers at the
-        // same vertical position as the Storages "No session selected"
-        // empty state. Multi-line descriptions push the title up.
-        // The full URL is available via the Copy IP toolbar button.
         switch state {
         case .stopped:
             return "The WebSocket listener hasn't started."
@@ -919,13 +931,38 @@ private struct ConnectionPlaceholder: View {
             return reason
         }
     }
+
+    private var showsHelp: Bool {
+        switch state {
+        case .listening, .clientDisconnected, .failed: true
+        case .stopped, .clientConnected: false
+        }
+    }
+
+    /// Where to connect, what went wrong last, and what usually blocks a
+    /// device (also in MCP.md → "Testing without Xcode").
+    @ViewBuilder
+    private var connectHelp: some View {
+        let urls = NetworkInterface.deviceURLs()
+        if urls.isEmpty {
+            Text(NetworkInterface.noAddressMessage)
+        } else {
+            Text("The app connects to \(urls.joined(separator: " or "))")
+                .textSelection(.enabled)
+        }
+        if let problem = env.connectionProblems.last {
+            Text("Last failed connection at \(problem.at.formatted(date: .omitted, time: .standard)): \(problem.peer) \(problem.reason)")
+        }
+        Text("Can't connect? Put the device on the same Wi-Fi as this Mac, allow Beaver in System Settings → Network → Firewall, and turn off VPN on both. Guest and office Wi-Fi often keep devices apart (client isolation).")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: 440)
+    }
 }
 
 private struct ConnectionIndicator: View {
     let state: WSServer.State
-    /// Connected devices (D73). While any is connected the pill says so,
-    /// whatever the last server-state update was: that one value is shared
-    /// by every connection, and one of them `.waiting` would read "Error".
+    /// Connected devices (D73), counted from the live sessions.
     var liveCount = 0
     var showsChevron = false
 
@@ -953,7 +990,10 @@ private struct ConnectionIndicator: View {
         )
     }
 
+    /// A listener failure shows even with devices connected: those stay,
+    /// but no new one can connect until it re-binds.
     private var color: Color {
+        if state.failure != nil { return .red }
         if liveCount > 0 { return .green }
         return switch state {
         case .clientConnected:       .green
@@ -965,12 +1005,13 @@ private struct ConnectionIndicator: View {
     }
 
     private var label: String {
+        if state.failure != nil { return liveCount > 0 ? "Not listening · \(liveCount) connected" : "Not listening" }
         if liveCount > 0 { return liveCount > 1 ? "Connected · \(liveCount)" : "Connected" }
         return switch state {
         case .clientConnected(let count): count > 1 ? "Connected · \(count)" : "Connected"
         case .listening:             "Listening"
         case .clientDisconnected:    "Disconnected"
-        case .failed:                "Error"
+        case .failed:                "Not listening"
         case .stopped:               "Stopped"
         }
     }
