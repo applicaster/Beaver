@@ -2586,8 +2586,10 @@ won't decode, and the feed starts unfiltered once.
   the background retrying its socket) never pulls the view away.
 - **Disconnect** (the red button on a live row in Sessions, the pill's
   menu, `devices_disconnect`)
-  closes that one connection; the session ends as on any drop. Beaver
-  can't stop an SDK from reconnecting — that comes back as a new session.
+  closes that one connection; the session ends as on any drop. *Amended by
+  D98:* the close carries code 4000, and an SDK that knows it stays away
+  until the app returns to the foreground or relaunches; an older SDK
+  reconnects as before (PROTOCOL.md §6.6).
 - **Following a restart (D66)** with several devices: same fingerprint (app,
   model, platform), else the one session that just came up. Two identical
   builds look alike until the SDK sends a device id — it does; see D77.
@@ -3319,3 +3321,29 @@ the step order of D90.
   session already holds rows — moving rows between sessions, and an SDK that
   logs before its handshake has no safe first frame; skip the empty-session
   delete — leaves an empty row per reconnect.
+
+## D98. Disconnect closes with code 4000, and the app stays away
+
+**Status:** Accepted (2026-10-05). Amends D73's Disconnect.
+
+- **Decision:** a person's or agent's Disconnect (the device menu, the
+  toolbar, `devices_disconnect`) sends a WebSocket close frame with code
+  **4000** and reason `disconnected by Beaver`, then closes the connection
+  (cancelled after 1 s if the client doesn't answer). An SDK that receives
+  4000 stops reconnecting until the app returns to the foreground, the
+  logger URL is set or the sink turned on again, or the app relaunches. Any
+  other close or network error still means reconnect with backoff. Beaver's
+  other closes (silence timeout, server stop or re-bind, a zombie socket)
+  never use 4000, so the app comes back after them (PROTOCOL.md §3.4).
+- **Why:** Disconnect only cancelled the socket, and every SDK reconnects:
+  iOS/tvOS and Android (quick-brick-xray 2.64.2 or later) after about 1 s,
+  the web on its next log. With D97 they came back into the same session,
+  so Disconnect looked like it did nothing. A close code needs no new frame
+  type, and older SDKs that ignore it behave as before.
+- **Client side:** the quick-brick-xray PRs for iOS/web and Android park the
+  sink on 4000 (quick-brick-xray <version TBD — the release carrying the iOS/web and Android 4000 parking PRs>). Beaver 4.22.0 or later sends it.
+- **Alternatives:** a `command` frame asking the app to stop (a new frame
+  type, and lost if the app is mid-reconnect); a cooldown in Beaver that
+  refuses the device's reconnects (the app keeps retrying and logs warnings);
+  4000 on every close (a timeout or Beaver restart would strand the app
+  until it is foregrounded).

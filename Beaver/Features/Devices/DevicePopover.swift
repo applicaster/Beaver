@@ -10,6 +10,9 @@ import AppKit
 import SwiftUI
 
 struct DevicePopover: View {
+    /// D98: what Disconnect does depends on the app's X-Ray SDK.
+    static let disconnectHelp = "Disconnect this device. An app whose X-Ray SDK supports close code 4000 stays disconnected until it returns to the foreground or is relaunched; older SDKs may reconnect on their own."
+
     let session: Session
     let isLive: Bool
     /// Every session row — to resolve which live session among several
@@ -59,7 +62,7 @@ struct DevicePopover: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(.red)
-                    .help("Disconnect this device")
+                    .help(Self.disconnectHelp)
                 }
                 Divider()
                 if logsOnly {

@@ -161,6 +161,7 @@ struct SessionsView: View {
             } label: {
                 Label("Disconnect", systemImage: "eject")
             }
+            .help(DevicePopover.disconnectHelp)
         }
         Divider()
         Button(role: .destructive) {

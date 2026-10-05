@@ -155,7 +155,7 @@ port, notifications), Zapp (token), About (version, What's New, updates).
 | `storage_set` | Set a storage key; Beaver re-reads storage and says whether the app applied it |
 | `storage_delete` | Delete a storage key, with the same check |
 | `commands_list` | Commands a connected app accepts (`deviceId` when several are connected) |
-| `devices_disconnect` | Close a connected app's connection (the Disconnect button); its session ends. With several apps, `deviceId` is required: the default doesn't count |
+| `devices_disconnect` | Close a connected app's connection (the Disconnect button); its session ends. An app whose X-Ray SDK supports close code 4000 stays away until foregrounded or relaunched; older SDKs may reconnect on their own. With several apps, `deviceId` is required: the default doesn't count |
 | `devices_connect_tv` | Read a smart TV app (Vizio, Vidaa, …) over DevTools from its IP and port, like Connect a TV…; it becomes a device that only sends logs. `devices_disconnect` stops it |
 | `devices_set_default` | Make one connected app the default for device tools (follows it across restarts); `null` clears |
 | `toolboxes_list` | An app's toolboxes, or one toolbox's tools with their arguments; `deviceId: "beaver"` for Beaver's own |
@@ -337,7 +337,7 @@ and in zapp-support's web logger (Beaver 4.14.0 or later). Case never matters.
 2. `commands_list(deviceId: "14")` — Beta's commands.
 3. `commands_send(deviceId: "14", command: "<command>", collectLogsMs: 5000)`.
 4. `logs_query(sessionId: 12, since: "5m")` — reads take a sessionId; a device's live session id is its deviceId.
-5. `devices_disconnect(deviceId: "12")` — only when the user asks to drop Alpha; an app that reconnects on its own comes back in a new session. With several apps it always needs `deviceId`, even with a default set.
+5. `devices_disconnect(deviceId: "12")` — only when the user asks to drop Alpha. An app whose X-Ray SDK supports close code 4000 stays disconnected until it returns to the foreground or is relaunched; older SDKs may reconnect on their own. With several apps it always needs `deviceId`, even with a default set.
 
 ### tv — logs from a smart TV
 
