@@ -12,34 +12,7 @@ does the same for a manual release.
 
 ## [Unreleased]
 
-## [4.22.1] - 2026-10-05
-
-No user-facing changes.
-
-## [4.22.0] - 2026-10-05
-
-### Changed
-- **Disconnect keeps the app away.** Disconnect (the device menu, the device
-  details, Sessions, `devices_disconnect`) now closes the connection with
-  close code 4000. An app whose X-Ray SDK supports close code 4000 stays
-  disconnected until it returns to the foreground or is relaunched; before,
-  it reconnected within a second, so Disconnect looked like it did nothing.
-  Older SDKs may reconnect on their own. Beaver's other
-  closes (a silent socket, restarting the server) don't use the code, so
-  apps come back after them as before. Agents: `devices_disconnect`'s
-  description and Next say so.
 ### Fixed
-- **Connect a TV is more reliable.** A TV that goes to sleep or drops off
-  the network is now noticed within about 15 seconds and picked up again
-  when it wakes, instead of looking connected while nothing arrives.
-  Reconnecting to the same page no longer repeats lines Beaver already
-  has. "Connected" appears only once Beaver actually reads the TV, and
-  Cancel while connecting really stops (no TV shows up afterwards).
-  Connecting the same TV twice at once makes one device. A TV that's off
-  now says "Can't reach the TV … Is it on?" rather than "no DevTools on
-  that port", which is kept for a closed port; when Beaver itself can't
-  take the TV, the message says why. With several pages open, the app's
-  page is preferred over the TV's own (about:blank, chrome://).
 - **A device that can't connect says why.** One phone's half-open connection
   no longer turns the whole server red ("Server error") or makes Connect a TV
   refuse; a real listener failure (port 9080 taken by another Beaver, the old
@@ -68,6 +41,34 @@ No user-facing changes.
   device (`webSocket.connectionProblems`, also in its summary when nothing is
   connected). Connection errors go to the macOS log (subsystem
   `com.applicaster.LoggerNext`, category `WSServer`) instead of nowhere.
+
+## [4.22.1] - 2026-10-05
+
+### Fixed
+- **Connect a TV is more reliable.** A TV that goes to sleep or drops off
+  the network is now noticed within about 15 seconds and picked up again
+  when it wakes, instead of looking connected while nothing arrives.
+  Reconnecting to the same page no longer repeats lines Beaver already
+  has. "Connected" appears only once Beaver actually reads the TV, and
+  Cancel while connecting really stops (no TV shows up afterwards).
+  Connecting the same TV twice at once makes one device. A TV that's off
+  now says "Can't reach the TV … Is it on?" rather than "no DevTools on
+  that port", which is kept for a closed port; when Beaver itself can't
+  take the TV, the message says why. With several pages open, the app's
+  page is preferred over the TV's own (about:blank, chrome://).
+
+## [4.22.0] - 2026-10-05
+
+### Changed
+- **Disconnect keeps the app away.** Disconnect (the device menu, the device
+  details, Sessions, `devices_disconnect`) now closes the connection with
+  close code 4000. An app whose X-Ray SDK supports close code 4000 stays
+  disconnected until it returns to the foreground or is relaunched; before,
+  it reconnected within a second, so Disconnect looked like it did nothing.
+  Older SDKs may reconnect on their own. Beaver's other
+  closes (a silent socket, restarting the server) don't use the code, so
+  apps come back after them as before. Agents: `devices_disconnect`'s
+  description and Next say so.
 
 ## [4.21.1] - 2026-10-02
 
