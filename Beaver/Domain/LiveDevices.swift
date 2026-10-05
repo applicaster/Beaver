@@ -45,12 +45,32 @@ public struct LiveDevices: Sendable, Equatable {
         return takesWindow
     }
 
-    /// D97: the connection carries on in a session it left earlier.
-    public mutating func rebind(_ connection: UUID, to session: Int64) {
-        guard let previous = sessions[connection] else { return }
+    /// D97: the connection carries on in `session`: one it left earlier, or
+    /// one another connection of the same app launch still holds (a socket
+    /// that hasn't noticed it's dead). That connection is let go and
+    /// returned, so its close no longer ends the session; the caller closes it.
+    @discardableResult
+    public mutating func rebind(_ connection: UUID, to session: Int64) -> UUID? {
+        guard let previous = sessions[connection] else { return nil }
+        let holder = self.connection(for: session)
+        if let holder {
+            sessions[holder] = nil
+            handshakes[holder] = nil
+        }
         sessions[connection] = session
         commands[previous] = nil
-        quietCmdlists.remove(previous)
+        // A `cmdlist` Beaver sent before the move is answered on this connection.
+        if quietCmdlists.remove(previous) != nil { quietCmdlists.insert(session) }
+        return holder
+    }
+
+    /// D97: another connection whose SDK handshake carried `launchId` and
+    /// that still writes a live session. Never a `register` client (D89).
+    public func connection(launchId: String, other connection: UUID) -> UUID? {
+        sessions.keys.first { key in
+            guard key != connection, let h = handshakes[key] else { return false }
+            return h.launchId == launchId && !h.logsOnly
+        }
     }
 
     @discardableResult

@@ -558,15 +558,22 @@ page, and after every reconnect.
    by Beaver: the SDK sends its `handshake` at once, and a mute socket that
    still answers keepalive would stay a live session forever. A
    connection that closes without ever sending a frame leaves no session
-   behind: Beaver deletes it instead of setting `ended_at`.
-5. New connections after a close start a new session, except one whose
-   `handshake` is its first frame and carries a `launchId` (and `deviceId`)
-   that an ended session already has (D97): it continues that session, which
-   Beaver reopens, and the empty one it opened is deleted. A reconnect of the
-   same app run is one session; a restart (a new `launchId`) is a new one. The
-   logs sent while the socket was down are lost (the SDK doesn't buffer them),
-   which Beaver notes in the session with an info line. An SDK that sends no
-   `launchId`, or logs before its handshake, keeps one session per connection.
+   behind: Beaver deletes it instead of setting `ended_at`. A connection
+   whose session another connection took over (§6.5) is closed by Beaver
+   (not with 4000, §3.4, so the app isn't parked), and its close ends nothing.
+5. New connections start a new session, except one whose `handshake` is its
+   first frame and carries a `launchId` that a session already has (D97): it
+   continues that session, and the empty one it opened is deleted. The
+   `launchId` alone decides (it is a random UUID per app process); `deviceId`
+   may be missing. If that session is still live on another connection (the
+   app reconnected in ~1 s and the old socket is half-open, not yet noticed by
+   keepalive), the new connection takes it over and Beaver closes the old
+   one; if it ended, Beaver reopens it. A reconnect of the same app run is one
+   session; a restart (a new `launchId`) is a new one. The logs sent while the
+   socket was down are lost (the SDK doesn't buffer them), which Beaver notes
+   in the session with an info line. An SDK that sends no `launchId`, or logs
+   before its handshake, keeps one session per connection; a `register`
+   client (§4.6) is never continued.
    A client may identify itself with `handshake` (§4.4, the SDK) or
    `register` (§4.6, zapp-support's TV bridge).
 6. **Reconnects, per platform.** After any drop (Wi-Fi hiccup, Beaver

@@ -3348,6 +3348,32 @@ the step order of D90.
   session already holds rows — moving rows between sessions, and an SDK that
   logs before its handshake has no safe first frame; skip the empty-session
   delete — leaves an empty row per reconnect.
+- **Amended (2026-10-05): a live session is taken over; the launch id alone
+  matches.** iOS and Android reconnect in about a second, while the old
+  socket is still open to Beaver (half-open: keepalive needs ~20 s, and the
+  15 s silence close doesn't apply to a socket that spoke). The session was
+  live, so the reconnect opened a second one, and repeated reconnects
+  alternated logs between the two. Now a first-frame handshake whose
+  `launchId` a connection still writes takes that session over: the old
+  connection is let go first (its later close ends nothing, its MCP client
+  is closed) and then closed (no 4000, D98), the new one moves onto the session, the empty
+  new session is deleted, and the info line is added. An ended session is
+  reopened as before. A connection waiting for a replacement of its
+  deleted session (D75) whose launch came back on another connection
+  meanwhile is closed the same way instead of getting one. The match no longer needs `device_uid`: the
+  `launchId` is a random UUID per process, and apps with no device id, or
+  the model as one (iOS before it captured the UUID, Android with no UUID,
+  web without one), never merged. `register` clients (D89) stay out. The
+  window is told of the first frame after the session is chosen, so a
+  reconnect of the viewed device keeps the view, its filter and its Clear
+  watermark. The routing lives in `SessionRouter` (Domain), so `swift test`
+  covers it; BeaverApp's inbound loop calls it.
+- **Also:** ending or deleting a session stores the events still queued for
+  it first (PROTOCOL.md §6.4), and the batched write skips rows of a session
+  deleted meanwhile, so one deleted session no longer loses every device's
+  batch with a "Couldn't save N events" toast. Delete all tells the window
+  before it gives the disk space back. D87's sweep never ends a session
+  before its start (a device clock behind the Mac's).
 
 ## D98. Disconnect closes with code 4000, and the app stays away
 
