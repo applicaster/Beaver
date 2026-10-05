@@ -5,10 +5,17 @@
 
 import Foundation
 import Network
+import os
 
-/// WebSocket listener for the mobile SDK. Accepts a single client at a
-/// time (D2). All inbound text frames are published as raw `Data` on
-/// `inbound`; consumers feed them to `ProtocolDecoder`.
+/// WebSocket listener for the mobile SDK. Accepts several clients at once
+/// (D73). Every inbound data frame, text or binary (the iOS sink sends
+/// binary), is published as raw `Data` on `inbound`, tagged with its
+/// connection; consumers feed them to `ProtocolDecoder`.
+///
+/// The listener's health and the connected devices are kept apart and
+/// `state` is derived from both (`currentState`): one connection's trouble
+/// never reports the listener failed, and a device leaving never hides a
+/// listener failure.
 ///
 /// Contract documented in `PROTOCOL.md`.
 public actor WSServer {
@@ -20,7 +27,18 @@ public actor WSServer {
         /// `count` devices are connected (D73).
         case clientConnected(count: Int)
         case clientDisconnected(reason: String)
+        /// The listener is down and no new device can connect; it re-binds
+        /// by itself. Devices already connected may still be.
         case failed(reason: String)
+    }
+
+    /// A connection that went wrong before it became a device: what a
+    /// person or agent needs when "the phone connected" but nothing shows.
+    public struct ConnectionProblem: Sendable, Equatable {
+        /// The peer's address and port.
+        public let peer: String
+        public let reason: String
+        public let at: Date
     }
 
     /// A client's frames, bracketed by its connect and disconnect, in
@@ -35,7 +53,12 @@ public actor WSServer {
     }
 
     public nonisolated let inbound: AsyncStream<Inbound>
+    /// Yields `currentState` on every change, and again when a connection
+    /// problem is recorded (read `recentProblems` then).
     public nonisolated let state: AsyncStream<State>
+
+    /// Above the SDKs' 16 MiB frame cap (TVBridge uses the same).
+    static let maximumMessageSize = 64 << 20
 
     private let port: NWEndpoint.Port
     private var listener: NWListener?
@@ -45,6 +68,19 @@ public actor WSServer {
     /// Ready connections that have not sent a thing yet, not even a ping.
     private var silent = Set<UUID>()
     private let silenceTimeout: Duration
+    private let handshakeTimeout: Duration
+
+    /// Between `start()` and `stop()`.
+    private var running = false
+    /// The listener reported `.ready`.
+    private var listening = false
+    /// Why the listener is down while a re-bind is pending; nil when healthy.
+    private var listenerFailure: String?
+    /// Why the last device left, while none is connected.
+    private var lastDisconnect: String?
+    private var problems: [ConnectionProblem] = []
+    /// Tests: errors the next binds throw, as `NWListener(using:on:)` can.
+    private var injectedBindErrors: [any Error] = []
 
     /// Pending re-bind after the listener failed. `nil` when the server
     /// is either healthy or deliberately stopped.
@@ -60,14 +96,19 @@ public actor WSServer {
     // `com.applicaster.LoggerNext`, see D38) for consistency with
     // Console.app traces and the Activity Monitor's grouping.
     private let networkQueue = DispatchQueue(label: "com.applicaster.LoggerNext.WSServer")
+    private static let log = Logger(subsystem: "com.applicaster.LoggerNext", category: "WSServer")
 
     // MARK: - Init
 
     /// - Parameter silenceTimeout: how long a connection may stay mute after
     ///   the handshake before it is closed. The SDK sends its own handshake
     ///   at once, so a socket mute for this long is a zombie (see `closeIfSilent`).
-    public init(port: UInt16 = 9080, silenceTimeout: Duration = .seconds(15)) {
+    /// - Parameter handshakeTimeout: how long a TCP connection may take to
+    ///   finish the WebSocket upgrade before it is closed.
+    public init(port: UInt16 = 9080, silenceTimeout: Duration = .seconds(15),
+                handshakeTimeout: Duration = .seconds(10)) {
         self.silenceTimeout = silenceTimeout
+        self.handshakeTimeout = handshakeTimeout
         guard let nwPort = NWEndpoint.Port(rawValue: port) else {
             preconditionFailure("Invalid port: \(port)")
         }
@@ -82,9 +123,38 @@ public actor WSServer {
         self.stateContinuation = stateCont
     }
 
+    // MARK: - State
+
+    public var currentState: State {
+        if !running { return .stopped }
+        if let listenerFailure { return .failed(reason: listenerFailure) }
+        if !ready.isEmpty { return .clientConnected(count: ready.count) }
+        if let lastDisconnect { return .clientDisconnected(reason: lastDisconnect) }
+        return listening ? .listening : .stopped
+    }
+
+    /// The last few connections that failed before the handshake, never
+    /// finished it, or were closed for sending nothing; oldest first.
+    public var recentProblems: [ConnectionProblem] { problems }
+
+    private func publish() { stateContinuation.yield(currentState) }
+
     // MARK: - Lifecycle
 
+    /// Doesn't throw (it stays `throws` for its callers): a listener that
+    /// can't be created is reported on `state` and retried, like one that
+    /// fails later.
     public func start() async throws {
+        running = true
+        do {
+            try bind()
+        } catch {
+            scheduleRebind(reason: describe(error))
+        }
+    }
+
+    private func bind() throws {
+        if !injectedBindErrors.isEmpty { throw injectedBindErrors.removeFirst() }
         let parameters = NWParameters(tls: nil)
         parameters.allowLocalEndpointReuse = true
         parameters.includePeerToPeer = true
@@ -99,23 +169,28 @@ public actor WSServer {
         // the budget short.
         //
         // Detection budget = keepaliveIdle + (keepaliveInterval *
-        // keepaliveCount) = 10 + (5 * 2) = 20 seconds.
+        // keepaliveCount) = 10 + (5 * 2) = 20 seconds. Keepalive pauses
+        // while sent data waits for an ACK — and Beaver sends cmdlist and
+        // storage.list right after connect — so `connectionDropTime`
+        // drops a peer that hasn't acknowledged data for 20 seconds.
         if let tcp = parameters.defaultProtocolStack.transportProtocol as? NWProtocolTCP.Options {
             tcp.enableKeepalive = true
             tcp.keepaliveIdle = 10
             tcp.keepaliveInterval = 5
             tcp.keepaliveCount = 2
+            tcp.connectionDropTime = 20
         }
 
         let wsOptions = NWProtocolWebSocket.Options()
         wsOptions.autoReplyPing = true
+        wsOptions.maximumMessageSize = Self.maximumMessageSize
         parameters.defaultProtocolStack.applicationProtocols.insert(wsOptions, at: 0)
 
         let listener = try NWListener(using: parameters, on: port)
         self.listener = listener
 
-        listener.newConnectionHandler = { [weak self] connection in
-            Task { await self?.handleNewConnection(connection) }
+        listener.newConnectionHandler = { [weak self, weak listener] connection in
+            Task { await self?.handleNewConnection(connection, from: listener) }
         }
 
         listener.stateUpdateHandler = { [weak self, weak listener] nwState in
@@ -132,13 +207,28 @@ public actor WSServer {
         retryTask?.cancel()
         retryTask = nil
         retryAttempt = 0
+        running = false
+        listening = false
+        listenerFailure = nil
+        lastDisconnect = nil
+        listener?.cancel()
+        listener = nil
+        // Their sessions end here: with `connections` empty, the cancel
+        // callbacks that follow find nothing to drop.
+        let gone = ready
         for connection in connections.values { connection.cancel() }
         connections = [:]
         ready = []
-        listener?.cancel()
-        listener = nil
-        stateContinuation.yield(.stopped)
+        silent = []
+        for id in gone { inboundContinuation.yield(.disconnected(id)) }
+        publish()
     }
+
+    // MARK: - Tests
+
+    func failNextBind(_ error: any Error) { injectedBindErrors.append(error) }
+
+    func failListener(_ reason: String) { scheduleRebind(reason: reason) }
 
     // MARK: - Connection handling
 
@@ -153,11 +243,15 @@ public actor WSServer {
             retryAttempt = 0
             retryTask?.cancel()
             retryTask = nil
-            stateContinuation.yield(.listening)
+            listening = true
+            listenerFailure = nil
+            Self.log.info("listening on port \(self.port.rawValue)")
+            publish()
         case .failed(let error):
-            scheduleRebind(reason: Self.describe(error))
+            scheduleRebind(reason: describe(error))
         case .cancelled:
-            stateContinuation.yield(.stopped)
+            listening = false
+            publish()
         default:
             break
         }
@@ -166,16 +260,16 @@ public actor WSServer {
     // MARK: - Recovering a lost listener
 
     /// A failed `NWListener` never recovers on its own, and the most
-    /// common cause is another Beaver already holding the port — which
+    /// common cause is another app already holding the port — which
     /// clears the moment that process quits. Without this the app sits
     /// there alive and silently deaf until someone restarts it.
     private func scheduleRebind(reason: String) {
         // Detach before cancelling: the dead listener's `.cancelled`
-        // callback would otherwise overwrite the message below with
-        // a plain "stopped".
+        // callback would otherwise overwrite the message below.
         listener?.stateUpdateHandler = nil
         listener?.cancel()
         listener = nil
+        listening = false
 
         // A listener can report `.failed` more than once; one pending
         // retry is enough.
@@ -184,9 +278,9 @@ public actor WSServer {
         retryAttempt += 1
         let delay = Self.rebindDelay(attempt: retryAttempt)
         let seconds = Int(delay.components.seconds)
-        stateContinuation.yield(
-            .failed(reason: "\(reason) — retrying in \(seconds)s")
-        )
+        Self.log.error("listener failed: \(reason, privacy: .public); retrying in \(seconds)s")
+        listenerFailure = "\(reason) — retrying in \(seconds)s"
+        publish()
 
         retryTask = Task { [weak self] in
             try? await Task.sleep(for: delay)
@@ -201,9 +295,9 @@ public actor WSServer {
         guard !Task.isCancelled else { return }
         retryTask = nil
         do {
-            try await start()
+            try bind()
         } catch {
-            scheduleRebind(reason: Self.describe(error))
+            scheduleRebind(reason: describe(error))
         }
     }
 
@@ -216,39 +310,52 @@ public actor WSServer {
 
     /// `POSIXErrorCode.EADDRINUSE` reads as "Address already in use",
     /// which doesn't tell a user what to do about it.
-    private static func describe(_ error: Error) -> String {
+    private func describe(_ error: any Error) -> String {
         if case .posix(let code)? = error as? NWError, code == .EADDRINUSE {
-            return "Port in use — another Beaver is probably running"
+            return "Port \(port.rawValue) is in use by another app: another Beaver, the old Logger app, "
+                + "or zapp-support's local server. Quit it; Beaver retries by itself"
         }
         return error.localizedDescription
     }
 
-    private func handleNewConnection(_ connection: NWConnection) {
+    private func handleNewConnection(_ connection: NWConnection, from source: NWListener?) {
+        // A callback can hop in after `stop()` or a rebind.
+        guard running, let source, source === listener else {
+            connection.cancel()
+            return
+        }
         let id = UUID()
-        print("[WSServer] new connection \(id) (endpoint=\(connection.endpoint))")
+        Self.log.info("new connection \(id) from \(String(describing: connection.endpoint), privacy: .public)")
         connections[id] = connection
         connection.stateUpdateHandler = { [weak self] state in
             Task { await self?.handleConnectionState(state, id: id) }
         }
         connection.start(queue: networkQueue)
+        // The silence timer starts at `.ready`; one that never gets there
+        // would otherwise hold its socket for good.
+        Task { [handshakeTimeout] in
+            try? await Task.sleep(for: handshakeTimeout)
+            self.closeIfNotReady(id)
+        }
     }
 
     private func handleConnectionState(_ state: NWConnection.State, id: UUID) async {
         // A connection that already failed can still report `.cancelled`.
         guard let connection = connections[id] else { return }
-        print("[WSServer] connection \(id): \(state)")
+        Self.log.debug("connection \(id): \(String(describing: state), privacy: .public)")
         switch state {
         case .ready:
+            // One session and one receive loop per connection.
+            guard ready.insert(id).inserted else { return }
             if let payload = try? ProtocolEncoder.encodeHandshake(id: UUID()) {
                 send(payload, on: connection)
             }
-            ready.insert(id)
             silent.insert(id)
             Task { [silenceTimeout] in
                 try? await Task.sleep(for: silenceTimeout)
                 self.closeIfSilent(id)
             }
-            stateContinuation.yield(.clientConnected(count: ready.count))
+            publish()
             inboundContinuation.yield(.connected(id))
             // Read only after `.connected` is out: a frame the client
             // sends at once would otherwise be yielded first.
@@ -258,6 +365,7 @@ public actor WSServer {
             // the failure, then cancels and ends the session after the last
             // one. Cancelling here would discard them.
             if ready.contains(id) { break }
+            record(id, "failed before the WebSocket handshake: \(error.localizedDescription)")
             // A failed connection holds its resources — and this handler,
             // which holds it — until cancelled.
             connection.cancel()
@@ -265,7 +373,9 @@ public actor WSServer {
         case .cancelled:
             if !ready.contains(id) { drop(id, reason: "cancelled") }
         case .waiting(let error):
-            stateContinuation.yield(.failed(reason: "waiting: \(error.localizedDescription)"))
+            // This connection's trouble, not the listener's: `closeIfNotReady`
+            // ends it if it never gets ready.
+            Self.log.info("connection \(id) waiting: \(error.localizedDescription, privacy: .public)")
         case .preparing, .setup:
             break
         @unknown default:
@@ -281,17 +391,35 @@ public actor WSServer {
     /// `receive`, like `disconnect`.
     private func closeIfSilent(_ id: UUID) {
         guard silent.remove(id) != nil else { return }
-        print("[WSServer] connection \(id) sent nothing in \(silenceTimeout), closing")
+        record(id, "connected but sent nothing for \(Self.format(silenceTimeout)); closed")
         connections[id]?.cancel()
+    }
+
+    private func closeIfNotReady(_ id: UUID) {
+        guard let connection = connections[id], !ready.contains(id) else { return }
+        record(id, "didn't finish the WebSocket handshake in \(Self.format(handshakeTimeout)); closed")
+        connection.cancel()
+    }
+
+    /// Keeps the last five; publishes so the app reads them again.
+    private func record(_ id: UUID, _ reason: String) {
+        let peer = connections[id].map { String(describing: $0.endpoint) } ?? "unknown"
+        Self.log.notice("connection from \(peer, privacy: .public): \(reason, privacy: .public)")
+        problems.append(ConnectionProblem(peer: peer, reason: reason, at: Date()))
+        if problems.count > 5 { problems.removeFirst(problems.count - 5) }
+        publish()
+    }
+
+    private static func format(_ duration: Duration) -> String {
+        duration.formatted(.units(allowed: [.seconds, .milliseconds], width: .narrow))
     }
 
     private func drop(_ id: UUID, reason: String) {
         connections[id] = nil
         silent.remove(id)
         guard ready.remove(id) != nil else { return }
-        stateContinuation.yield(ready.isEmpty
-            ? .clientDisconnected(reason: reason)
-            : .clientConnected(count: ready.count))
+        if ready.isEmpty { lastDisconnect = reason }
+        publish()
         inboundContinuation.yield(.disconnected(id))
     }
 
@@ -301,14 +429,15 @@ public actor WSServer {
     ///
     /// Control frames (ping, pong, close) are delivered here too, even
     /// with `autoReplyPing` answering the ping. They carry no protocol
-    /// frame, so only data messages go on to the decoder (PROTOCOL.md §1).
+    /// frame, so only data messages, text or binary, go on to the decoder
+    /// (PROTOCOL.md §1).
     ///
     /// This loop ends the session: the end of the peer's stream (a FIN,
     /// with or without a close frame) reaches only this callback, and the
     /// connection stays `.ready`. The error for the peer's close can come
     /// with a frame while later ones are still buffered, so reading goes on
-    /// until a callback brings no data — the SDK flushes its buffer right
-    /// after connecting, and stopping early lost those logs. `.disconnected`
+    /// until a callback brings no data — a client that sends frames and
+    /// closes at once would otherwise lose the last ones. `.disconnected`
     /// is yielded after the last frame, never before it.
     private nonisolated func receive(on connection: NWConnection, id: UUID, heard: Bool) {
         connection.receiveMessage { [weak self] data, context, _, error in

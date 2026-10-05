@@ -132,12 +132,26 @@ port, notifications), Zapp (token), About (version, What's New, updates).
    Beaver X.Y.Z" with every version since the last one you ran (nothing on
    a fresh install). Beaver → **What's New…** and Settings → About show it
    again.
+18. A device that can't connect (Beaver 4.21.2 or later): with nothing
+   connected, the empty screen shows the `ws://` address(es) to connect to,
+   the last connection that went wrong ("… sent nothing for 15s; closed",
+   "didn't finish the WebSocket handshake", "failed before the WebSocket
+   handshake: …") and what usually blocks a device: a different Wi-Fi, the
+   macOS firewall (System Settings → Network → Firewall: allow Beaver), a
+   VPN, or guest/office Wi-Fi that keeps devices apart (client isolation).
+   Open a second copy of Beaver (or anything else on port 9080, such as the
+   old Logger app or zapp-support's local server): the toolbar pill turns red,
+   **Not listening**, even with devices connected; its tooltip, the pill's
+   menu and the empty screen say why, and Beaver re-binds by itself once the
+   port is free. `beaver_status` leads with "Beaver can't accept devices:
+   …", lists every address (`webSocket.deviceURLs`) and the recent failed
+   connections (`webSocket.connectionProblems`).
 
 ## Tools
 
 | Tool | What it does |
 |---|---|
-| `beaver_status` | Every connected device (its `id` is the `deviceId` other tools take), live and viewed session, latest event id, where the device connects, how long old sessions are kept (`retentionDays`) and the store's size (`storeBytes`) |
+| `beaver_status` | Every connected device (its `id` is the `deviceId` other tools take), live and viewed session, latest event id, where the device connects (every address), why Beaver can't accept devices if it can't, recent connections that failed before becoming a device, how long old sessions are kept (`retentionDays`) and the store's size (`storeBytes`) |
 | `sessions_list` | Stored sessions, newest first, with app, device and counts |
 | `sessions_import` | Open a Beaver / zapp-support JSON or a HAR file as a new session |
 | `sessions_export` | Write a session (or a filtered part) as JSON, or its requests as HAR |

@@ -29,6 +29,35 @@ struct StatusToolsTests {
         #expect(r.body.contains("ws://192.168.1.5:9080"))
     }
 
+    @Test("beaver_status leads with why Beaver can't accept devices, and how to fix it")
+    func statusListenerFailed() async throws {
+        let store = try LogStore(source: .inMemory)
+        let reason = "Port 9080 is in use by another app: another Beaver, the old Logger app, or zapp-support's local server. Quit it; Beaver retries by itself — retrying in 4s"
+        let r = try await StatusTools.status.run(ToolArguments(), makeContext(store, ui: HostSnapshot(serverState: "failed: \(reason)")))
+        #expect(r.summary.hasPrefix("Beaver can't accept devices: Port 9080 is in use"))
+        #expect(r.next.first?.contains("quit the other app") == true)
+        #expect(r.structured["webSocket"]?["acceptProblem"] == .string(reason))
+
+        let stopped = try await StatusTools.status.run(ToolArguments(), makeContext(store, ui: HostSnapshot(serverState: "stopped")))
+        #expect(stopped.summary.hasPrefix("Beaver can't accept devices: its WebSocket server is stopped"))
+        #expect(stopped.next.first?.contains("reopen Beaver") == true)
+    }
+
+    @Test("beaver_status lists every address and the connections that never became a device")
+    func statusAddressesAndProblems() async throws {
+        let store = try LogStore(source: .inMemory)
+        var host = HostSnapshot()
+        host.deviceURLs = ["ws://192.168.1.5:9080", "ws://10.0.0.7:9080"]
+        host.connectionProblems = [.init(peer: "192.168.1.30:50123", reason: "connected but sent nothing for 15s; closed",
+                                         at: Date(timeIntervalSince1970: 1_000_000))]
+        let r = try await StatusTools.status.run(ToolArguments(), makeContext(store, ui: host))
+        #expect(r.body.contains("ws://192.168.1.5:9080 or ws://10.0.0.7:9080"))
+        #expect(r.body.contains("192.168.1.30:50123: connected but sent nothing"))
+        #expect(r.summary.contains("Last connection attempt: 192.168.1.30:50123 connected but sent nothing"))
+        #expect(r.structured["webSocket"]?["deviceURLs"]?.array?.count == 2)
+        #expect(r.structured["webSocket"]?["connectionProblems"]?.array?.count == 1)
+    }
+
     @Test("sessions_list with counts, newest first")
     func sessions() async throws {
         let store = try LogStore(source: .inMemory)

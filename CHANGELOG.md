@@ -40,6 +40,34 @@ No user-facing changes.
   that port", which is kept for a closed port; when Beaver itself can't
   take the TV, the message says why. With several pages open, the app's
   page is preferred over the TV's own (about:blank, chrome://).
+- **A device that can't connect says why.** One phone's half-open connection
+  no longer turns the whole server red ("Server error") or makes Connect a TV
+  refuse; a real listener failure (port 9080 taken by another Beaver, the old
+  Logger app or zapp-support's local server) now shows in the toolbar pill as
+  red **Not listening**, with the reason in its tooltip and menu, even while
+  devices are connected. A device leaving no longer hides it.
+- **Beaver no longer goes deaf when it can't open its port at launch.** It
+  retries by itself, as it already did when the port was lost later.
+- **The empty screen helps you connect.** It shows the `ws://` address(es),
+  the last connection that went wrong (sent nothing for 15 s, never finished
+  the WebSocket handshake, failed with an error) and what usually blocks a
+  device: another Wi-Fi, the macOS firewall, a VPN, client isolation.
+- **Copy IP picks the right address.** The network macOS routes through comes
+  first; VPN tunnels, bridges, AirDrop links, interfaces that are down and
+  self-assigned 169.254.x addresses are skipped, and a link-local IPv6 is never
+  offered. With no usable address it says so instead of copying
+  `ws://localhost:9080`.
+- **Dead and stuck connections go away.** A device that stops acknowledging
+  data is dropped after 20 s (TCP keepalive waits while data is unacknowledged),
+  and a connection that never finishes the WebSocket upgrade is closed after
+  10 s. Frames up to 64 MiB are accepted.
+- **Stopping the server ends the connected devices' sessions.**
+- **Agents:** `beaver_status` leads with "Beaver can't accept devices: …" and
+  a step that fixes it when the listener is down, lists every address
+  (`webSocket.deviceURLs`) and the recent connections that never became a
+  device (`webSocket.connectionProblems`, also in its summary when nothing is
+  connected). Connection errors go to the macOS log (subsystem
+  `com.applicaster.LoggerNext`, category `WSServer`) instead of nowhere.
 
 ## [4.21.1] - 2026-10-02
 

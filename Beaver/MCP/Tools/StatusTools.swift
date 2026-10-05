@@ -11,7 +11,7 @@ enum StatusTools {
     static let status: MCPTool = MCPTool(
         name: "beaver_status",
         title: "Beaver status",
-        description: "Use first, and whenever you are unsure what is connected: which apps are connected (each with the deviceId to pass to device tools), their live and the viewed session ids, the latest event id (a starting point for afterId), where the device should connect, and how long old sessions are kept.",
+        description: "Use first, and whenever you are unsure what is connected: which apps are connected (each with the deviceId to pass to device tools), their live and the viewed session ids, the latest event id (a starting point for afterId), where the device should connect, why Beaver can't accept devices if it can't, recent connections that failed before becoming a device, and how long old sessions are kept.",
         kind: .read,
         inputSchema: ToolSchema.object([:])
     ) { (_: ToolArguments, ctx: ToolContext) async throws -> ToolResult in
@@ -41,7 +41,14 @@ enum StatusTools {
                 + (isDefault ? " (default)" : ""))
         }
         lines.append("Beaver \(host.beaverVersion) · WebSocket \(host.serverState)"
-            + (host.deviceURL.map { " · the device connects to \($0)" } ?? ""))
+            + (host.deviceURLs.isEmpty ? " · this Mac has no network address a device can reach"
+               : " · the device connects to \(host.deviceURLs.joined(separator: " or "))"))
+        if !host.connectionProblems.isEmpty {
+            lines.append("Recent connections that never became a device:")
+            for problem in host.connectionProblems {
+                lines.append("- \(problem.at.formatted(date: .omitted, time: .standard)) \(problem.peer): \(problem.reason)")
+            }
+        }
         if let viewing = host.viewingSessionId { lines.append("The user is viewing session #\(viewing).") }
         let storeBytes = try await ctx.store.databaseSize()
         let retentionDays: Int? = host.retention == .never ? nil : host.retention.rawValue
@@ -57,19 +64,27 @@ enum StatusTools {
         }
         lines.append("Agent notifications: \(host.notifications.rawValue)" + notificationsSuffix)
 
-        let summary = switch devices.count {
+        var summary = switch devices.count {
         case 0: "No device is connected. \(sessions.isEmpty ? "No sessions are stored yet." : "Past sessions can still be read.")"
+            + (host.connectionProblems.last.map { " Last connection attempt: \($0.peer) \($0.reason)." } ?? "")
         case 1: "A device is connected: \(described[0])."
         default: "\(devices.count) devices are connected: \(described.joined(separator: "; ")). Pass deviceId to commands and storage changes."
         }
         let first = host.liveSessionIds.first
-        let next: [String] = devices.isEmpty
+        var next: [String] = devices.isEmpty
             ? (sessions.isEmpty
                 ? ["ask the user to connect the app to \(host.deviceURL ?? "Beaver") with remote assistance, then beaver_status()"]
                 : ["sessions_list()", "logs_facets(sessionId: \(sessions[0].id))"])
             : devices.count == 1
                 ? ["logs_facets(since: \"10m\")", "logs_query(filter: {minLevel: \"warning\"}, since: \"10m\")"]
                 : ["commands_list(deviceId: \"\(first ?? 0)\")", "logs_facets(sessionId: \(first ?? 0), since: \"10m\")"]
+        // Leads: until it's fixed no device can connect, whatever else is true.
+        if let problem = host.acceptProblem {
+            summary = "Beaver can't accept devices: \(problem). " + summary
+            next.insert(problem.contains("in use")
+                ? "ask the user to quit the other app holding the port (another Beaver, the old Logger app or zapp-support's local server); Beaver re-binds by itself, then beaver_status()"
+                : "ask the user to quit and reopen Beaver if this lasts (it retries by itself), then beaver_status()", at: 0)
+        }
         let defaultNote: String
         if let preferred = host.defaultDevice {
             let described = try await ctx.describeDefault(preferred)
@@ -82,7 +97,14 @@ enum StatusTools {
             body: lines.joined(separator: "\n"),
             structured: [
                 "beaver": ["version": .string(host.beaverVersion), "mcpPort": JSON(host.mcpPort), "deviceId": "beaver"],
-                "webSocket": ["state": .string(host.serverState), "deviceURL": JSON(host.deviceURL)],
+                "webSocket": [
+                    "state": .string(host.serverState), "deviceURL": JSON(host.deviceURL),
+                    "deviceURLs": .array(host.deviceURLs.map { .string($0) }),
+                    "acceptProblem": JSON(host.acceptProblem),
+                    "connectionProblems": .array(host.connectionProblems.map {
+                        ["peer": .string($0.peer), "reason": .string($0.reason), "at": .string($0.at.ISO8601Format())]
+                    }),
+                ],
                 "devices": .array(devices),
                 "viewingSessionId": JSON(host.viewingSessionId),
                 "sessionCount": JSON(sessions.count),

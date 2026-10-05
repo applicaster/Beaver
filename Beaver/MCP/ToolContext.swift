@@ -36,7 +36,11 @@ public struct HostSnapshot: Sendable, Equatable {
     public var commandsBySession: [Int64: [CommandHint]]
     /// Live devices that only send logs: `register` clients such as the TV bridge (D89).
     public var logsOnly: Set<Int64> = []
-    public var deviceURL: String?
+    /// Every address a device on the network can connect to, best first.
+    public var deviceURLs: [String]
+    public var deviceURL: String? { deviceURLs.first }
+    /// The last connections that went wrong before they became devices.
+    public var connectionProblems: [WSServer.ConnectionProblem] = []
     public var beaverVersion: String
     public var mcpPort: UInt16
     /// What the window shows (design §7.1).
@@ -47,6 +51,14 @@ public struct HostSnapshot: Sendable, Equatable {
     public var frontmost: Bool
 
     public var deviceConnected: Bool { !liveSessionIds.isEmpty }
+
+    /// Why no device can connect now (the listener failed or is stopped);
+    /// nil while Beaver accepts devices.
+    public var acceptProblem: String? {
+        if serverState == "stopped" { return "its WebSocket server is stopped" }
+        if serverState.hasPrefix("failed: ") { return String(serverState.dropFirst("failed: ".count)) }
+        return nil
+    }
 
     /// The session the window shows.
     public var viewingSessionId: Int64? {
@@ -69,7 +81,7 @@ public struct HostSnapshot: Sendable, Equatable {
         self.serverState = serverState
         self.liveSessionIds = liveSessionIds
         self.commandsBySession = commandsBySession
-        self.deviceURL = deviceURL
+        self.deviceURLs = deviceURL.map { [$0] } ?? []
         self.beaverVersion = beaverVersion; self.mcpPort = mcpPort
         self.ui = ui; self.windowOpen = windowOpen; self.frontmost = frontmost
         if let viewingSessionId { self.ui.sessionId = viewingSessionId }

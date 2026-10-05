@@ -94,7 +94,7 @@ struct WSServerInboundTests {
     /// to go on until a callback brought no data.
     @Test("Frames that arrive with the client's close are all kept, before .disconnected")
     func framesBeforeCloseAreKept() async throws {
-        let server = WSServer(port: 19_088)
+        let server = WSServer(port: 19_092)
         try await server.start()
         _ = await race(timeout: .seconds(10)) {
             for await state in server.state { if case .listening = state { return } }
@@ -108,7 +108,7 @@ struct WSServerInboundTests {
         let frames = frame(0x1, Array("first".utf8)) + frame(0x1, Array("second".utf8)) + frame(0x8, [0x03, 0xE8])
 
         for round in 0..<1_000 {
-            let client = NWConnection(host: "127.0.0.1", port: 19_088, using: .tcp)
+            let client = NWConnection(host: "127.0.0.1", port: 19_092, using: .tcp)
             client.start(queue: .global())
             client.send(content: Data(upgrade.utf8), completion: .idempotent)
             // The 101: from here on the bytes are WebSocket frames.
