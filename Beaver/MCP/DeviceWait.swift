@@ -306,6 +306,10 @@ extension ToolContext {
                 + "Example: beaver_status() for the apps' deviceIds.")
         }
         guard !live.isEmpty else {
+            if let problem = host.acceptProblem {
+                throw ToolError("Beaver can't accept devices: \(problem), so it can't \(what). "
+                    + "Fix that first (beaver_status() says how), then ask the user to reopen the app.")
+            }
             throw ToolError("No device is connected, so Beaver can't \(what). Ask the user to open the app with "
                 + "remote assistance pointed at \(host.deviceURL ?? "Beaver"), then call beaver_status().")
         }

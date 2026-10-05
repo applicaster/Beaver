@@ -186,6 +186,10 @@ extension ToolContext {
         if let s = sessions.first {
             return ResolvedSession(id: s.id, session: s, how: .latest)
         }
+        if let problem = host.acceptProblem {
+            throw ToolError("Beaver has no sessions yet, and it can't accept devices: \(problem). "
+                + "Fix that first (beaver_status() says how), then ask the user to reopen the app.")
+        }
         throw ToolError("Beaver has no sessions yet. Ask the user to connect the app to Beaver"
             + (host.deviceURL.map { " at \($0)" } ?? "")
             + " (remote assistance on the device), then call beaver_status().")

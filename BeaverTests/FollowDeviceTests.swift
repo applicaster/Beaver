@@ -196,6 +196,25 @@ struct FollowDeviceTests {
         }
     }
 
+    @Test("Review focus: the server is down — device tools say Beaver can't accept devices, not \"No device\"")
+    func cannotAcceptDevices() async throws {
+        let store = try LogStore(source: .inMemory)
+        let ctx = makeContext(store, ui: HostSnapshot(serverState: "failed: Port 9080 is in use by another app"))
+        do {
+            _ = try await ctx.requireDevice(ToolArguments(), doing: "send a command", call: "commands_send(command: \"cmdlist\")")
+            Issue.record("expected an error")
+        } catch let error as ToolError {
+            #expect(error.message.hasPrefix("Beaver can't accept devices: Port 9080 is in use by another app, so it can't send a command."))
+            #expect(error.message.contains("beaver_status()"))
+        }
+        do {
+            _ = try await ctx.resolveSession(ToolArguments())
+            Issue.record("expected an error")
+        } catch let error as ToolError {
+            #expect(error.message.contains("can't accept devices: Port 9080 is in use"))
+        }
+    }
+
     private func session(_ id: Int64, app: String? = nil, model: String? = nil) -> Session {
         Session(id: id, startedAt: Date(), source: .live, appName: app, deviceModel: model, platform: "iOS")
     }
