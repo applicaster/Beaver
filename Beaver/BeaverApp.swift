@@ -439,7 +439,8 @@ extension AppEnvironment: SessionRouterHost {
     /// D97: another connection of the same app launch took this one's session.
     public func closeConnection(_ connection: UUID) async {
         await mcpClients.removeValue(forKey: connection)?.close()
-        await server.disconnect(connection)
+        // Not `disconnect`: its 4000 would park the app (D98).
+        await server.close(connection)
     }
 }
 

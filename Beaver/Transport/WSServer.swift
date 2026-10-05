@@ -487,6 +487,13 @@ public actor WSServer {
         networkQueue.asyncAfter(deadline: .now() + 1) { target.cancel() }
     }
 
+    /// Closes one client without 4000, so its app comes back (D97: another
+    /// connection of the same app launch took its session over). Ends
+    /// through `receive`, like the silence close.
+    public func close(_ connection: UUID) {
+        connections[connection]?.cancel()
+    }
+
     // MARK: - Outbound
 
     /// Send a command frame to one client. No-op when that connection is gone.

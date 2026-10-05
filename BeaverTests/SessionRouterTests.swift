@@ -5,11 +5,21 @@ import Foundation
 /// AppEnvironment's part in routing, recorded.
 @MainActor
 final class RouterHost: SessionRouterHost {
-    var live = LiveDevices() {
-        // Runs once, the moment a connection starts waiting for a replacement.
-        didSet { if !live.waiting.isEmpty, let hook = onDetach { onDetach = nil; hook(&live) } }
+    var live: LiveDevices {
+        get {
+            // Delete all lands just before the router's `n`-th look at `live`.
+            if let n = deleteAllBeforeRead { deleteAllBeforeRead = n > 1 ? n - 1 : nil; if n == 1 { _ = stored.detach { _ in true } } }
+            return stored
+        }
+        set {
+            stored = newValue
+            // Runs once, the moment a connection starts waiting for a replacement.
+            if !stored.waiting.isEmpty, let hook = onDetach { onDetach = nil; hook(&stored) }
+        }
     }
+    private var stored = LiveDevices()
     var onDetach: ((inout LiveDevices) -> Void)?
+    var deleteAllBeforeRead: Int?
     var viewingSessionId: Int64?
     var defaultDevice: DefaultDevice?
     var spoke: [Int64] = []
@@ -179,6 +189,43 @@ struct SessionRouterTests {
         await router.disconnected(c)
         #expect(host.live.sessionIds.isEmpty)
         #expect(try await store.sessions().isEmpty)
+    }
+
+    @Test("A Delete all while a reconnect reopens its session: the row is ended again and the frame waits (D75)")
+    func deleteAllDuringReopen() async throws {
+        let (a, old) = try await connect(launch: "L-1")
+        await router.disconnected(a)
+        let b = UUID()
+        await router.connected(b)
+        let fresh = try #require(host.live.session(for: b))
+        // route reads `live` for b's session (1) and for a live holder of the
+        // launch (2), awaits the reopen, then checks b's session (3): Delete
+        // all detaches every connection (BeaverApp's changes loop) right then.
+        host.deleteAllBeforeRead = 3
+
+        #expect(await router.route(handshakeFrame(launch: "L-1"), from: b) == nil)
+        #expect(host.deleteAllBeforeRead == nil, "the race ran")
+        #expect(!host.spoke.contains(fresh), "the window isn't sent to the deleted session")
+        #expect(try await store.sessions().first { $0.id == old }?.endedAt != nil)
+        #expect(host.live.waiting == [b])
+    }
+
+    @Test("A connection waiting for its replacement whose app launch came back on another connection is closed")
+    func replaceAfterLaunchCameBack() async throws {
+        let (x, s) = try await connect(launch: "L-1")
+        try await store.deleteSession(id: s)
+        let y = UUID()
+        // While X waits, the app reconnects as Y (its own session: X's is gone).
+        host.onDetach = {
+            _ = $0.connect(y, session: 99, viewing: nil)
+            $0.setHandshake(ClientHandshake(launchId: "L-1"), for: y)
+        }
+        #expect(await router.replaceDeleted(viewed: nil, where: { $0 == s }).isEmpty)
+        #expect(host.closed == [x])
+        #expect(host.live.sessionIds == [99])
+        #expect(try await store.sessions().isEmpty, "no replacement row is left behind")
+        await router.disconnected(x)
+        #expect(host.live.sessionIds == [99])
     }
 
     @Test("A replacement session gets the handshake and the window")

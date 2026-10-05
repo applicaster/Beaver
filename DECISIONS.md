@@ -3358,7 +3358,9 @@ the step order of D90.
   connection is let go first (its later close ends nothing, its MCP client
   is closed) and then closed (no 4000, D98), the new one moves onto the session, the empty
   new session is deleted, and the info line is added. An ended session is
-  reopened as before. The match no longer needs `device_uid`: the
+  reopened as before. A connection waiting for a replacement of its
+  deleted session (D75) whose launch came back on another connection
+  meanwhile is closed the same way instead of getting one. The match no longer needs `device_uid`: the
   `launchId` is a random UUID per process, and apps with no device id, or
   the model as one (iOS before it captured the UUID, Android with no UUID,
   web without one), never merged. `register` clients (D89) stay out. The

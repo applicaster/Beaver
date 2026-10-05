@@ -16,7 +16,7 @@ private final class Inbound {
         store = try LogStore(source: .inMemory)
         server = WSServer(port: port)
         router = SessionRouter(store: store, host: host)
-        host.onClose = { [server] in await server.disconnect($0) }
+        host.onClose = { [server] in await server.close($0) }  // as AppEnvironment.closeConnection
     }
 
     func start() async throws {
@@ -121,6 +121,9 @@ struct LaunchTakeoverSocketTests {
         try await b.send(.data(handshakeFrame(launch: "L1", device: "D1")))
         try await b.send(.data(eventFrame("b1")))
         #expect(await eventually { p.disconnected == 1 }, "Beaver closes the old socket")
+        // Not with 4000 (D98): that would park the app, which is still here.
+        _ = await race(timeout: .seconds(10)) { while (try? await a.receive()) != nil {} }
+        #expect(a.closeCode.rawValue != 4000)
         #expect(p.host.live.sessionIds == [session])
         try await waitForEvents(3, session: session, in: p.store)  // a1, the note, b1
 

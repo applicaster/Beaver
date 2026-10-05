@@ -51,6 +51,10 @@ public final class SessionRouter {
                let continued = await continueLaunch(connection, fresh: session, handshake: handshake) {
                 session = continued
             }
+            // A Delete all during an await above left the connection waiting
+            // for its replacement (D75), which keeps the handshake.
+            guard let current = host.live.session(for: connection) else { return nil }
+            session = current
             if host.viewingSessionId != session { host.didSpeak(session: session) }
         }
         return session
@@ -82,10 +86,12 @@ public final class SessionRouter {
         if let holder = host.live.connection(launchId: launchId, other: connection),
            let held = host.live.session(for: holder) {
             target = held
-        } else if let ended = try? await store.reopenSession(launchId: launchId, replacing: fresh),
-                  // ponytail: a Delete all during the await moved the connection; the
-                  // reopened row stays open until the next launch's sweep (D87).
-                  host.live.session(for: connection) == fresh {
+        } else if let ended = try? await store.reopenSession(launchId: launchId, replacing: fresh) {
+            // A Delete all during the await moved the connection: end the row again.
+            guard host.live.session(for: connection) == fresh else {
+                try? await store.endSession(ended)
+                return nil
+            }
             target = ended
         } else {
             return nil
@@ -109,13 +115,23 @@ public final class SessionRouter {
     /// Detaches first, before any await, so frames stop going to the deleted
     /// rows at once. The window follows the device it showed; with none, it
     /// shows the first fresh session. A device that leaves meanwhile gets its
-    /// fresh session dropped. Returns the fresh sessions of SDK clients that
-    /// sent a handshake, to ask what their app was built with (D85).
+    /// fresh session dropped. One whose app launch came back on another
+    /// connection meanwhile (D97) is closed: that connection carries on.
+    /// Returns the fresh sessions of SDK clients that sent a handshake, to
+    /// ask what their app was built with (D85).
     public func replaceDeleted(viewed: Int64?, where deleted: (Int64) -> Bool) async -> [Int64] {
         let viewedConnection = viewed.flatMap { host.live.connection(for: $0) }
         var identified: [Int64] = []
         for connection in host.live.detach(where: deleted) {
             guard let fresh = try? await store.createSession(source: .live) else { continue }
+            if let handshake = host.live.handshake(for: connection), !handshake.logsOnly,
+               let launchId = handshake.launchId,
+               host.live.connection(launchId: launchId, other: connection) != nil {
+                host.live.disconnect(connection)
+                try? await store.deleteSession(id: fresh.id)
+                await host.closeConnection(connection)
+                continue
+            }
             guard host.live.attach(connection, session: fresh.id) else {
                 try? await store.endSession(fresh.id, receivedFrames: false)
                 continue
