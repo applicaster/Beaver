@@ -10,8 +10,8 @@ import AppKit
 import SwiftUI
 
 struct DevicePopover: View {
-    /// D98: what Disconnect does depends on the app's X-Ray version.
-    static let disconnectHelp = "Disconnect this device. With quick-brick-xray 2.72.0 or later the app stays disconnected until it returns to the foreground or is relaunched; an older one reconnects within seconds, into the same session."
+    /// D98: what Disconnect does depends on the app's X-Ray SDK.
+    static let disconnectHelp = "Disconnect this device. An app whose X-Ray SDK supports close code 4000 stays disconnected until it returns to the foreground or is relaunched; older SDKs may reconnect on their own."
 
     let session: Session
     let isLive: Bool

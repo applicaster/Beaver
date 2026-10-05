@@ -229,8 +229,7 @@ or later.
 - Beaver never uses 4000 for its other closes: the silence timeout (§6.4),
   stopping or re-binding the server, or a dropped zombie socket. After those
   the app comes back on its own.
-- An SDK that doesn't know 4000 reconnects as before, into the same session
-  (§6.5).
+- An SDK that doesn't know 4000 reconnects as before (§6.6).
 
 ---
 
@@ -580,9 +579,10 @@ page, and after every reconnect.
 
    A reconnect of the same app run lands in the same session (5. above).
    After a Disconnect in Beaver (close code 4000, §3.4), an SDK with
-   quick-brick-xray 2.72.0 or later stays disconnected until the app returns
-   to the foreground, the logger is re-enabled, or the app is relaunched;
-   an older SDK reconnects within seconds, into the same session.
+   quick-brick-xray <version TBD — the release carrying the iOS/web and Android 4000 parking PRs> or later stays
+   disconnected until the app returns to the foreground, the logger is
+   re-enabled, or the app is relaunched; an older SDK reconnects as
+   described above (Android before 2.64.2 not at all).
 
 ---
 

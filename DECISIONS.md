@@ -2589,7 +2589,7 @@ won't decode, and the feed starts unfiltered once.
   closes that one connection; the session ends as on any drop. *Amended by
   D98:* the close carries code 4000, and an SDK that knows it stays away
   until the app returns to the foreground or relaunches; an older SDK
-  reconnects into the same session (D97), not a new one.
+  reconnects as before (PROTOCOL.md §6.6).
 - **Following a restart (D66)** with several devices: same fingerprint (app,
   model, platform), else the one session that just came up. Two identical
   builds look alike until the SDK sends a device id — it does; see D77.
@@ -3341,7 +3341,7 @@ the step order of D90.
   so Disconnect looked like it did nothing. A close code needs no new frame
   type, and older SDKs that ignore it behave as before.
 - **Client side:** the quick-brick-xray PRs for iOS/web and Android park the
-  sink on 4000 (X-Ray 2.72.0 or later). Beaver 4.22.0 or later sends it.
+  sink on 4000 (quick-brick-xray <version TBD — the release carrying the iOS/web and Android 4000 parking PRs>). Beaver 4.22.0 or later sends it.
 - **Alternatives:** a `command` frame asking the app to stop (a new frame
   type, and lost if the app is mid-reconnect); a cooldown in Beaver that
   refuses the device's reconnects (the app keeps retrying and logs warnings);
