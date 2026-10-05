@@ -132,7 +132,7 @@ port, notifications), Zapp (token), About (version, What's New, updates).
    Beaver X.Y.Z" with every version since the last one you ran (nothing on
    a fresh install). Beaver → **What's New…** and Settings → About show it
    again.
-18. A device that can't connect (Beaver 4.21.2 or later): with nothing
+18. A device that can't connect (Beaver 4.22.2 or later): with nothing
    connected, the empty screen shows the `ws://` address(es) to connect to,
    the last connection that went wrong ("… sent nothing for 15s; closed",
    "didn't finish the WebSocket handshake", "failed before the WebSocket
