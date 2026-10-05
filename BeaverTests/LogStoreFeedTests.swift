@@ -6,6 +6,7 @@
 import Testing
 import Foundation
 import GRDB
+import SQLite3
 @testable import BeaverCore
 
 @Suite("LogStore feed")
@@ -96,11 +97,19 @@ struct LogStoreFeedTests {
 
     @Test("A batch that fails to save is announced, not just printed")
     func flushFailureIsBroadcast() async throws {
-        let store = try LogStore(source: .inMemory)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("flush-fails-\(UUID()).sqlite")
+        defer { for suffix in ["", "-journal", "-wal", "-shm"] { try? FileManager.default.removeItem(atPath: url.path + suffix) } }
+        let store = try LogStore(source: .onDisk(url))
+        let session = try await store.createSession(source: .live)
         let stream = await store.changes()
-        // No such session: the foreign key rejects the insert.
+        // Another connection holds the file: the write fails. (A row for a
+        // deleted session is skipped instead, see FlushTests.)
+        var other: OpaquePointer?
+        #expect(sqlite3_open(url.path, &other) == SQLITE_OK)
+        #expect(sqlite3_exec(other, "BEGIN EXCLUSIVE", nil, nil, nil) == SQLITE_OK)
+        defer { sqlite3_exec(other, "ROLLBACK", nil, nil, nil); sqlite3_close(other) }
         await store.append(DecodedEvent(timestampMillis: 1, level: .info, subsystem: "s", category: "",
-                                        message: "lost", dataJSON: nil, contextJSON: nil), to: 999)
+                                        message: "lost", dataJSON: nil, contextJSON: nil), to: session.id)
         let message = try await withThrowingTaskGroup(of: String?.self) { group in
             group.addTask {
                 for await change in stream {

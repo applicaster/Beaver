@@ -78,21 +78,35 @@ private func eventually(_ timeout: Duration = .seconds(10),
     return try await condition()
 }
 
+/// Its own session: `URLSession.shared` allows 6 connections per host, and a
+/// socket over the limit waits for a slot for ever.
+private let wsSession: URLSession = {
+    let config = URLSessionConfiguration.ephemeral
+    config.httpMaximumConnectionsPerHost = 64
+    return URLSession(configuration: config)
+}()
+
+private struct SocketDidNotOpen: Error {}
+
 private func socket(_ port: UInt16) async throws -> URLSessionWebSocketTask {
-    let c = URLSession.shared.webSocketTask(with: URL(string: "ws://127.0.0.1:\(port)")!)
+    let c = wsSession.webSocketTask(with: URL(string: "ws://127.0.0.1:\(port)")!)
     c.resume()
-    _ = try await c.receive()  // Beaver's handshake
+    // Beaver's handshake. A socket that never opens fails the test, not hangs it.
+    guard await race(timeout: .seconds(10), { (try? await c.receive()) != nil }) == true else {
+        c.cancel()
+        throw SocketDidNotOpen()
+    }
     return c
 }
 
-/// Ports away from the other WS suites (19080-19090).
+/// Ports 19600-19609 are this suite's; other WS suites use 19080-19098, 19400s, 19500s.
 @Suite("One app launch, one session, over a socket (D97)", .serialized, .timeLimit(.minutes(2)))
 @MainActor
 struct LaunchTakeoverSocketTests {
 
     @Test("Same launch reconnects while the old socket is still open: one session, the old socket closed")
     func reconnectWhileOldOpen() async throws {
-        let port: UInt16 = 19_461
+        let port: UInt16 = 19_600
         let p = try Inbound(port: port)
         try await p.start()
         let a = try await socket(port)
@@ -126,7 +140,7 @@ struct LaunchTakeoverSocketTests {
 
     @Test("20 overlapping reconnects of one launch stay one session with every event")
     func overlappingReconnects() async throws {
-        let port: UInt16 = 19_462
+        let port: UInt16 = 19_601
         let p = try Inbound(port: port)
         try await p.start()
         var sockets: [URLSessionWebSocketTask] = []
@@ -138,6 +152,8 @@ struct LaunchTakeoverSocketTests {
             #expect(await eventually { p.disconnected == i && p.host.live.handshakes.count == 1 })
             let session = try #require(p.host.live.sessionIds.first)
             try await waitForEvents(2 * i + 1, session: session, in: p.store)  // i notes
+            // Beaver already closed the previous one; free the client's end too.
+            sockets.last?.cancel()
             sockets.append(c)
         }
         let session = try #require(p.host.live.sessionIds.first)

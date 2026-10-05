@@ -5,7 +5,11 @@ import Foundation
 /// AppEnvironment's part in routing, recorded.
 @MainActor
 final class RouterHost: SessionRouterHost {
-    var live = LiveDevices()
+    var live = LiveDevices() {
+        // Runs once, the moment a connection starts waiting for a replacement.
+        didSet { if !live.waiting.isEmpty, let hook = onDetach { onDetach = nil; hook(&live) } }
+    }
+    var onDetach: ((inout LiveDevices) -> Void)?
     var viewingSessionId: Int64?
     var defaultDevice: DefaultDevice?
     var spoke: [Int64] = []
@@ -168,11 +172,12 @@ struct SessionRouterTests {
     func replaceAfterLeaving() async throws {
         let (c, s) = try await connect(launch: "L-1")
         try await store.deleteSession(id: s)
-        let replacing = Task { await router.replaceDeleted(viewed: nil, where: { $0 == s }) }
-        while host.live.waiting.isEmpty { await Task.yield() }
-        // The replacement is being created; the device leaves meanwhile.
+        // Detached, its replacement not yet created: the device leaves (the
+        // `LiveDevices` half of `disconnected`, which can't run mid-mutation).
+        host.onDetach = { $0.disconnect(c) }
+        #expect(await router.replaceDeleted(viewed: nil, where: { $0 == s }).isEmpty)
         await router.disconnected(c)
-        #expect(await replacing.value.isEmpty)
+        #expect(host.live.sessionIds.isEmpty)
         #expect(try await store.sessions().isEmpty)
     }
 
