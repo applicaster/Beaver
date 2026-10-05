@@ -12,6 +12,8 @@ does the same for a manual release.
 
 ## [Unreleased]
 
+## [4.22.3] - 2026-10-05
+
 ### Fixed
 - **Several devices and reconnects: agents reach the right app.** Since a
   reconnect continues an app launch's session (4.21.0), the newest session is
@@ -984,7 +986,7 @@ end-to-end. No code-visible changes versus 1.0.0.
 
 Initial Beaver release. See `DECISIONS.md` D1–D20 for the design history.
 
-[Unreleased]: https://github.com/applicaster/Beaver/compare/4.22.2...HEAD
+[Unreleased]: https://github.com/applicaster/Beaver/compare/4.22.3...HEAD
 [2.0.1]: https://github.com/applicaster/Beaver/releases/tag/2.0.1
 [2.0.0]: https://github.com/applicaster/Beaver/releases/tag/2.0.0
 [1.0.2]: https://github.com/applicaster/Beaver/releases/tag/1.0.2
