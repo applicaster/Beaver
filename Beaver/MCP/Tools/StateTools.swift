@@ -24,7 +24,9 @@ enum StateTools {
         let lines = hints.map { h in
             [h.syntax ?? h.name, h.description].compactMap { $0 }.joined(separator: " — ")
         }
-        let nextSuggestions = hints.first.map { h in ["logs_query(filter: {search: \"\(h.name)\"}) to see what a command logged"] } ?? []
+        let nextSuggestions = hints.first.map { h in
+            ["logs_query(sessionId: \(live), filter: {search: \"\(h.name)\"}) to see what a command logged"]
+        } ?? []
         return ToolResult(
             summary: "The app accepts \(hints.count) command(s).",
             body: lines.joined(separator: "\n"),

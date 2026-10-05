@@ -13,7 +13,7 @@ enum CommandTools {
     static let send: MCPTool = MCPTool(
         name: "commands_send",
         title: "Send a command",
-        description: "Use to make the connected app do something: send one of the commands from commands_list, exactly as the user would type it in Beaver's command bar. With collectLogsMs, also returns the events logged in that window, following the app into its new session if the command restarts it. Beaver sends any command; it can't know which ones restart the app.",
+        description: "Use to make the connected app do something: send one of the commands from commands_list, exactly as the user would type it in Beaver's command bar. With collectLogsMs, also returns the events logged in that window, following the app into its new session if the command restarts its process (an in-app reload stays in the same session). Beaver sends any command; it can't know which ones restart the app.",
         kind: .change,
         inputSchema: ToolSchema.object([
             "command": ToolSchema.string("The command line, e.g. \"storage.list\" or \"debug.flag.on newPlayer\"."),
@@ -36,7 +36,10 @@ enum CommandTools {
                                  : ResolvedFilter(filter: .none, notes: [])
         let before = try await ctx.store.latestEventId(sessionId: session.id) ?? 0
 
-        await ctx.device.send(command: command, to: live)
+        guard await ctx.device.send(command: command, to: live) else {
+            throw ToolError("Not sent: \(target) disconnected before \"\(command)\" went out, so nothing ran. "
+                + "Example: beaver_status() to see whether it is back, then send it again.")
+        }
         await ctx.ui.didSendCommand(command)
         await ctx.watchForDisconnect(after: command, sessionId: session.id)
 
@@ -45,7 +48,7 @@ enum CommandTools {
                 summary: "Sent \"\(command)\" to \(target) (session \(session.label)).",
                 structured: ["sent": .string(command), "sessionId": JSON(session.id), "afterId": JSON(before)],
                 next: ["logs_wait(sessionId: \(session.id), afterId: \(before), timeoutMs: 15000) for what it logs "
-                       + "(after a restart, beaver_status() shows its new session)",
+                       + "(\(ToolText.restartNote))",
                        "commands_send(deviceId: \"\(live)\", command: \"\(command)\", collectLogsMs: 5000) to send and collect in one call"],
                 sessionId: session.id
             )

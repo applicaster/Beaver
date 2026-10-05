@@ -180,10 +180,10 @@ enum LogTools {
     static let wait: MCPTool = MCPTool(
         name: "logs_wait",
         title: "Wait for logs",
-        description: "Use after you or the user do something on the device, to wait until a matching event is logged. Returns as soon as one arrives, or when timeoutMs passes (default 15000, max 60000). Pass afterId from an earlier result; without it, only events from now on count. Without sessionId it follows the device: if the app restarts it carries on in the new session and says so (sessionChanged). For minutes or longer, use watch_start.",
+        description: "Use after you or the user do something on the device, to wait until a matching event is logged. Returns as soon as one arrives, or when timeoutMs passes (default 15000, max 60000). Pass afterId from an earlier result; without it, only events from now on count. Without sessionId it reads the default device's live session (else the viewed one) and follows the device: if the app process restarts it carries on in the new session and says so (sessionChanged); a reconnect or an in-app reload stays in the same session. For minutes or longer, use watch_start.",
         kind: .read,
         inputSchema: ToolSchema.object([
-            "sessionId": ToolSchema.integer("Stay on this session; if it ends the call returns sessionEnded. Omit it to follow the device."),
+            "sessionId": ToolSchema.integer("Stay on this session; if it ends (the device isn't back in it within 3 s) the call returns sessionEnded. Omit it to follow the device."),
             "filter": ToolSchema.filter,
             "afterId": ToolSchema.integer("Only events after this id. Default: the latest event now."),
             "timeoutMs": ToolSchema.integer("How long to wait. Default 15000, max 60000."),
@@ -219,7 +219,7 @@ enum LogTools {
                 summary: "\(w.total) new event(s) matched in session \(s.label) after #\(start) (\(ToolText.describe(f.filter))).\(resolved)\(follow)",
                 body: w.events.map(ToolText.eventLine).joined(separator: "\n"),
                 structured: .object(structured),
-                next: ["logs_get(ids: [\(w.events[0].id)])", "logs_wait(afterId: \(last.id), …) for the next one"],
+                next: ["logs_get(ids: [\(w.events[0].id)])", "logs_wait(sessionId: \(w.sessionId), afterId: \(last.id), …) for the next one"],
                 sessionId: w.sessionId
             )
         }
@@ -229,7 +229,8 @@ enum LogTools {
             structured: .object(structured),
             next: w.sessionEnded
                 ? ["beaver_status() to see the device's new session", "logs_wait(…) without sessionId to follow the device"]
-                : ["logs_wait(afterId: \(start), …) to keep waiting", "logs_query(afterId: \(start)) to see what did arrive"],
+                : ["logs_wait(sessionId: \(w.sessionId), afterId: \(start), …) to keep waiting",
+                   "logs_query(sessionId: \(w.sessionId), afterId: \(start)) to see what did arrive"],
             sessionId: w.sessionId
         )
     }

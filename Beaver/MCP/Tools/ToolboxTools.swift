@@ -20,7 +20,7 @@ enum ToolboxTools {
     static let setDefault: MCPTool = MCPTool(
         name: "devices_set_default",
         title: "Set the default device",
-        description: "Use when several apps are connected and you will work with one of them: device tools (commands_send, storage_set, toolboxes_list, tools_call, …) then use it when you omit deviceId. It follows the app when it restarts. Pass deviceId: null to clear it. The user can set it too, in the device popover.",
+        description: "Use when several apps are connected and you will work with one of them: device tools (commands_send, storage_set, toolboxes_list, tools_call, …) then use it when you omit deviceId, and reads and waits (logs_query, logs_wait, …) when you omit sessionId. It follows the app when it restarts. Pass deviceId: null to clear it. The user can set it too, in the device popover.",
         kind: .change,
         idempotent: true,
         inputSchema: ToolSchema.object([
@@ -46,7 +46,7 @@ enum ToolboxTools {
         let device = DefaultDevice(session: session)
         await ctx.ui.setDefaultDevice(device)
         let lasts = if case .uid = device { "it stays the default when the app restarts" }
-                    else { "this app sends no device id, so the default ends when it reconnects" }
+                    else { "this app sends no device id, so the default ends when it disconnects" }
         return ToolResult(
             summary: "Default device: \(StatusTools.describeDevice(session)) (deviceId \"\(id)\"); \(lasts).",
             structured: ["default": .string(String(id)), "uid": JSON(session.deviceUID)],
@@ -193,7 +193,7 @@ enum ToolboxTools {
             body: body,
             structured: .object(structured),
             next: ["logs_wait(sessionId: \(id), afterId: \(before), timeoutMs: 15000) for what the app logged "
-                   + "(after a restart, beaver_status() shows its new session)"],
+                   + "(\(ToolText.restartNote))"],
             sessionId: id,
             journalKind: risky ? .destructive : nil
         )

@@ -55,22 +55,23 @@ public actor Watches {
 
     func setTask(_ task: Task<Void, Never>, for name: String) { tasks[name] = task }
 
-    /// The disconnect watcher of commands_send and tools_call: one at a
-    /// time, the latest command wins. `token` says whose it is.
-    private var disconnectWatcher: (token: UUID, task: Task<Void, Never>)?
+    /// The disconnect watchers of commands_send and tools_call: one per
+    /// device (its session when the command went out), the latest command
+    /// to it wins. `token` says whose it is.
+    private var disconnectWatchers: [Int64: (token: UUID, task: Task<Void, Never>)] = [:]
 
-    var hasDisconnectWatcher: Bool { disconnectWatcher != nil }
+    var hasDisconnectWatcher: Bool { !disconnectWatchers.isEmpty }
 
-    func setDisconnectWatcher(token: UUID, _ task: Task<Void, Never>) {
-        disconnectWatcher?.task.cancel()
-        disconnectWatcher = (token, task)
+    func setDisconnectWatcher(token: UUID, sessionId: Int64, _ task: Task<Void, Never>) {
+        disconnectWatchers[sessionId]?.task.cancel()
+        disconnectWatchers[sessionId] = (token, task)
     }
 
     /// Stops the watcher `token` started; a later command's is left alone.
     func cancelDisconnectWatcher(_ token: UUID) {
-        guard disconnectWatcher?.token == token else { return }
-        disconnectWatcher?.task.cancel()
-        disconnectWatcher = nil
+        guard let (sessionId, watcher) = disconnectWatchers.first(where: { $0.value.token == token }) else { return }
+        watcher.task.cancel()
+        disconnectWatchers[sessionId] = nil
     }
 
     /// `false` when the watch is gone, was replaced (a different
@@ -100,11 +101,16 @@ extension ToolContext {
     static let watchPollInterval: Duration = .milliseconds(500)
 
     /// The start session after the start id, plus — for a following watch —
-    /// every later live session from its first event (session ids grow).
+    /// the same device's later sessions from their first event: its
+    /// restarts (a reconnect stays in the start session, D97). Other
+    /// devices' sessions never count (`Session.isSameDevice`, the rule the
+    /// notify task's `DeviceFollower` is held to).
     func segments(of w: Watches.Watch) async throws -> [(sessionId: Int64, afterId: Int64)] {
         var segments = [(sessionId: w.sessionId, afterId: w.startId)]
         if w.follows {
-            let later = try await store.sessions().filter { $0.source == .live && $0.id > w.sessionId }
+            let sessions = try await store.sessions()
+            guard let start = sessions.first(where: { $0.id == w.sessionId }) else { return segments }
+            let later = sessions.filter { $0.source == .live && $0.id > w.sessionId && start.isSameDevice($0) }
             segments += later.map(\.id).sorted().map { (sessionId: $0, afterId: Int64(0)) }
         }
         return segments
@@ -170,10 +176,16 @@ extension ToolContext {
                 try? await Task.sleep(for: Self.watchPollInterval)
                 guard let current = await watches.get(w.name), current.startedAt == w.startedAt,
                       current.firedAt == nil else { return }
-                if w.follows,
-                   case .moved(let next)? = await device.step(live: await ui.snapshot().liveSessionIds, store: store),
-                   !segments.contains(where: { $0.sessionId == next }) {
-                    segments.append(WaitSegment(sessionId: next, afterId: 0))
+                if w.follows {
+                    _ = await device.step(live: await ui.snapshot().liveSessionIds, store: store)
+                    // Checked on every poll, not only when the follower moves: an
+                    // app's identity can land after its session came up (a sink
+                    // without a handshake, a late one), and only then does it pass.
+                    let next = device.current
+                    if next != w.sessionId, !segments.contains(where: { $0.sessionId == next }),
+                       await isLaterSession(next, ofSameDeviceAs: w.sessionId) {
+                        segments.append(WaitSegment(sessionId: next, afterId: 0))
+                    }
                 }
                 for (i, s) in segments.enumerated() {
                     // The newest match after the cursor, and how many there are.
@@ -204,5 +216,14 @@ extension ToolContext {
                 return
             }
         }
+    }
+
+    /// `segments(of:)`'s rule for one session, so the notification and
+    /// watch_status count the same sessions.
+    private func isLaterSession(_ id: Int64, ofSameDeviceAs startId: Int64) async -> Bool {
+        guard id > startId, let sessions = try? await store.sessions(),
+              let start = sessions.first(where: { $0.id == startId }),
+              let next = sessions.first(where: { $0.id == id }) else { return false }
+        return next.source == .live && start.isSameDevice(next)
     }
 }

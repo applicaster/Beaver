@@ -399,6 +399,8 @@ final class StoragesViewModel {
         case notApplied
         /// No snapshot arrived — disconnected or the SDK is stuck.
         case noAnswer
+        /// Nothing went out: the device disconnected.
+        case notSent
     }
 
     /// Send an edit and read it back through `StorageCommand.sendAndVerify`,
@@ -424,6 +426,7 @@ final class StoragesViewModel {
         case .applied: return .applied(undo: undo)
         case .notApplied: return .notApplied
         case .noAnswer: return .noAnswer
+        case .notSent: return .notSent
         }
     }
 

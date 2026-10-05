@@ -160,9 +160,13 @@ public final class AppEnvironment {
 
     /// viewingSessionId stays — the user can keep reading the now-ended
     /// session. Returns the session that ended.
+    /// A `.session` default ends with its session: an app without a
+    /// handshake reconnects in a new one (D76).
     @discardableResult
     public func didDisconnect(_ connection: UUID) -> Int64? {
-        live.disconnect(connection)
+        let ended = live.disconnect(connection)
+        if let ended, defaultDevice == .session(ended) { defaultDevice = nil }
+        return ended
     }
 
     /// Re-query the event count for the viewing session. Called on
@@ -182,14 +186,17 @@ public final class AppEnvironment {
 }
 
 extension AppEnvironment: DeviceLink {
-    /// Sends to the connection that writes `sessionId`; no-op once it's gone,
-    /// and for a logs-only client (D89), which reads nothing: every command —
-    /// on connect, from the Storages tab, the command bar, an agent — ends here.
-    nonisolated public func send(command: String, to sessionId: Int64) async {
+    /// Sends to the connection that writes `sessionId`; false (nothing sent)
+    /// once it's gone, and for a logs-only client (D89), which reads nothing:
+    /// every command — on connect, from the Storages tab, the command bar, an
+    /// agent — ends here.
+    @discardableResult
+    nonisolated public func send(command: String, to sessionId: Int64) async -> Bool {
         guard let connection = await MainActor.run(body: {
             self.live.logsOnlySessions.contains(sessionId) ? nil : self.live.connection(for: sessionId)
-        }) else { return }
+        }) else { return false }
         await server.send(command: command, to: connection)
+        return true
     }
 
     /// `cmdlist` for the command-help popover; its reply skips the Log feed.

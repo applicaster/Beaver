@@ -12,6 +12,43 @@ does the same for a manual release.
 
 ## [Unreleased]
 
+### Fixed
+- **Several devices and reconnects: agents reach the right app.** Since a
+  reconnect continues an app launch's session (4.21.0), the newest session is
+  no longer the one with the highest number; Beaver now picks the most
+  recently active one wherever it has to choose. Fixes for agents:
+  - a wait without `sessionId` no longer jumps to the short-lived session a
+    reconnect opens, and no longer reports a deleted session and a
+    disconnect when the app came back into its own session;
+  - a wait on a given `sessionId` gives the device 3 s to come back into it
+    before it says `sessionEnded`;
+  - a following watch counts only its own device's later sessions, so
+    `watch_status` and the notification agree (also for apps that name
+    themselves only after their first logs); another device connecting
+    doesn't add to it;
+  - without `sessionId`, reads and waits use the default device's session
+    when one is set (where commands without `deviceId` go; while it restarts,
+    its latest session, followed into the new one), and `logs_wait`'s
+    and `commands_list`'s Next suggestions keep the `sessionId`;
+  - `commands_send` to an app whose connection just went away says "Not sent"
+    instead of "Sent"; `storage_set` / `storage_delete` report `notSent`;
+  - device tools say "Beaver can't accept devices: …" instead of "No device
+    is connected" when Beaver's WebSocket server is stopped or failed;
+  - a default device set for an app without a device id ends when it
+    disconnects, instead of failing every later call;
+  - a command to one app no longer stops watching another app's command for
+    a drop; a device back in the same session is journaled as back, not "not
+    back after 30 s";
+  - texts no longer promise that a restart gives a new session: an in-app
+    reload (iOS `app.restart`, a React Native JS reload) stays in the same
+    session, only a process restart doesn't.
+- **Toolboxes load again after a reconnect.** The Sessions details showed a
+  spinner forever when the session went live again; Reload and Retry now
+  belong to the session they were pressed for.
+- **Deleting a session that came back live is refused.** If the app
+  reconnects into the session while the Delete dialog is open, Beaver says so
+  instead of deleting the live session; `sessions_delete` checks the same.
+
 ## [4.22.2] - 2026-10-05
 
 ### Fixed

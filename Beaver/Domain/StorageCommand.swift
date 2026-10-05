@@ -122,6 +122,8 @@ public enum StorageCommand {
         case notApplied
         /// No snapshot arrived — disconnected, or the SDK is stuck.
         case noAnswer
+        /// Nothing went out: the device disconnected.
+        case notSent
     }
 
     /// Sends an edit and reads it back. The SDK reports set / delete only as
@@ -134,7 +136,7 @@ public enum StorageCommand {
                                      key: String, expected: String?, sessionId: Int64,
                                      store: LogStore, device: any DeviceLink) async -> Outcome {
         let sentAt = wholeMillisecondNow()
-        await device.send(command: command, to: sessionId)
+        guard await device.send(command: command, to: sessionId) else { return .notSent }
         await device.send(command: "storage.list", to: sessionId)
         var heardBack = false
         for _ in 0..<12 {
@@ -151,10 +153,11 @@ public enum StorageCommand {
     /// Sends `storage.list` and waits for the answer: the layers of
     /// `layers` that have a snapshot taken after the request. One `storage`
     /// frame carries every layer, so once one lands the rest get 100 ms.
+    /// Nil when the request didn't go out (the device disconnected).
     public static func refresh(_ layers: [StorageSnapshot.Namespace], sessionId: Int64, timeout: Duration,
-                               store: LogStore, device: any DeviceLink) async -> Set<StorageSnapshot.Namespace> {
+                               store: LogStore, device: any DeviceLink) async -> Set<StorageSnapshot.Namespace>? {
         let sentAt = wholeMillisecondNow()
-        await device.send(command: "storage.list", to: sessionId)
+        guard await device.send(command: "storage.list", to: sessionId) else { return nil }
         func fresh() async -> Set<StorageSnapshot.Namespace> {
             var found = Set<StorageSnapshot.Namespace>()
             for layer in layers {

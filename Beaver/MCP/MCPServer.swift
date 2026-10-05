@@ -26,17 +26,18 @@ public struct MCPServer: Sendable {
         (sessions_list) and log files the user has (sessions_import). For what's broken in a session, \
         issues_list: its warnings and errors grouped by signature, each with a filter for its events. When it works in one session and \
         not in another (app versions, devices), sessions_compare(a: <works>, b: <fails>). Omitting sessionId means the \
-        live session (with several, the viewed one if live, else the newest), else the one the user \
-        is viewing, else the most recent. Before filtering by \
+        live session (with several: the default device's, else the viewed one if live, else the most \
+        recently active), else the one the user is viewing, else the most recent. Before filtering by \
         subsystem or category call logs_facets: names are namespaced and you will not guess them \
         (globs like "*auth*" and name fragments work, and results say what they matched). A filter's \
         search is a query in the Log feed's syntax, one line for many conditions: \
         "level:error sub:*auth* -heartbeat" (beaver_guide topic query). Use \
         since: "5m" or afterId to look at recent events. To see what an action causes, send it with \
         commands_send and collectLogsMs, or note latestEventId, act (commands_send, storage_set), \
-        then logs_wait with afterId. Beaver sends any command and can't know which ones restart the \
-        app: without sessionId, waits follow the device into its new session and say \
-        sessionChanged; pass sessionId to stay on one session. Storage values can't contain \
+        then logs_wait with the sessionId and afterId the action's result gives. A session is one app \
+        process: a reconnect or an in-app reload stays in it. Beaver sends any command and can't know \
+        which ones restart the process: without sessionId, waits follow the device into its new \
+        session and say sessionChanged; pass sessionId to stay on one session. Storage values can't contain \
         spaces. To follow something for minutes or hours use watch_start and check watch_status \
         later: you are not woken, the user is notified. Rows are one line each; full payloads come \
         from logs_get and network_get. Network bodies are capped at 100 KB by the SDK and some \

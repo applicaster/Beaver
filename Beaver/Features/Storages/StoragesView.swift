@@ -89,6 +89,8 @@ private func sendStorageEdit(_ edit: StoragesViewModel.Edit,
             toasts.error("Device didn't apply this — see the log")
         case .noAnswer:
             toasts.error("No reply from the device — see the log")
+        case .notSent:
+            toasts.error("Not sent — the device disconnected")
         }
     }
 }

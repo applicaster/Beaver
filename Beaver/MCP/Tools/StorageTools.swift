@@ -92,8 +92,10 @@ enum StorageTools {
             return " Not refreshed: this device only sends logs (a smart TV read over DevTools), so it has no storage to send."
         }
         let timeout = min(30_000, max(0, try args.int("timeoutMs") ?? 5_000))
-        let fresh = await StorageCommand.refresh(layers, sessionId: s.id, timeout: .milliseconds(timeout),
-                                                 store: ctx.store, device: ctx.device)
+        guard let fresh = await StorageCommand.refresh(layers, sessionId: s.id, timeout: .milliseconds(timeout),
+                                                       store: ctx.store, device: ctx.device) else {
+            return " Not refreshed: the device disconnected; this is the last stored snapshot."
+        }
         if fresh.isEmpty { return " The app didn't answer within \(timeout) ms; this is the last stored snapshot." }
         let missing = layers.filter { !fresh.contains($0) }
         let app = StatusTools.describeDevice(s.session)
@@ -360,6 +362,7 @@ enum StorageTools {
         case .applied: "\(request): applied (Beaver re-read the app's storage and saw it)."
         case .notApplied: "\(request): not applied — the app sent its storage back without the change."
         case .noAnswer: "\(request): sent, but the app didn't send its storage back within 3 s, so Beaver can't tell whether it applied."
+        case .notSent: "\(request): not sent — the device disconnected."
         }
         return ToolResult(
             summary: summary,
@@ -369,7 +372,8 @@ enum StorageTools {
             next: outcome == .applied
                 ? ["storage_snapshot(sessionId: \(live), layer: \"\(layer.wireKey)\")",
                    "logs_wait(sessionId: \(live), afterId: \(before), filter: {search: \"\(key)\"}, timeoutMs: 15000) "
-                       + "for what the app does with it (after a restart, beaver_status() shows its new session)"]
+                       + "for what the app does with it (\(ToolText.restartNote))"]
+                : outcome == .notSent ? ["beaver_status() to see whether it is back"]
                 : ["logs_query(sessionId: \(live), filter: {search: \"\(key)\"}, since: \"1m\") for the app's own message about it",
                    "beaver_status()"],
             sessionId: live

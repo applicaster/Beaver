@@ -174,7 +174,7 @@ port, notifications), Zapp (token), About (version, What's New, updates).
 | `commands_list` | Commands a connected app accepts (`deviceId` when several are connected) |
 | `devices_disconnect` | Close a connected app's connection (the Disconnect button); its session ends. An app whose X-Ray SDK supports close code 4000 stays away until foregrounded or relaunched; older SDKs may reconnect on their own. With several apps, `deviceId` is required: the default doesn't count |
 | `devices_connect_tv` | Read a smart TV app (Vizio, Vidaa, …) over DevTools from its IP and port, like Connect a TV…; it becomes a device that only sends logs. `devices_disconnect` stops it |
-| `devices_set_default` | Make one connected app the default for device tools (follows it across restarts); `null` clears |
+| `devices_set_default` | Make one connected app the default for device tools, and for reads and waits without `sessionId` (follows it across restarts); `null` clears |
 | `toolboxes_list` | An app's toolboxes, or one toolbox's tools with their arguments; `deviceId: "beaver"` for Beaver's own |
 | `tools_call` | Run one tool from `toolboxes_list` on the app (or on Beaver) and get its answer; it is marked destructive, so clients that honor destructiveHint ask the user to confirm (app tools can delete data or restart the app) |
 | `commands_send` | Send a command to the app; optionally collect the logs it causes, following a restart |
@@ -195,13 +195,19 @@ port, notifications), Zapp (token), About (version, What's New, updates).
 | `beaver_guide` | These recipes, by topic |
 
 Conventions: omitting `sessionId` means the live session (with several
-devices, the viewed one if it is live, else the newest), else the viewed one,
-else the most recent — and during a wait it follows the device into its new
-session if the app restarts (`sessionChanged`); a given `sessionId` stays put
-(`sessionEnded`). With an SDK that sends a launch id (Beaver 4.21.0 or
-later), an app that only reconnected keeps its session, so a wait can see
-`sessionEnded` and the same session go live again; only a restart is
-`sessionChanged`. Subsystem and category values accept `*` globs, name
+devices: the default device's if one is set — while it restarts, its latest
+session, followed into the new one — else the viewed one if it is live, else
+the most recently active), else the viewed one, else the most
+recent — and during a wait it follows the device into its new session if the
+app process restarts (`sessionChanged`); a given `sessionId` stays put
+(`sessionEnded`). A session is one app process: with an SDK that sends a
+launch id (Beaver 4.21.0 or later), an app that reconnected (background, a
+network blip) or reloaded in-app (iOS `app.restart`, a React Native JS
+reload) keeps its session. A wait on a given `sessionId` gives a dropped
+device 3 s to come back into it before it says `sessionEnded`; only a process
+restart is `sessionChanged`. The results of `commands_send`, `storage_set`
+and `tools_call` give the `sessionId` to wait on: pass it on, so the wait
+reads the app the action went to. Subsystem and category values accept `*` globs, name
 fragments and any case; results say what they matched. A filter's `search`
 is a query in the Log feed's syntax, the same as zapp-support's web logger
 (recipe `query`); `searchIsRegex: true` takes it as one regular expression
@@ -264,11 +270,11 @@ and in zapp-support's web logger (Beaver 4.14.0 or later). Case never matters.
 
 ### wait — see what an action causes
 
-1. `beaver_status()` — note `latestEventId` of the device.
+1. `beaver_status()` — note the device's `id` and `latestEventId`.
 2. Ask the user to do the action on the device, or do it yourself with
-   `commands_send` / `storage_set`.
-3. `logs_wait(afterId: <latestEventId>, filter: {search: "…"}, timeoutMs: 30000)`.
-4. Timed out? `logs_query(afterId: <latestEventId>)` shows what did arrive.
+   `commands_send` / `storage_set` (their results give `sessionId` and `afterId`).
+3. `logs_wait(sessionId: <id>, afterId: <latestEventId>, filter: {search: "…"}, timeoutMs: 30000)`.
+4. Timed out? `logs_query(sessionId: <id>, afterId: <latestEventId>)` shows what did arrive.
 
 ### network — a failing request
 
@@ -304,7 +310,8 @@ and in zapp-support's web logger (Beaver 4.14.0 or later). Case never matters.
    sessions always do).
 2. `storage_set(layer: "local", key: "onboardingDone", value: "false")` —
    `applied` means Beaver re-read storage and saw it; `notApplied` means the
-   app kept the old value; `noAnswer` means it didn't send storage back.
+   app kept the old value; `noAnswer` means it didn't send storage back;
+   `notSent` means the device disconnected and nothing went out (`beaver_status()`).
    Values can't contain spaces: pick another value.
 3. `storage_delete(layer: "local", key: "onboardingDone")`.
 4. `logs_wait(filter: {search: "onboardingDone"})` — what the app did with it.
@@ -334,17 +341,22 @@ and in zapp-support's web logger (Beaver 4.14.0 or later). Case never matters.
 1. `commands_list()` — what the app accepts.
 2. `commands_send(command: "debug.flag.on newPlayer", collectLogsMs: 5000)` —
    sends it and returns what the app logged in the next 5 s.
-3. Or in two steps: `beaver_status()` → note `latestEventId`, then
-   `commands_send(command: …)`, then
-   `logs_wait(afterId: <latestEventId>, filter: {subsystems: ["player*"]})`.
+3. Or in two steps: `commands_send(command: …)` — its result gives `sessionId`
+   and `afterId` — then
+   `logs_wait(sessionId: <sessionId>, afterId: <afterId>, filter: {subsystems: ["player*"]})`.
+   A command that never went out (the device disconnected) is an error that
+   starts with "Not sent": `beaver_status()`, then send it again.
 
 ### restart — the app restarts and you carry on
 
 1. `commands_send(command: "<restart command from commands_list>", collectLogsMs: 20000)`.
 2. The result says `sessionChanged: {from, to}` when the app came back in a
-   new session, and holds the logs from the new launch. Without `sessionId`,
-   `logs_wait` and `commands_send` follow the device; pass `sessionId` to stay
-   on one session (you get `sessionEnded: true` when it ends).
+   new session — its process restarted — and holds the logs from the new
+   launch. An in-app reload (iOS `app.restart`, a React Native JS reload) or
+   a reconnect stays in the same session: no `sessionChanged`. Without
+   `sessionId`, `logs_wait` and `commands_send` follow the device; pass
+   `sessionId` to stay on one session (you get `sessionEnded: true` when it
+   ends: the device isn't back in it within 3 s).
 3. `deviceDisconnected: true`: the app hasn't come back — ask the user to
    open it.
 
@@ -493,7 +505,8 @@ Beaver 4.18.0 or later.
 1. `watch_start(name: "player errors", filter: {minLevel: "error", subsystems: ["player*"]}, notify: {atCount: 10})`
    — counting starts now. `notify` tells the **user** (an attention note and
    a notification); you are not woken. Without `sessionId` the watch follows
-   the device into new sessions.
+   the device into its new sessions (a process restart); other devices'
+   sessions never count.
 2. Your turn may end; later, `watch_status(name: "player errors")` — matches,
    first and last ids, counts per level, subsystem, category, whether it fired.
 3. `logs_query(afterId: <startId>, filter: {…same…}, order: "oldest")` for the

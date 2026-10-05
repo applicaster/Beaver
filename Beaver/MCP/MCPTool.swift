@@ -153,7 +153,7 @@ public enum ToolSchema {
     }
 
     public static let sessionId = integer(
-        "Session id. Omit it for the live session (with several devices, the viewed one if live, else the newest), else the one the user is viewing, else the most recent.")
+        "Session id. Omit it for the live session (with several devices, the default device's, else the viewed one if live, else the most recently active), else the one the user is viewing, else the most recent.")
 
     public static let deviceId = string(
         "Which connected app: its deviceId from beaver_status. Omit it for the default device (devices_set_default), or the only connected one.")

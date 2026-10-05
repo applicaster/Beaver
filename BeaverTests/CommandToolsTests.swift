@@ -68,7 +68,7 @@ struct CommandToolsTests {
                                                 makeContext(store, fakeUI: ui, device: device))
         #expect(r.body.contains("App started"))
         #expect(r.structured["sessionChanged"]?["from"] == JSON(s.id))
-        #expect(r.summary.contains("reconnected"))
+        #expect(r.summary.contains("new session"))
     }
 
     @Test("A drop after an agent's command becomes one system entry, with the session it came back in")
@@ -102,8 +102,84 @@ struct CommandToolsTests {
         try await Task.sleep(for: .milliseconds(400))
         let b = try await store.createSession(source: .live)
         ui.update { $0.liveSessionIds = [b.id] }
+        await store.append(event("App started"), to: b.id)
         try await Task.sleep(for: .milliseconds(1000))
         let rows = try await store.agentActivity().filter { $0.kind == .system }
         #expect(rows.map(\.summary) == ["Device disconnected after \"restart\" → session #\(b.id)"])
+    }
+
+    @Test("Review focus: D97 — back in the same session counts as back, not \"not back after 30 s\"")
+    func disconnectEntrySameSession() async throws {
+        let (store, a, ui) = try await live()
+        let ctx = makeContext(store, fakeUI: ui)
+        await ctx.watchForDisconnect(after: "background", sessionId: a.id, window: .seconds(3))
+        try await Task.sleep(for: .milliseconds(300))
+        ui.update { $0.liveSessionIds = [] }
+        try await Task.sleep(for: .milliseconds(400))
+        ui.update { $0.liveSessionIds = [a.id] }
+        var rows: [AgentActivity] = []
+        for _ in 0..<20 where rows.isEmpty {
+            try await Task.sleep(for: .milliseconds(100))
+            rows = try await store.agentActivity().filter { $0.kind == .system }
+        }
+        #expect(rows.map(\.summary) == ["Device disconnected after \"background\" → back in session #\(a.id)"])
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(await ctx.watches.hasDisconnectWatcher == false)
+    }
+
+    @Test("Review focus: D97 with a late handshake — the reconnect's silent session is deleted, the device is back in its own")
+    func disconnectEntryLateHandshake() async throws {
+        let (store, a, ui) = try await live()
+        let ctx = makeContext(store, fakeUI: ui)
+        await ctx.watchForDisconnect(after: "background", sessionId: a.id, window: .seconds(3))
+        try await Task.sleep(for: .milliseconds(300))
+        ui.update { $0.liveSessionIds = [] }
+        try await Task.sleep(for: .milliseconds(200))
+        let fresh = try await store.createSession(source: .live)
+        ui.update { $0.liveSessionIds = [fresh.id] }
+        try await Task.sleep(for: .milliseconds(2000))   // past the follower's settle
+        ui.update { $0.liveSessionIds = [a.id] }
+        try await store.deleteSession(id: fresh.id)
+        var rows: [AgentActivity] = []
+        for _ in 0..<30 where rows.isEmpty {
+            try await Task.sleep(for: .milliseconds(100))
+            rows = try await store.agentActivity().filter { $0.kind == .system }
+        }
+        #expect(rows.map(\.summary) == ["Device disconnected after \"background\" → back in session #\(a.id)"])
+    }
+
+    @Test("Review focus: a command to device B doesn't cancel the watcher of A's command")
+    func disconnectWatcherPerDevice() async throws {
+        let store = try LogStore(source: .inMemory)
+        let a = try await store.createSession(source: .live)
+        let b = try await store.createSession(source: .live)
+        let ui = FakeUI(value: HostSnapshot(liveSessionIds: [a.id, b.id]))
+        let ctx = makeContext(store, fakeUI: ui)
+        await ctx.watchForDisconnect(after: "restart", sessionId: a.id, window: .seconds(2))
+        await ctx.watchForDisconnect(after: "cmdlist", sessionId: b.id, window: .seconds(2))
+        try await Task.sleep(for: .milliseconds(300))
+        ui.update { $0.liveSessionIds = [b.id] }
+        var rows: [AgentActivity] = []
+        for _ in 0..<40 where rows.isEmpty {
+            try await Task.sleep(for: .milliseconds(100))
+            rows = try await store.agentActivity().filter { $0.kind == .system }
+        }
+        #expect(rows.map(\.summary) == ["Device disconnected after \"restart\"; not back after 2 s"])
+    }
+
+    @Test("Review focus: the connection vanished: not sent, and the error says so")
+    func notSent() async throws {
+        let (store, _, ui) = try await live()
+        let device = FakeDevice()
+        device.vanish()
+        do {
+            _ = try await CommandTools.send.run(ToolArguments(["command": "cmdlist"]),
+                                                makeContext(store, fakeUI: ui, device: device))
+            Issue.record("expected an error")
+        } catch let error as ToolError {
+            #expect(error.message.hasPrefix("Not sent:"))
+            #expect(error.message.contains("beaver_status()"))
+        }
+        #expect(ui.sentCommands.isEmpty)
     }
 }
