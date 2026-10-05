@@ -57,13 +57,20 @@ struct WatchTests {
         #expect(status.body.contains("fired"))
     }
 
+    private func alpha(_ store: LogStore, _ id: Int64, app: String = "Alpha", uid: String = "A") async throws {
+        try await store.setSessionDeviceInfo(id: id, appName: app, appVersion: nil, deviceModel: "iPhone",
+                                             platform: "iOS", osVersion: nil, deviceUID: uid)
+    }
+
     @Test("A following watch counts the device's new session; a pinned one doesn't")
     func follows() async throws {
         let (store, a, ui, ctx) = try await live()
+        try await alpha(store, a.id)
         _ = try await WatchTools.start.run(ToolArguments(["name": "follow", "filter": ["search": "hit"]]), ctx)
         _ = try await WatchTools.start.run(ToolArguments(["name": "pinned", "filter": ["search": "hit"],
                                                           "sessionId": JSON(a.id)]), ctx)
         let b = try await store.createSession(source: .live)
+        try await alpha(store, b.id)
         ui.update { $0.liveSessionIds = [b.id] }
         try await seed(store, session: b.id, [(.info, "a", "", "hit")])
         let status = try await WatchTools.status.run(ToolArguments(), ctx)
@@ -74,15 +81,31 @@ struct WatchTests {
         #expect(byName["pinned"]?["total"] == 0)
     }
 
+    @Test("Review focus: a second device connecting after watch_start isn't counted by a following watch")
+    func otherDeviceNotCounted() async throws {
+        let (store, a, ui, ctx) = try await live()
+        try await alpha(store, a.id)
+        _ = try await WatchTools.start.run(ToolArguments(["name": "follow", "filter": ["search": "hit"]]), ctx)
+        let other = try await store.createSession(source: .live)
+        try await alpha(store, other.id, app: "Beta", uid: "B")
+        ui.update { $0.liveSessionIds = [a.id, other.id] }
+        try await seed(store, session: other.id, [(.info, "a", "", "hit")])
+        let status = try await WatchTools.status.run(ToolArguments(["name": "follow"]), ctx)
+        #expect(status.structured["watches"]?.array?.first?["total"] == 0)
+        #expect(status.structured["watches"]?.array?.first?["sessions"] == [JSON(a.id)])
+    }
+
     @Test("notify counts across the device's new session and links the first match")
     func notifyFollows() async throws {
         let (store, a, ui, ctx) = try await live()
+        try await alpha(store, a.id)
         _ = try await WatchTools.start.run(ToolArguments(["name": "errs", "filter": ["minLevel": "error"],
                                                           "notify": ["atCount": 2]]), ctx)
         try await seed(store, session: a.id, [(.error, "a", "", "before restart")])
         let firstId = try #require(try await store.latestEventId(sessionId: a.id))
         try await Task.sleep(for: .milliseconds(700))
         let b = try await store.createSession(source: .live)
+        try await alpha(store, b.id)
         ui.update { $0.liveSessionIds = [b.id] }
         try await seed(store, session: b.id, [(.info, "a", "", "noise"), (.error, "a", "", "after restart")])
         var notes: [AgentActivity] = []

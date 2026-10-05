@@ -36,7 +36,95 @@ struct FollowDeviceTests {
         #expect(r.body.contains("App started"))
         #expect(r.structured["sessionChanged"]?["from"] == JSON(a.id))
         #expect(r.structured["sessionId"] != JSON(a.id))
-        #expect(r.summary.contains("reconnected"))
+        #expect(r.summary.contains("new session"))
+    }
+
+    @Test("Review focus: D97 — the device drops, a fresh session flashes up and is deleted, the same session comes back")
+    func returnsToSameSession() async throws {
+        let (store, a, ui) = try await liveFixture()
+        Task {
+            try? await Task.sleep(for: .milliseconds(300))
+            ui.update { $0.liveSessionIds = [] }
+            try? await Task.sleep(for: .milliseconds(200))
+            // The reconnect's own session, deleted once it continues the launch.
+            guard let fresh = try? await store.createSession(source: .live) else { return }
+            ui.update { $0.liveSessionIds = [fresh.id] }
+            try? await Task.sleep(for: .milliseconds(500))
+            ui.update { $0.liveSessionIds = [a.id] }
+            try? await store.deleteSession(id: fresh.id)
+            try? await Task.sleep(for: .milliseconds(300))
+            await store.append(event("App resumed"), to: a.id)
+        }
+        let r = try await LogTools.wait.run(
+            ToolArguments(["filter": ["search": "App resumed"], "timeoutMs": 5000]),
+            makeContext(store, fakeUI: ui))
+        #expect(r.structured["timedOut"] == false)
+        #expect(r.body.contains("App resumed"))
+        #expect(r.structured["sessionChanged"] == .null)
+        #expect(r.structured["sessionId"] == JSON(a.id))
+        #expect(r.structured["deviceDisconnected"] == false)
+        #expect(r.structured["liveSessionId"] == JSON(a.id))
+    }
+
+    @Test("A silent fresh session isn't followed until it settles; the old session's return is .same")
+    func freshSessionSettles() async throws {
+        let store = try LogStore(source: .inMemory)
+        let a = try await store.createSession(source: .live)
+        var follower = DeviceFollower(start: a.id, live: [a.id])
+        let t0 = ContinuousClock.now
+        #expect(await follower.step(live: [], store: store, now: t0) == .gone)
+        let fresh = try await store.createSession(source: .live)
+        #expect(await follower.step(live: [fresh.id], store: store, now: t0) == nil)
+        try await store.deleteSession(id: fresh.id)
+        #expect(await follower.step(live: [a.id], store: store, now: t0) == .same)
+        #expect(follower.current == a.id)
+    }
+
+    @Test("Once followed into a session, coming back to an earlier one is .same, not .gone")
+    func backToVisited() async throws {
+        let store = try LogStore(source: .inMemory)
+        let a = try await store.createSession(source: .live)
+        let b = try await store.createSession(source: .live)
+        for id in [a.id, b.id] {
+            try await store.setSessionDeviceInfo(id: id, appName: "Alpha", appVersion: nil, deviceModel: "iPhone",
+                                                 platform: "iOS", osVersion: nil, deviceUID: "A")
+        }
+        var follower = DeviceFollower(start: a.id, live: [a.id])
+        #expect(await follower.step(live: [b.id], store: store) == .moved(b.id))
+        #expect(await follower.step(live: [a.id], store: store) == .same)
+        #expect(follower.current == a.id)
+    }
+
+    @Test("A pinned wait rides out a blip: D97 brings the device back into the same session")
+    func pinnedSurvivesBlip() async throws {
+        let (store, a, ui) = try await liveFixture()
+        Task {
+            try? await Task.sleep(for: .milliseconds(300))
+            ui.update { $0.liveSessionIds = [] }
+            try? await Task.sleep(for: .milliseconds(800))
+            ui.update { $0.liveSessionIds = [a.id] }
+            try? await Task.sleep(for: .milliseconds(300))
+            await store.append(event("after blip"), to: a.id)
+        }
+        let r = try await LogTools.wait.run(
+            ToolArguments(["sessionId": JSON(a.id), "filter": ["search": "after blip"], "timeoutMs": 5000]),
+            makeContext(store, fakeUI: ui))
+        #expect(r.structured["sessionEnded"] == false)
+        #expect(r.structured["deviceDisconnected"] == false)
+        #expect(r.body.contains("after blip"))
+    }
+
+    @Test("successor: of several sessions of one device, the most recently active (listed last), not the highest id")
+    func successorByRecency() {
+        let ended = twin(1, uid: "A")
+        #expect(DeviceFollower.successor(of: ended, live: [twin(9, uid: "A"), twin(4, uid: "A")], appeared: [4, 9]) == 4)
+    }
+
+    @Test("successor: the same device id running another app is another device")
+    func successorOtherAppSameDevice() {
+        let other = Session(id: 4, startedAt: .distantPast, source: .live, appName: "Beta",
+                            deviceModel: "iPhone 15", platform: "iOS", deviceUID: "A")
+        #expect(DeviceFollower.successor(of: twin(1, uid: "A"), live: [other], appeared: [4]) == nil)
     }
 
     @Test("A pinned session reports that it ended, without waiting out the timeout")
@@ -206,7 +294,9 @@ struct FollowDeviceTests {
         let dropped = await follower.step(live: [b.id], store: store)
         #expect(dropped == .gone)
         let a2 = try await store.createSession(source: .live)
-        let back = await follower.step(live: [b.id, a2.id], store: store)
+        // Silent and unidentified: followed once it has been up a while.
+        #expect(await follower.step(live: [b.id, a2.id], store: store) == nil)
+        let back = await follower.step(live: [b.id, a2.id], store: store, now: .now + DeviceFollower.settle)
         #expect(back == .moved(a2.id))
     }
 
@@ -219,6 +309,8 @@ struct FollowDeviceTests {
         let gone = await follower.step(live: [], store: store)
         #expect(gone == .gone)
         let fresh = try await store.createSession(source: .live)
+        await store.append(event("first line"), to: fresh.id)
+        try await waitForEvents(1, session: fresh.id, in: store)
         let back = await follower.step(live: [fresh.id], store: store)
         #expect(back == .moved(fresh.id))
     }

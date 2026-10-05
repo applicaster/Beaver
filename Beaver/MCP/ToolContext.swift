@@ -94,8 +94,10 @@ public struct HostSnapshot: Sendable, Equatable {
 /// How tools reach the connected apps (design M15, D57, D73). The app
 /// environment routes to the right connection; tests use a fake.
 public protocol DeviceLink: Sendable {
-    /// Sends to the device whose live session is `sessionId`; no-op once it's gone.
-    func send(command: String, to sessionId: Int64) async
+    /// Sends to the device whose live session is `sessionId`. False when
+    /// nothing went out: the device is gone, or only sends logs.
+    @discardableResult
+    func send(command: String, to sessionId: Int64) async -> Bool
     /// Closes that device's connection; its session ends. No-op once it's gone.
     func disconnect(_ sessionId: Int64) async
     /// One MCP request to the app whose live session is `sessionId` (D75).

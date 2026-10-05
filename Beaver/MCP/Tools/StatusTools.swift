@@ -21,7 +21,7 @@ enum StatusTools {
         var described: [String] = []
         var lines: [String] = []
         // The one session device tools use, not every session with its uid.
-        let defaultId = host.defaultDevice?.liveSession(in: sessions, live: host.liveSessionIds)
+        let defaultId = host.defaultDevice?.liveSession(in: sessions, live: await ctx.store.byRecency(host.liveSessionIds))
         for live in host.liveSessionIds {
             guard let session = sessions.first(where: { $0.id == live }) else { continue }
             let latest = try await ctx.store.latestEventId(sessionId: live)

@@ -86,9 +86,15 @@ final class FakeDevice: DeviceLink {
         return try onConnectTV(host, port)
     }
 
-    func send(command: String, to sessionId: Int64) async {
+    /// The connection is gone: sends report false and nothing goes out.
+    private let gone = Mutex(false)
+    func vanish() { gone.withLock { $0 = true } }
+
+    func send(command: String, to sessionId: Int64) async -> Bool {
+        guard !gone.withLock({ $0 }) else { return false }
         log.withLock { $0.append((command, sessionId)) }
         await onSend(command)
+        return true
     }
 
     func mcp(_ method: String, params: JSON, to sessionId: Int64, timeout: Duration,
@@ -102,7 +108,7 @@ final class FakeDevice: DeviceLink {
 /// A real DeviceMCPClient behind DeviceLink: requests queue as in the app.
 struct ClientDevice: DeviceLink {
     let client: DeviceMCPClient
-    func send(command: String, to sessionId: Int64) async {}
+    func send(command: String, to sessionId: Int64) async -> Bool { true }
     func disconnect(_ sessionId: Int64) async {}
     func connectTV(host: String, port: Int, name: String?) async throws -> Int64 { throw TVBridgeError.noPage }
     func mcp(_ method: String, params: JSON, to sessionId: Int64, timeout: Duration,

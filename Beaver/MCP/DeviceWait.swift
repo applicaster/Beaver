@@ -29,7 +29,7 @@ public struct WaitResult: Sendable {
     public var followText: String {
         var parts: [String] = []
         if let c = sessionChanged {
-            parts.append("The device reconnected: carried on from session #\(c.from) into #\(c.to).")
+            parts.append("The device came back in a new session: carried on from session #\(c.from) into #\(c.to).")
         }
         if sessionEnded {
             parts.append("The session ended" + (liveSessionId.map { "; the device is now in session #\($0)." } ?? "."))
@@ -58,61 +58,104 @@ struct WaitSegment: Sendable {
 /// (D77); a different known device id is another device. Without device
 /// ids, the fingerprint decides as a fallback; when either fingerprint is
 /// still unknown, only the one session that came up since the last look.
+///
+/// D97: a reconnect of the same app launch carries on in a session the
+/// follower was already in, so the return of any of them is `.same`. On the
+/// way the connection opens a fresh session that is deleted a moment later:
+/// a session that says nothing about itself (no device id, no fingerprint,
+/// no event) isn't followed until it has been up for `settle`.
 // ponytail: the fingerprint heuristic is now the fallback for SDKs without a
 // client handshake (D77). A session whose handshake lands after the 250 ms
 // poll that sees it appear is judged by fingerprint on that poll.
 struct DeviceFollower: Sendable {
     enum Step: Equatable { case same, moved(Int64), gone }
 
+    static let settle: Duration = .milliseconds(1500)
+
     private(set) var current: Int64
+    /// Every session this follower has been in.
+    private(set) var visited: [Int64]
     private var lastLive: Set<Int64>
     /// Sessions live at the same time as `current`: another device, so
     /// never its restart — not even a twin with the same fingerprint.
     private var alongside: Set<Int64>
+    /// The device as last seen in the store: survives its row being deleted.
+    private var identity: Session?
+    private var seenAt: [Int64: ContinuousClock.Instant] = [:]
+    /// Silent sessions not old enough yet: looked at again on the next call.
+    private var settling: Set<Int64> = []
+    /// Candidates already judged and passed over; not "just came up" again.
+    private var considered: Set<Int64> = []
+    private var lastStep: Step = .same
 
     init(start: Int64, live: [Int64]) {
         current = start
+        visited = [start]
         lastLive = Set(live)
         alongside = Set(live)
     }
 
-    /// nil while the set of live sessions hasn't changed since the last call.
-    mutating func step(live: [Int64], store: LogStore) async -> Step? {
-        let now = Set(live)
-        guard now != lastLive else { return nil }
-        let appeared = now.subtracting(lastLive)
-        lastLive = now
-        if now.contains(current) {
-            alongside.formUnion(now)
-            return .same
+    /// nil while nothing changed since the last call.
+    mutating func step(live: [Int64], store: LogStore, now: ContinuousClock.Instant = .now) async -> Step? {
+        let nowLive = Set(live)
+        guard nowLive != lastLive || !settling.isEmpty else { return nil }
+        for id in nowLive.subtracting(lastLive) { seenAt[id] = now }
+        lastLive = nowLive
+        settling = []
+        // Back in a session it was in (D97 reopens it), or never left.
+        if let back = visited.last(where: nowLive.contains) {
+            current = back
+            alongside.formUnion(nowLive)
+            considered = []
+            return report(.same)
         }
         let sessions = (try? await store.sessions()) ?? []
-        let candidates = sessions.filter { now.contains($0.id) && !alongside.contains($0.id) }
+        if let known = Self.identity(of: visited, in: sessions) { identity = known }
+        var candidates: [(session: Session, latest: Int64)] = []
+        for s in sessions where nowLive.contains(s.id) && !alongside.contains(s.id) {
+            let latest = try? await store.latestEventId(sessionId: s.id)
+            if s.deviceUID == nil, s.fingerprint == nil, latest == nil,
+               now - (seenAt[s.id] ?? now) < Self.settle {
+                settling.insert(s.id)
+                continue
+            }
+            candidates.append((s, latest ?? 0))
+        }
+        // Least recently active first: `successor` takes the last match.
+        let ordered = candidates.sorted { ($0.latest, $0.session.id) < ($1.latest, $1.session.id) }.map(\.session)
         // A deleted row (the user deleted a live session) knows no
         // fingerprint: the one session that came up since continues it.
-        let ended = sessions.first(where: { $0.id == current })
-            ?? Session(id: current, startedAt: .distantPast, source: .live)
-        guard let next = Self.successor(of: ended, live: candidates, appeared: appeared) else { return .gone }
+        let ended = identity ?? Session(id: current, startedAt: .distantPast, source: .live)
+        let appeared = Set(ordered.map(\.id)).subtracting(considered)
+        guard let next = Self.successor(of: ended, live: ordered, appeared: appeared) else {
+            considered.formUnion(ordered.map(\.id))
+            return report(.gone)
+        }
         current = next
-        alongside = now
-        return .moved(next)
+        visited.append(next)
+        alongside = nowLive
+        considered = []
+        return report(.moved(next))
     }
 
+    /// A repeated `.gone` (re-checked while a session settles) is no news.
+    private mutating func report(_ step: Step) -> Step? {
+        defer { lastStep = step }
+        return step == .gone && lastStep == .gone ? nil : step
+    }
+
+    /// The visited session that says most about the device: the latest with
+    /// a device id, else with a fingerprint.
+    private static func identity(of visited: [Int64], in sessions: [Session]) -> Session? {
+        let rows = visited.reversed().compactMap { id in sessions.first { $0.id == id } }
+        return rows.first { $0.deviceUID != nil } ?? rows.first { $0.fingerprint != nil } ?? rows.first
+    }
+
+    /// `live` is least recently active first; the last match wins (D97:
+    /// session ids don't say which is newest).
     static func successor(of ended: Session, live: [Session], appeared: Set<Int64>) -> Int64? {
-        // D77: a known device id decides; a different known one is another device.
-        let newer = live.filter {
-            $0.id > ended.id && (ended.deviceUID == nil || $0.deviceUID == nil || $0.deviceUID == ended.deviceUID)
-        }
-        if let uid = ended.deviceUID, let same = newer.filter({ $0.deviceUID == uid }).map(\.id).max() {
-            return same
-        }
-        if let print = ended.fingerprint,
-           let same = newer.filter({ $0.fingerprint == print }).map(\.id).max() {
-            return same
-        }
-        let unknown = newer.filter {
-            appeared.contains($0.id) && (ended.fingerprint == nil || $0.fingerprint == nil)
-        }
+        if let same = live.last(where: ended.isSameDevice) { return same.id }
+        let unknown = live.filter { appeared.contains($0.id) && !ended.canTellApart(from: $0) }
         return unknown.count == 1 ? unknown[0].id : nil
     }
 }
@@ -123,11 +166,40 @@ extension Session {
         guard let appName else { return nil }
         return [appName, deviceModel ?? "", platform ?? ""]
     }
+
+    /// Device ids (D77), or fingerprints, are known on both sides.
+    func canTellApart(from other: Session) -> Bool {
+        (deviceUID != nil && other.deviceUID != nil) || (fingerprint != nil && other.fingerprint != nil)
+    }
+
+    /// The same app on the same device: a known device id decides, and the
+    /// fingerprint when both are known (one device runs several apps).
+    /// `DeviceFollower` and a following watch's sessions use this one rule.
+    func isSameDevice(_ other: Session) -> Bool {
+        if let a = deviceUID, let b = other.deviceUID, a != b { return false }
+        if let a = fingerprint, let b = other.fingerprint, a != b { return false }
+        return canTellApart(from: other)
+    }
+}
+
+extension LogStore {
+    /// `ids` least recently active first, by their latest event; one with
+    /// no event yet comes first. D97 continues an older session on
+    /// reconnect, so the highest id isn't the newest.
+    func byRecency(_ ids: [Int64]) async -> [Int64] {
+        var latest: [Int64: Int64] = [:]
+        for id in ids { latest[id] = try? await latestEventId(sessionId: id) }
+        return ids.sorted { (latest[$0] ?? 0, $0) < (latest[$1] ?? 0, $1) }
+    }
 }
 
 extension ToolContext {
 
     static let pollInterval: Duration = .milliseconds(250)
+    /// How long a pinned session that dropped may take to come back before
+    /// the wait says it ended: D97 reopens it when the same app launch
+    /// reconnects (a background app, a network blip).
+    static let reopenGrace: Duration = .seconds(3)
 
     /// Waits for events matching `filter` after `afterId`. `untilFirst`
     /// returns as soon as something matches (logs_wait); otherwise it
@@ -143,12 +215,14 @@ extension ToolContext {
         var result = WaitResult(sessionId: start.id)
         result.liveSessionId = liveAtStart.contains(start.id) ? start.id : nil
         let deadline = ContinuousClock.now + timeout
+        var endsAt: ContinuousClock.Instant?   // a pinned session dropped: ended unless back by then
 
         while true {
+            if let endsAt, ContinuousClock.now >= endsAt { result.sessionEnded = true }
             (result.events, result.total) = try await read(segments, filter: filter, limit: limit)
             let done = (untilFirst && result.total > 0) || result.sessionEnded
             if done || ContinuousClock.now >= deadline || Task.isCancelled {
-                result.sessionId = segments[segments.count - 1].sessionId
+                result.sessionId = follows ? device.current : start.id
                 result.timedOut = untilFirst && result.total == 0 && !result.sessionEnded
                 return result
             }
@@ -156,12 +230,21 @@ extension ToolContext {
             guard let step = await device.step(live: await ui.snapshot().liveSessionIds, store: store) else { continue }
             switch step {
             case .same:
+                // Live, or back in a session it was in (D97).
                 result.deviceDisconnected = false
+                result.liveSessionId = device.current
+                endsAt = nil
+                if follows {
+                    result.sessionChanged = device.current == start.id
+                        ? nil : SessionChange(from: start.id, to: device.current)
+                }
             case .moved(let next):
                 result.liveSessionId = next
                 result.deviceDisconnected = false
-                if follows, !segments.contains(where: { $0.sessionId == next }) {
-                    segments.append(WaitSegment(sessionId: next, afterId: 0))
+                if follows {
+                    if !segments.contains(where: { $0.sessionId == next }) {
+                        segments.append(WaitSegment(sessionId: next, afterId: 0))
+                    }
                     result.sessionChanged = SessionChange(from: start.id, to: next)
                 } else if pinnedWasLive {
                     result.sessionEnded = true
@@ -171,8 +254,8 @@ extension ToolContext {
                 if follows {
                     result.deviceDisconnected = true
                 } else if pinnedWasLive {
-                    result.sessionEnded = true
                     result.deviceDisconnected = true
+                    endsAt = endsAt ?? ContinuousClock.now + Self.reopenGrace
                 }
             }
         }
@@ -232,8 +315,10 @@ extension ToolContext {
            live.contains(id) { return (host, id) }
         if wanted == nil || wanted == "current" {
             // D76: the default, when set, is the only fallback — never another device.
-            if useDefault, let preferred = host.defaultDevice {
-                if let id = preferred.liveSession(in: try await store.sessions(), live: live) { return (host, id) }
+            // A `.session` default that ended never comes back: as if unset.
+            if useDefault, let preferred = host.defaultDevice, !preferred.isGone(live: live) {
+                let byRecency = await store.byRecency(live)
+                if let id = preferred.liveSession(in: try await store.sessions(), live: byRecency) { return (host, id) }
                 let list = try await describeDevices(live)
                 let name = try await describeDefault(preferred)
                 throw ToolError("The default device \(name) isn't connected; it may be restarting. "
@@ -259,7 +344,8 @@ extension ToolContext {
     public func describeTarget(_ id: Int64, _ args: ToolArguments, _ host: HostSnapshot) async throws -> String {
         let name = try await store.sessions().first { $0.id == id }.map(StatusTools.describeDevice) ?? "device \"\(id)\""
         let wanted = try args.string("deviceId")
-        return name + (host.defaultDevice != nil && (wanted == nil || wanted == "current") ? " (default)" : "")
+        let isDefault = host.defaultDevice.map { !$0.isGone(live: host.liveSessionIds) } ?? false
+        return name + (isDefault && (wanted == nil || wanted == "current") ? " (default)" : "")
     }
 
     /// `commands_send(command: "x")` → `commands_send(deviceId: "12", command: "x")`.
@@ -289,17 +375,18 @@ extension ToolContext {
     }
 
     /// Design §7.2: when the device drops within `window` after an agent's
-    /// command, one system entry says so — written when it is back (with
-    /// its new session) or when it hasn't come back within another `window`.
-    /// Replaces any earlier command's watcher, so N commands before a restart
-    /// write one entry, naming the last. `token` lets the caller stop it
-    /// (`Watches.cancelDisconnectWatcher`).
+    /// command, one system entry says so — written when it is back (in its
+    /// new session, or the same one after a reconnect, D97) or when it
+    /// hasn't come back within another `window`. Replaces an earlier
+    /// command's watcher on the same device, so N commands before a restart
+    /// write one entry, naming the last; other devices' watchers stay.
+    /// `token` lets the caller stop it (`Watches.cancelDisconnectWatcher`).
     func watchForDisconnect(after command: String, sessionId: Int64, window: Duration = .seconds(30),
                             token: UUID = UUID()) async {
         // The command's session counts as live even if the app already
         // dropped before this snapshot (a restart that answers and exits).
         let liveNow = Array(Set(await ui.snapshot().liveSessionIds).union([sessionId]))
-        await watches.setDisconnectWatcher(token: token, Task { [self] in
+        await watches.setDisconnectWatcher(token: token, sessionId: sessionId, Task { [self] in
             var device = DeviceFollower(start: sessionId, live: liveNow)
             let dropDeadline = ContinuousClock.now + window
             while ContinuousClock.now < dropDeadline {
@@ -313,12 +400,15 @@ extension ToolContext {
                 while back == nil, ContinuousClock.now < backDeadline {
                     try? await Task.sleep(for: Self.pollInterval)
                     guard !Task.isCancelled else { return }
-                    if case .moved(let id)? = await device.step(live: await ui.snapshot().liveSessionIds, store: store) {
-                        back = id
+                    switch await device.step(live: await ui.snapshot().liveSessionIds, store: store) {
+                    case .moved(let id)?: back = id
+                    case .same?: back = device.current   // reconnected into its session (D97)
+                    default: break
                     }
                 }
                 guard !Task.isCancelled else { return }
-                let outcome = back.map { " → session #\($0)" } ?? "; not back after \(window.components.seconds) s"
+                let outcome = back.map { $0 == sessionId ? " → back in session #\($0)" : " → session #\($0)" }
+                    ?? "; not back after \(window.components.seconds) s"
                 await AgentJournal(store: store).post(.system, "Device disconnected after \"\(command)\"\(outcome)",
                                                       sessionId: back ?? sessionId)
                 return

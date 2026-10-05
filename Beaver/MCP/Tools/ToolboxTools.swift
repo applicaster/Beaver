@@ -46,7 +46,7 @@ enum ToolboxTools {
         let device = DefaultDevice(session: session)
         await ctx.ui.setDefaultDevice(device)
         let lasts = if case .uid = device { "it stays the default when the app restarts" }
-                    else { "this app sends no device id, so the default ends when it reconnects" }
+                    else { "this app sends no device id, so the default ends when it disconnects" }
         return ToolResult(
             summary: "Default device: \(StatusTools.describeDevice(session)) (deviceId \"\(id)\"); \(lasts).",
             structured: ["default": .string(String(id)), "uid": JSON(session.deviceUID)],
@@ -193,7 +193,7 @@ enum ToolboxTools {
             body: body,
             structured: .object(structured),
             next: ["logs_wait(sessionId: \(id), afterId: \(before), timeoutMs: 15000) for what the app logged "
-                   + "(after a restart, beaver_status() shows its new session)"],
+                   + "(\(ToolText.restartNote))"],
             sessionId: id,
             journalKind: risky ? .destructive : nil
         )

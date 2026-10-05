@@ -28,6 +28,8 @@ struct DevicePopover: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(ToastCenter.self) private var toasts
     @State private var load: ToolboxLoad = .loading
+    /// Bumped by Reload and Retry: part of the load task's identity.
+    @State private var attempt = 0
     @State private var openToolbox: String?
     @State private var showingDefaultHelp = false
 
@@ -85,7 +87,13 @@ struct DevicePopover: View {
         .padding(width == nil ? 0 : 16)
         .frame(width: width, alignment: .leading)
         .frame(maxWidth: width == nil ? .infinity : nil, alignment: .leading)
-        .task(id: session.id) { if isLive && !logsOnly && showsToolboxes { await reload() } }
+        // Keyed on liveness too: with D97 an ended session comes back live
+        // when its app launch reconnects, and its toolboxes load again. One
+        // task for every load, so a switch to another session cancels it
+        // before it can show the first one's toolboxes.
+        .task(id: ToolboxLoadKey(sessionId: session.id, isLive: isLive, attempt: attempt)) {
+            if isLive && !logsOnly && showsToolboxes { await reload() }
+        }
     }
 
     /// D76, said so a person knows what ticking it changes.
@@ -179,7 +187,7 @@ struct DevicePopover: View {
         HStack {
             Text("Toolboxes").font(.subheadline.weight(.semibold))
             Spacer()
-            Button { Task { await reload() } } label: { Image(systemName: "arrow.clockwise") }
+            Button { attempt += 1 } label: { Image(systemName: "arrow.clockwise") }
                 .buttonStyle(.borderless)
                 .help("Ask the app for its toolboxes again")
                 .accessibilityLabel("Reload toolboxes")
@@ -196,13 +204,13 @@ struct DevicePopover: View {
                 // A native app is never latched as unsupported, but one can
                 // be before its handshake arrives. The handshake clears the
                 // latch, so Retry then loads its toolboxes (as after a failed load).
-                Button("Retry") { Task { await reload() } }
+                Button("Retry") { attempt += 1 }
             }
         case .failed(let message):
             HStack {
                 Text(message).font(.caption).foregroundStyle(.secondary)
                 Spacer()
-                Button("Retry") { Task { await reload() } }
+                Button("Retry") { attempt += 1 }
             }
         case .loaded(let boxes) where boxes.isEmpty:
             Text("This app has no toolboxes.").font(.caption).foregroundStyle(.secondary)
@@ -261,6 +269,12 @@ struct DevicePopover: View {
         guard !Task.isCancelled else { return }
         load = fetched
     }
+}
+
+private struct ToolboxLoadKey: Equatable {
+    let sessionId: Int64
+    let isLive: Bool
+    let attempt: Int
 }
 
 private struct ToolRow: View {

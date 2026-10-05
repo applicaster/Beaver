@@ -59,6 +59,18 @@ struct StorageToolsTests {
         #expect(r.next.contains { $0.hasPrefix("storage_snapshot(sessionId: \(live), ") })
     }
 
+    @Test("Review focus: the connection vanished: storage_set says not sent, not \"sent, no answer\"")
+    func setNotSent() async throws {
+        let (_, ctx, device) = try await fixture()
+        device.vanish()
+        let r = try await StorageTools.set.run(
+            ToolArguments(["layer": "local", "key": "onboardingDone", "value": "false"]), ctx)
+        #expect(r.structured["outcome"] == "notSent")
+        #expect(r.summary.contains("not sent — the device disconnected"))
+        #expect(r.next.contains { $0.hasPrefix("beaver_status()") })
+        #expect(device.sent.isEmpty)
+    }
+
     @Test("A JSON value is sent compact and matched by content")
     func jsonValue() async throws {
         let (_, ctx, device) = try await fixture()

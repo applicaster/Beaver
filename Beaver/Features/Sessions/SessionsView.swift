@@ -103,6 +103,12 @@ struct SessionsView: View {
                 let id = item.id
                 let title = item.title
                 pendingDelete = nil
+                // D97: the device can come back into this session while
+                // the dialog is open; the inbound writer is using it again.
+                guard !env.isLive(id) else {
+                    toasts.error("\"\(title)\" is live again — disconnect the device first")
+                    return
+                }
                 Task {
                     await vm.deleteSession(id: id)
                     toasts.success("Deleted \"\(title)\"")

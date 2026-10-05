@@ -124,5 +124,48 @@ struct DefaultDeviceTests {
         #expect(DefaultDevice.session(7).liveSession(in: [s], live: [7]) == 7)
         #expect(DefaultDevice.session(7).liveSession(in: [s], live: [8]) == nil)
         #expect(DefaultDevice(session: Session(id: 8, startedAt: .distantPast, source: .live, deviceUID: "U")) == .uid("U"))
+        #expect(DefaultDevice.session(7).isGone(live: [8]))
+        #expect(!DefaultDevice.session(7).isGone(live: [7]))
+        #expect(!DefaultDevice.uid("U").isGone(live: []))
+    }
+
+    @Test("Review focus: D97 — of two live sessions of one device, the most recently active, not the highest id")
+    func defaultByRecency() async throws {
+        let store = try LogStore(source: .inMemory)
+        let continued = try await store.createSession(source: .live)   // older id, reconnected (D97)
+        let idle = try await store.createSession(source: .live)
+        for s in [continued, idle] {
+            try await store.setSessionDeviceInfo(id: s.id, appName: "Alpha", appVersion: nil, deviceModel: nil,
+                                                 platform: nil, osVersion: nil, deviceUID: "A")
+        }
+        try await seed(store, session: idle.id, [(.info, "app", "", "earlier")])
+        try await seed(store, session: continued.id, [(.info, "loggernext.session", "", "Reconnected")])
+        let ui = HostSnapshot(liveSessionIds: [continued.id, idle.id], defaultDevice: .uid("A"))
+        let ctx = makeContext(store, ui: ui)
+        let (_, id) = try await ctx.requireDevice(ToolArguments(), doing: "send", call: call)
+        #expect(id == continued.id)
+        #expect(try await ctx.resolveSession(ToolArguments()).id == continued.id)
+        let status = try await StatusTools.status.run(ToolArguments(), ctx)
+        let flags = status.structured["devices"]?.array?.filter { $0["default"]?.bool == true }.map { $0["id"]?.string }
+        #expect(flags == [String(continued.id)])
+    }
+
+    @Test("Review focus: a session default whose session ended counts as no default")
+    func deadSessionDefault() async throws {
+        let store = try LogStore(source: .inMemory)
+        let gone = try await store.createSession(source: .live)
+        let back = try await store.createSession(source: .live)   // the app reconnected without a handshake
+        let ctx = makeContext(store, ui: HostSnapshot(liveSessionIds: [back.id], defaultDevice: .session(gone.id)))
+        let (host, id) = try await ctx.requireDevice(ToolArguments(), doing: "send", call: call)
+        #expect(id == back.id)
+        #expect(try await !ctx.describeTarget(id, ToolArguments(), host).contains("(default)"))
+    }
+
+    @Test("Review focus: without sessionId, reads and waits use the default device, not the viewed one")
+    func readsUseDefault() async throws {
+        let (store, a, b, _) = try await twoDevices(default: .uid("A"))
+        let ctx = makeContext(store, ui: HostSnapshot(liveSessionIds: [a.id, b.id], viewingSessionId: b.id,
+                                                      defaultDevice: .uid("A")))
+        #expect(try await ctx.resolveSession(ToolArguments()).id == a.id)
     }
 }

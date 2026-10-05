@@ -152,7 +152,10 @@ public struct IdRange: Sendable, Equatable {
 
 extension ToolContext {
 
-    /// Design M9: given → live → viewed → most recent.
+    /// Design M9: given → live → viewed → most recent. The live one is the
+    /// default device's (D76: where commands without deviceId go, so a wait
+    /// after one reads the same app), else the viewed one, else the most
+    /// recently active — not the highest id: D97 continues older ones.
     public func resolveSession(_ args: ToolArguments) async throws -> ResolvedSession {
         let sessions = try await store.sessions()   // newest first
         if let wanted = try args.int64("sessionId") {
@@ -162,9 +165,10 @@ extension ToolContext {
             return ResolvedSession(id: wanted, session: s, how: .given)
         }
         let host = await ui.snapshot()
-        // D73: with several devices, the one the user is viewing, else the newest.
-        let liveId = host.viewingSessionId.flatMap { host.liveSessionIds.contains($0) ? $0 : nil }
-            ?? host.liveSessionIds.max()
+        let live = await store.byRecency(host.liveSessionIds)
+        let liveId = host.defaultDevice.flatMap { $0.liveSession(in: sessions, live: live) }
+            ?? host.viewingSessionId.flatMap { live.contains($0) ? $0 : nil }
+            ?? live.last
         if let id = liveId, let s = sessions.first(where: { $0.id == id }) {
             return ResolvedSession(id: id, session: s, how: .live)
         }
@@ -317,6 +321,11 @@ extension ToolContext {
 public enum ToolText {
     public static let payloadCap = 256 * 1024
     public static let messageCap = 500
+
+    /// D97: a session is one app process. A reconnect or an in-app reload
+    /// (iOS app.restart, a React Native JS reload) stays in it.
+    public static let restartNote = "a reconnect or an in-app reload stays in this session; "
+        + "if the app process restarts, beaver_status() shows its new one"
 
     /// `#48211 14:03:12.482 ERROR com.app.auth/token: refresh failed 401`
     public static func eventLine(_ e: EventRecord) -> String {

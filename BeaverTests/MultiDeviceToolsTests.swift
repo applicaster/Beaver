@@ -74,13 +74,17 @@ struct MultiDeviceToolsTests {
         #expect(!r.body.contains("alpha.only"))
     }
 
-    @Test("Without sessionId, reads use the viewed live device, else the newest")
+    @Test("Without sessionId, reads use the viewed live device, else the most recently active")
     func resolveAmongSeveral() async throws {
         let (store, a, b, ui) = try await twoDevices(viewing: nil)
         let ctx = makeContext(store, fakeUI: ui)
         #expect(try await ctx.resolveSession(ToolArguments()).id == b.id)
-        ui.update { $0.viewingSessionId = a.id }
+        // D97: a reconnected older session is the newest by activity, not by id.
+        try await seed(store, session: b.id, [(.info, "app", "", "b")])
+        try await seed(store, session: a.id, [(.info, "app", "", "a")])
         #expect(try await ctx.resolveSession(ToolArguments()).id == a.id)
+        ui.update { $0.viewingSessionId = b.id }
+        #expect(try await ctx.resolveSession(ToolArguments()).id == b.id)
     }
 
     @Test("devices_disconnect closes the chosen device")
