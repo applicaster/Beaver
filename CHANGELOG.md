@@ -12,6 +12,28 @@ does the same for a manual release.
 
 ## [Unreleased]
 
+### Fixed
+- **A quick reconnect no longer splits one app run into two sessions.** When
+  an app reconnected while its old socket still looked open to Beaver (a
+  Wi-Fi blip, background and foreground), the logs went to a second session,
+  and with more reconnects they alternated between the two. Beaver now
+  carries on in the session the app already has and closes the old
+  connection. Apps that send no device id are matched too, by their launch
+  id alone.
+- **Reconnecting the device you're viewing keeps your view.** The Log feed no
+  longer reloads twice, your filter is no longer replaced by the Default
+  saved filter, and Clear, the selection, Network and Storage stay as they
+  were.
+- **Deleting sessions while devices stream no longer loses other devices'
+  logs.** Delete all (or deleting a session just after it ended) could drop
+  a batch of every connected device's events with "Couldn't save N events".
+  A session's last events are also stored before it ends.
+- A session left open by a quit or crash no longer ends before it started
+  when the device's clock is behind the Mac's (which could have it deleted
+  as old at once).
+- A device that disconnected just as its session was deleted no longer
+  leaves an empty "Ended" session behind.
+
 ## [4.22.3] - 2026-10-05
 
 ### Fixed
@@ -50,26 +72,6 @@ does the same for a manual release.
 - **Deleting a session that came back live is refused.** If the app
   reconnects into the session while the Delete dialog is open, Beaver says so
   instead of deleting the live session; `sessions_delete` checks the same.
-- **A quick reconnect no longer splits one app run into two sessions.** When
-  an app reconnected while its old socket still looked open to Beaver (a
-  Wi-Fi blip, background and foreground), the logs went to a second session,
-  and with more reconnects they alternated between the two. Beaver now
-  carries on in the session the app already has and closes the old
-  connection. Apps that send no device id are matched too, by their launch
-  id alone.
-- **Reconnecting the device you're viewing keeps your view.** The Log feed no
-  longer reloads twice, your filter is no longer replaced by the Default
-  saved filter, and Clear, the selection, Network and Storage stay as they
-  were.
-- **Deleting sessions while devices stream no longer loses other devices'
-  logs.** Delete all (or deleting a session just after it ended) could drop
-  a batch of every connected device's events with "Couldn't save N events".
-  A session's last events are also stored before it ends.
-- A session left open by a quit or crash no longer ends before it started
-  when the device's clock is behind the Mac's (which could have it deleted
-  as old at once).
-- A device that disconnected just as its session was deleted no longer
-  leaves an empty "Ended" session behind.
 
 ## [4.22.2] - 2026-10-05
 
