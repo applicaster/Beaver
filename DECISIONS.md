@@ -3217,10 +3217,12 @@ the step order of D90.
   or leaves the network is re-discovered like a closed page. A reattach to
   the same page (same debugger URL) drops lines at or before the newest
   TV time already sent — `Runtime.enable` / `Log.enable` replay what the
-  page kept. Only ECONNREFUSED is "no DevTools on that port"; timeouts
+  page kept — until the reply to `Log.enable` (id 2), which ends the
+  replay; after it nothing is filtered (a TV clock may step back). Only ECONNREFUSED is "no DevTools on that port"; timeouts
   and unreachable hosts are "Can't reach the TV". `pick` prefers a page
   whose URL isn't about:/chrome*/devtools:. Connect: one in flight per
-  device id (`TVConnects`, a second caller awaits the first); hosts are
+  device id (`TVConnects`, a second caller awaits the first, and connects
+  afresh if the first caller cancelled); hosts are
   lowercased (a hostname and its IP are still two ids); any error or
   cancel after the start stops the bridge (`TVBridge.connect`), and
   `beaverUnavailable` carries its reason and points at the connection pill.

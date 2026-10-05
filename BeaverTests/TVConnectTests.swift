@@ -162,7 +162,7 @@ struct TVConnectTests {
 
     @Test("Connect: register, the TV's lines, a page reload re-registers, Disconnect stops the bridge")
     func endToEnd() async throws {
-        let server = WSServer(port: 19_090)
+        let server = WSServer(port: 19_400)
         try await server.start()
         _ = await race(timeout: .seconds(10)) {
             for await state in server.state { if case .listening = state { return } }
@@ -173,7 +173,7 @@ struct TVConnectTests {
         defer { drain.cancel(); tv.stop() }
 
         let bridge = try TVBridge(host: "127.0.0.1", port: Int(tv.httpPort),
-                                  beaver: URL(string: "ws://127.0.0.1:19090")!, retryDelay: .milliseconds(100),
+                                  beaver: URL(string: "ws://127.0.0.1:19400")!, retryDelay: .milliseconds(100),
                                   ping: .milliseconds(100), timeout: .seconds(2))
         try await bridge.start()
         #expect(await bridge.isRunning)
@@ -207,6 +207,9 @@ struct TVConnectTests {
         tv.push(#"{"method":"Runtime.consoleAPICalled","params":{"type":"log","timestamp":\#(at + 500),"args":[{"type":"string","value":"after"}]}}"#)
         _ = try await inbound.first { $0.event?.message == "after" }
         #expect(inbound.events.filter { $0.message == "boom" }.count == 1)
+        // Past the replay (the reply to Log.enable), a TV clock that stepped back drops nothing.
+        tv.push(#"{"method":"Runtime.consoleAPICalled","params":{"type":"log","timestamp":\#(at - 5_000),"args":[{"type":"string","value":"clock stepped back"}]}}"#)
+        _ = try await inbound.first { $0.event?.message == "clock stepped back" }
         #expect(inbound.events.contains { $0.category == "bridge" && $0.message.hasPrefix("Reattached to \"Zapp App 2\"") })
         // Pings were answered all along: no "stopped answering".
         #expect(!inbound.events.contains { $0.message.contains("stopped answering") })
@@ -223,7 +226,7 @@ struct TVConnectTests {
     func errors() async throws {
         let tv = try await FakeTV.start()
         defer { tv.stop() }
-        func start(_ port: Int = 0, beaver: String = "ws://127.0.0.1:19091") async throws {
+        func start(_ port: Int = 0, beaver: String = "ws://127.0.0.1:19401") async throws {
             try await TVBridge(host: "127.0.0.1", port: port == 0 ? Int(tv.httpPort) : port,
                                beaver: URL(string: beaver)!, timeout: .milliseconds(300)).start()
         }
@@ -271,7 +274,7 @@ struct TVConnectTests {
 
     @Test("A TV that stops answering pings is found again: the bridge reattaches when it wakes")
     func sleepingTV() async throws {
-        let server = WSServer(port: 19_092)
+        let server = WSServer(port: 19_402)
         try await server.start()
         _ = await race(timeout: .seconds(10)) {
             for await state in server.state { if case .listening = state { return } }
@@ -280,7 +283,7 @@ struct TVConnectTests {
         let drain = Task { for await item in server.inbound { inbound.add(item) } }
         let tv = try await FakeTV.start()
         defer { drain.cancel(); tv.stop() }
-        let bridge = try TVBridge(host: "127.0.0.1", port: Int(tv.httpPort), beaver: URL(string: "ws://127.0.0.1:19092")!,
+        let bridge = try TVBridge(host: "127.0.0.1", port: Int(tv.httpPort), beaver: URL(string: "ws://127.0.0.1:19402")!,
                                   retryDelay: .milliseconds(100), ping: .milliseconds(100), timeout: .milliseconds(300))
         try await bridge.start()
         try await until { tv.methods.count == 2 }
@@ -299,7 +302,7 @@ struct TVConnectTests {
 
     @Test("Cancelling a Connect after the bridge started stops it: no TV appears")
     func cancelStops() async throws {
-        let server = WSServer(port: 19_093)
+        let server = WSServer(port: 19_403)
         try await server.start()
         _ = await race(timeout: .seconds(10)) {
             for await state in server.state { if case .listening = state { return } }
@@ -307,7 +310,7 @@ struct TVConnectTests {
         let drain = Task { for await _ in server.inbound {} }
         let tv = try await FakeTV.start()
         defer { drain.cancel(); tv.stop() }
-        let bridge = try TVBridge(host: "127.0.0.1", port: Int(tv.httpPort), beaver: URL(string: "ws://127.0.0.1:19093")!)
+        let bridge = try TVBridge(host: "127.0.0.1", port: Int(tv.httpPort), beaver: URL(string: "ws://127.0.0.1:19403")!)
         let connect = Task { try await bridge.connect(wait: .seconds(30)) { nil } }
         try await until { await bridge.isRunning }
         connect.cancel()
@@ -334,6 +337,25 @@ struct TVConnectTests {
         #expect(try await connects.run("cdp-10.0.0.5:9222", work) == 42)
         #expect(runs.withLock { $0 } == 2)
         #expect(try TVBridge(host: "TV.Local", port: 9222).deviceId == TVBridge(host: "tv.local", port: 9222).deviceId)
+    }
+
+    @Test("Cancelling the first Connect doesn't cancel a second caller's: it connects on its own")
+    @MainActor func cancelOnlyMine() async throws {
+        let connects = TVConnects()
+        let runs = Mutex(0)
+        let work: @MainActor () async throws -> Int64 = {
+            runs.withLock { $0 += 1 }
+            try await Task.sleep(for: .milliseconds(200))
+            return 7
+        }
+        let first = Task { try await connects.run("cdp-tv:9222", work) }
+        try await until { runs.withLock { $0 } == 1 }
+        let second = Task { try await connects.run("cdp-tv:9222", work) }
+        try await Task.sleep(for: .milliseconds(20))
+        first.cancel()
+        await #expect(throws: CancellationError.self) { try await first.value }
+        #expect(try await second.value == 7)
+        #expect(runs.withLock { $0 } == 2)
     }
 
     // MARK: - MCP

@@ -283,7 +283,10 @@ public actor TVBridge {
         do {
             let deadline = ContinuousClock.now.advanced(by: wait)
             while ContinuousClock.now < deadline {
-                if let id = try await session() { return id }
+                if let id = try await session() {
+                    try Task.checkCancellation()
+                    return id
+                }
                 try await Task.sleep(for: .milliseconds(50))
             }
             throw TVBridgeError.beaverUnavailable(reason: "Beaver opened no session for it in \(wait.components.seconds) s")
@@ -406,11 +409,15 @@ public actor TVBridge {
         defer { ws.cancel() }
         let pinger = Task { await ping(ws) }
         defer { pinger.cancel() }
-        let cutoff = page.socket.flatMap { newest[$0] }
+        // Only the replay is filtered: Chrome sends it before its replies to
+        // Runtime.enable (id 1) and Log.enable (id 2). Past that, a TV clock
+        // that stepped back must not drop new lines.
+        var cutoff = page.socket.flatMap { newest[$0] }
         for e in early { await forward(e, page: page.socket, cutoff: cutoff) }
         do {
             while !Task.isCancelled {
                 let data = Self.data(try await ws.receive())
+                if CDP.reply(data)?.id == 2 { cutoff = nil }
                 if let e = CDP.event(data, now: Self.now()) { await forward(e, page: page.socket, cutoff: cutoff) }
             }
         } catch {
@@ -491,17 +498,25 @@ public actor TVBridge {
 
 /// One Connect per TV at a time (D94): a second Connect for a TV that is
 /// still connecting waits for the first one's result instead of starting a
-/// second bridge.
+/// second bridge. Only the caller that started a Connect can cancel it; one
+/// cancelled under a waiting caller is started again for that caller, so a
+/// `CancellationError` reaches only whoever cancelled.
 @MainActor public final class TVConnects {
     private var running: [String: Task<Int64, any Error>] = [:]
 
     public init() {}
 
     public func run(_ deviceId: String, _ connect: @escaping @MainActor () async throws -> Int64) async throws -> Int64 {
-        if let first = running[deviceId] { return try await first.value }
+        if let first = running[deviceId], !first.isCancelled {
+            do {
+                return try await first.value
+            } catch is CancellationError where !Task.isCancelled {
+                return try await run(deviceId, connect)
+            }
+        }
         let task = Task { try await connect() }
         running[deviceId] = task
-        defer { running[deviceId] = nil }
+        defer { if running[deviceId] == task { running[deviceId] = nil } }
         return try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
     }
 }
