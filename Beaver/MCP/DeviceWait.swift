@@ -387,32 +387,54 @@ extension ToolContext {
         // dropped before this snapshot (a restart that answers and exits).
         let liveNow = Array(Set(await ui.snapshot().liveSessionIds).union([sessionId]))
         await watches.setDisconnectWatcher(token: token, sessionId: sessionId, Task { [self] in
-            var device = DeviceFollower(start: sessionId, live: liveNow)
-            let dropDeadline = ContinuousClock.now + window
-            while ContinuousClock.now < dropDeadline {
+            await disconnectWatch(after: command, sessionId: sessionId, live: liveNow, window: window)
+            await watches.cancelDisconnectWatcher(token)   // done: off the map
+        })
+    }
+
+    private func disconnectWatch(after command: String, sessionId: Int64, live liveNow: [Int64],
+                                 window: Duration) async {
+        var device = DeviceFollower(start: sessionId, live: liveNow)
+        let dropDeadline = ContinuousClock.now + window
+        while ContinuousClock.now < dropDeadline {
+            try? await Task.sleep(for: Self.pollInterval)
+            guard !Task.isCancelled else { return }
+            guard let step = await device.step(live: await ui.snapshot().liveSessionIds, store: store),
+                  step != .same else { continue }
+            var back: Int64?
+            // A session that says nothing about itself may be a reconnect's
+            // own, deleted when its late handshake continues the launch
+            // (D97): watch one more settle period for the device's return.
+            var settleUntil: ContinuousClock.Instant?
+            func moved(to id: Int64) async {
+                back = id
+                // D97 only continues into a launch from a session with no rows.
+                let row = try? await store.sessions().first { $0.id == id }
+                let silent = (try? await store.latestEventId(sessionId: id)) == nil
+                let unknown = row.map { $0.deviceUID == nil && $0.fingerprint == nil } ?? true
+                settleUntil = silent && unknown ? ContinuousClock.now + DeviceFollower.settle : nil
+            }
+            if case .moved(let id) = step { await moved(to: id) }
+            let backDeadline = ContinuousClock.now + window
+            while back == nil || settleUntil.map({ ContinuousClock.now < $0 }) == true,
+                  ContinuousClock.now < backDeadline {
                 try? await Task.sleep(for: Self.pollInterval)
                 guard !Task.isCancelled else { return }
-                guard let step = await device.step(live: await ui.snapshot().liveSessionIds, store: store),
-                      step != .same else { continue }
-                var back: Int64?
-                if case .moved(let id) = step { back = id }
-                let backDeadline = ContinuousClock.now + window
-                while back == nil, ContinuousClock.now < backDeadline {
-                    try? await Task.sleep(for: Self.pollInterval)
-                    guard !Task.isCancelled else { return }
-                    switch await device.step(live: await ui.snapshot().liveSessionIds, store: store) {
-                    case .moved(let id)?: back = id
-                    case .same?: back = device.current   // reconnected into its session (D97)
-                    default: break
-                    }
+                switch await device.step(live: await ui.snapshot().liveSessionIds, store: store) {
+                case .moved(let id)?: await moved(to: id)
+                case .same?:
+                    back = device.current   // reconnected into its session (D97)
+                    if back == sessionId { settleUntil = nil }
+                case .gone?: back = nil; settleUntil = nil
+                case nil: break
                 }
-                guard !Task.isCancelled else { return }
-                let outcome = back.map { $0 == sessionId ? " → back in session #\($0)" : " → session #\($0)" }
-                    ?? "; not back after \(window.components.seconds) s"
-                await AgentJournal(store: store).post(.system, "Device disconnected after \"\(command)\"\(outcome)",
-                                                      sessionId: back ?? sessionId)
-                return
             }
-        })
+            guard !Task.isCancelled else { return }
+            let outcome = back.map { $0 == sessionId ? " → back in session #\($0)" : " → session #\($0)" }
+                ?? "; not back after \(window.components.seconds) s"
+            await AgentJournal(store: store).post(.system, "Device disconnected after \"\(command)\"\(outcome)",
+                                                  sessionId: back ?? sessionId)
+            return
+        }
     }
 }

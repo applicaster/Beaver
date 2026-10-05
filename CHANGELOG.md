@@ -83,10 +83,12 @@ does the same for a manual release.
   - a wait on a given `sessionId` gives the device 3 s to come back into it
     before it says `sessionEnded`;
   - a following watch counts only its own device's later sessions, so
-    `watch_status` and the notification agree; another device connecting
+    `watch_status` and the notification agree (also for apps that name
+    themselves only after their first logs); another device connecting
     doesn't add to it;
   - without `sessionId`, reads and waits use the default device's session
-    when one is set (where commands without `deviceId` go), and `logs_wait`'s
+    when one is set (where commands without `deviceId` go; while it restarts,
+    its latest session, followed into the new one), and `logs_wait`'s
     and `commands_list`'s Next suggestions keep the `sessionId`;
   - `commands_send` to an app whose connection just went away says "Not sent"
     instead of "Sent"; `storage_set` / `storage_delete` report `notSent`;

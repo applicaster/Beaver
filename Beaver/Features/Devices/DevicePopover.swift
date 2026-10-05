@@ -103,7 +103,8 @@ struct DevicePopover: View {
         such a call fails and the agent has to pick a device.
         Only one app is the default: ticking this one unticks the other.
         Follows this device across app restarts (by its device id). \
-        Kept until Beaver quits. Reading logs, network and storage isn't affected.
+        Kept until Beaver quits. An agent's reads and waits that name no session \
+        use this app's session too.
         """
     static let defaultTakenHelp = """
         Another live session of this same device is already the agents' default \

@@ -174,7 +174,7 @@ port, notifications), Zapp (token), About (version, What's New, updates).
 | `commands_list` | Commands a connected app accepts (`deviceId` when several are connected) |
 | `devices_disconnect` | Close a connected app's connection (the Disconnect button); its session ends. An app whose X-Ray SDK supports close code 4000 stays away until foregrounded or relaunched; older SDKs may reconnect on their own. With several apps, `deviceId` is required: the default doesn't count |
 | `devices_connect_tv` | Read a smart TV app (Vizio, Vidaa, …) over DevTools from its IP and port, like Connect a TV…; it becomes a device that only sends logs. `devices_disconnect` stops it |
-| `devices_set_default` | Make one connected app the default for device tools (follows it across restarts); `null` clears |
+| `devices_set_default` | Make one connected app the default for device tools, and for reads and waits without `sessionId` (follows it across restarts); `null` clears |
 | `toolboxes_list` | An app's toolboxes, or one toolbox's tools with their arguments; `deviceId: "beaver"` for Beaver's own |
 | `tools_call` | Run one tool from `toolboxes_list` on the app (or on Beaver) and get its answer; it is marked destructive, so clients that honor destructiveHint ask the user to confirm (app tools can delete data or restart the app) |
 | `commands_send` | Send a command to the app; optionally collect the logs it causes, following a restart |
@@ -195,8 +195,9 @@ port, notifications), Zapp (token), About (version, What's New, updates).
 | `beaver_guide` | These recipes, by topic |
 
 Conventions: omitting `sessionId` means the live session (with several
-devices: the default device's if one is set, else the viewed one if it is
-live, else the most recently active), else the viewed one, else the most
+devices: the default device's if one is set — while it restarts, its latest
+session, followed into the new one — else the viewed one if it is live, else
+the most recently active), else the viewed one, else the most
 recent — and during a wait it follows the device into its new session if the
 app process restarts (`sessionChanged`); a given `sessionId` stays put
 (`sessionEnded`). A session is one app process: with an SDK that sends a

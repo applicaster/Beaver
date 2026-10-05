@@ -34,7 +34,7 @@ enum SchemeTools {
                                       oneOf: SchemeLink.Mode.allCases.map(\.rawValue)),
             "template": ToolSchema.string(templateHelp, oneOf: SchemeLink.Template.allCases.map(\.rawValue)),
             "scheme": ToolSchema.string("Mobile: the app's URL scheme without ://. Omitted: the app's own, read from the session's storage; myapp when it isn't there."),
-            "sessionId": ToolSchema.integer("Session whose storage gives the scheme. Omitted: the live session (with several devices, the viewed one if live, else the newest), else the viewed one, else the most recent."),
+            "sessionId": ToolSchema.integer("Session whose storage gives the scheme. Omitted: the live session (with several devices, the default device's, else the viewed one if live, else the most recently active), else the viewed one, else the most recent."),
             "baseUrl": ToolSchema.string("Web: the web app's index.html URL."),
             "screenType": ToolSchema.string("screen-type: the content type, mapped to its screen, e.g. movie."),
             "id": ToolSchema.string("screen-type: id. feed-content: the entry id. present: entry_id."),

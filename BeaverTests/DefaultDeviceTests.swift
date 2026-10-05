@@ -161,6 +161,31 @@ struct DefaultDeviceTests {
         #expect(try await !ctx.describeTarget(id, ToolArguments(), host).contains("(default)"))
     }
 
+    @Test("Review focus: while the default restarts, reads use its latest session and follow it — not another device")
+    func readsFollowRestartingDefault() async throws {
+        let (store, a, b, _) = try await twoDevices(default: .uid("A"))
+        try await store.endSession(a.id)
+        let ui = FakeUI(value: HostSnapshot(liveSessionIds: [b.id], viewingSessionId: b.id, defaultDevice: .uid("A")))
+        let ctx = makeContext(store, fakeUI: ui)
+        let s = try await ctx.resolveSession(ToolArguments())
+        #expect(s.id == a.id)
+        #expect(s.how == .live)
+        Task {
+            try? await Task.sleep(for: .milliseconds(300))
+            guard let a2 = try? await store.createSession(source: .live) else { return }
+            try? await store.setSessionDeviceInfo(id: a2.id, appName: "Alpha", appVersion: "1.0", deviceModel: "iPhone 15",
+                                                  platform: "iOS", osVersion: "18.0", deviceUID: "A")
+            ui.update { $0.liveSessionIds = [b.id, a2.id] }
+            try? await Task.sleep(for: .milliseconds(300))
+            await store.append(event("App started"), to: a2.id)
+            await store.append(event("App started"), to: b.id)
+        }
+        let r = try await LogTools.wait.run(ToolArguments(["filter": ["search": "App started"], "timeoutMs": 4000]), ctx)
+        #expect(r.structured["sessionChanged"]?["from"] == JSON(a.id))
+        #expect(r.structured["sessionId"] != JSON(b.id))
+        #expect(r.structured["total"] == 1)
+    }
+
     @Test("Review focus: without sessionId, reads and waits use the default device, not the viewed one")
     func readsUseDefault() async throws {
         let (store, a, b, _) = try await twoDevices(default: .uid("A"))

@@ -166,7 +166,15 @@ extension ToolContext {
         }
         let host = await ui.snapshot()
         let live = await store.byRecency(host.liveSessionIds)
+        // A default by device id that is restarting: its latest session, which
+        // a wait (`.live`) follows into the new one — not another device.
+        let restarting: Int64? = if case .uid(let uid)? = host.defaultDevice,
+                                    !sessions.contains(where: { live.contains($0.id) && $0.deviceUID == uid }) {
+            sessions.filter { $0.source == .live && $0.deviceUID == uid }
+                .max { ($0.endedAt ?? .distantFuture, $0.id) < ($1.endedAt ?? .distantFuture, $1.id) }?.id
+        } else { nil }
         let liveId = host.defaultDevice.flatMap { $0.liveSession(in: sessions, live: live) }
+            ?? restarting
             ?? host.viewingSessionId.flatMap { live.contains($0) ? $0 : nil }
             ?? live.last
         if let id = liveId, let s = sessions.first(where: { $0.id == id }) {

@@ -118,6 +118,30 @@ struct WatchTests {
         #expect(ui.notes.count == 1)
     }
 
+    @Test("Review focus: notify follows a restart whose identity lands after its first events, like watch_status")
+    func notifyFollowsLateIdentity() async throws {
+        let (store, a, ui, ctx) = try await live()
+        try await alpha(store, a.id)
+        _ = try await WatchTools.start.run(ToolArguments(["name": "errs", "filter": ["minLevel": "error"],
+                                                          "notify": ["atCount": 2]]), ctx)
+        try await seed(store, session: a.id, [(.error, "a", "", "before restart")])
+        try await Task.sleep(for: .milliseconds(700))
+        let b = try await store.createSession(source: .live)
+        ui.update { $0.liveSessionIds = [b.id] }
+        try await seed(store, session: b.id, [(.error, "a", "", "after restart")])
+        try await Task.sleep(for: .milliseconds(1200))
+        #expect(try await store.agentActivity().filter(\.isAttention).isEmpty)
+        try await alpha(store, b.id)   // the storage harvest names it only now
+        var notes: [AgentActivity] = []
+        for _ in 0..<50 where notes.isEmpty {
+            try await Task.sleep(for: .milliseconds(100))
+            notes = try await store.agentActivity().filter(\.isAttention)
+        }
+        #expect(notes.map(\.summary).first?.hasPrefix("Watch “errs”: 2 matches") == true)
+        let status = try await WatchTools.status.run(ToolArguments(["name": "errs"]), ctx)
+        #expect(status.structured["watches"]?.array?.first?["total"] == 2)
+    }
+
     @Test("watch_stop returns the final status and forgets the watch; missing names are not errors")
     func stop() async throws {
         let (_, _, _, ctx) = try await live()

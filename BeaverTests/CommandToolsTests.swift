@@ -123,6 +123,29 @@ struct CommandToolsTests {
             rows = try await store.agentActivity().filter { $0.kind == .system }
         }
         #expect(rows.map(\.summary) == ["Device disconnected after \"background\" → back in session #\(a.id)"])
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(await ctx.watches.hasDisconnectWatcher == false)
+    }
+
+    @Test("Review focus: D97 with a late handshake — the reconnect's silent session is deleted, the device is back in its own")
+    func disconnectEntryLateHandshake() async throws {
+        let (store, a, ui) = try await live()
+        let ctx = makeContext(store, fakeUI: ui)
+        await ctx.watchForDisconnect(after: "background", sessionId: a.id, window: .seconds(3))
+        try await Task.sleep(for: .milliseconds(300))
+        ui.update { $0.liveSessionIds = [] }
+        try await Task.sleep(for: .milliseconds(200))
+        let fresh = try await store.createSession(source: .live)
+        ui.update { $0.liveSessionIds = [fresh.id] }
+        try await Task.sleep(for: .milliseconds(2000))   // past the follower's settle
+        ui.update { $0.liveSessionIds = [a.id] }
+        try await store.deleteSession(id: fresh.id)
+        var rows: [AgentActivity] = []
+        for _ in 0..<30 where rows.isEmpty {
+            try await Task.sleep(for: .milliseconds(100))
+            rows = try await store.agentActivity().filter { $0.kind == .system }
+        }
+        #expect(rows.map(\.summary) == ["Device disconnected after \"background\" → back in session #\(a.id)"])
     }
 
     @Test("Review focus: a command to device B doesn't cancel the watcher of A's command")

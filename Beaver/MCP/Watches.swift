@@ -176,11 +176,16 @@ extension ToolContext {
                 try? await Task.sleep(for: Self.watchPollInterval)
                 guard let current = await watches.get(w.name), current.startedAt == w.startedAt,
                       current.firedAt == nil else { return }
-                if w.follows,
-                   case .moved(let next)? = await device.step(live: await ui.snapshot().liveSessionIds, store: store),
-                   !segments.contains(where: { $0.sessionId == next }),
-                   await isLaterSession(next, ofSameDeviceAs: w.sessionId) {
-                    segments.append(WaitSegment(sessionId: next, afterId: 0))
+                if w.follows {
+                    _ = await device.step(live: await ui.snapshot().liveSessionIds, store: store)
+                    // Checked on every poll, not only when the follower moves: an
+                    // app's identity can land after its session came up (a sink
+                    // without a handshake, a late one), and only then does it pass.
+                    let next = device.current
+                    if next != w.sessionId, !segments.contains(where: { $0.sessionId == next }),
+                       await isLaterSession(next, ofSameDeviceAs: w.sessionId) {
+                        segments.append(WaitSegment(sessionId: next, afterId: 0))
+                    }
                 }
                 for (i, s) in segments.enumerated() {
                     // The newest match after the cursor, and how many there are.

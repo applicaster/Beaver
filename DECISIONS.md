@@ -2679,6 +2679,15 @@ won't decode, and the feed starts unfiltered once.
 - `devices_disconnect` ignores the default: with several apps connected it
   needs `deviceId`; with one, `deviceId` may be omitted. Disconnecting the
   wrong app by leaving `deviceId` off is a mistake too easy to make silent.
+- **Amended (2026-10-05, D97):** reads and waits without `sessionId` use the
+  default device's live session too, before the viewed one: a `logs_wait`
+  after `commands_send` must read the app the command went to. While a
+  default by device id is between sessions (restarting) they use its latest
+  session and follow the device into the new one. Where Beaver has to pick
+  among live sessions (the default's, the fallback for reads, the session a
+  wait follows) it takes the most recently active, by latest event, not the
+  highest id: D97 continues an older session on reconnect. A default by
+  session (an app without a device id) ends when that session disconnects.
 
 ## D77. Beaver reads the client handshake
 

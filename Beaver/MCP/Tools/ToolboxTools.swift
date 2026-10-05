@@ -20,7 +20,7 @@ enum ToolboxTools {
     static let setDefault: MCPTool = MCPTool(
         name: "devices_set_default",
         title: "Set the default device",
-        description: "Use when several apps are connected and you will work with one of them: device tools (commands_send, storage_set, toolboxes_list, tools_call, …) then use it when you omit deviceId. It follows the app when it restarts. Pass deviceId: null to clear it. The user can set it too, in the device popover.",
+        description: "Use when several apps are connected and you will work with one of them: device tools (commands_send, storage_set, toolboxes_list, tools_call, …) then use it when you omit deviceId, and reads and waits (logs_query, logs_wait, …) when you omit sessionId. It follows the app when it restarts. Pass deviceId: null to clear it. The user can set it too, in the device popover.",
         kind: .change,
         idempotent: true,
         inputSchema: ToolSchema.object([
