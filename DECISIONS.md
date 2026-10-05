@@ -3208,6 +3208,24 @@ the step order of D90.
   are more than a day from Beaver's (an unset TV clock). It reports its own
   state as `category: "bridge"` events, once per change, which the script
   printed to its terminal.
+- **Reliability (amended 2026-10-05):** "Connected" means read: `start()`
+  attaches first and waits for the TV's reply to `Runtime.enable` (5 s),
+  then registers with Beaver, so a page that doesn't answer throws
+  `attachFailed` and nothing reaches Beaver; later attach failures put
+  their reason in the `bridge` line. A ping every 10 s with no pong in 5 s
+  ends the page's socket ("the TV stopped answering"), so a TV that sleeps
+  or leaves the network is re-discovered like a closed page. A reattach to
+  the same page (same debugger URL) drops lines at or before the newest
+  TV time already sent — `Runtime.enable` / `Log.enable` replay what the
+  page kept — until the reply to `Log.enable` (id 2), which ends the
+  replay; after it nothing is filtered (a TV clock may step back). Only ECONNREFUSED is "no DevTools on that port"; timeouts
+  and unreachable hosts are "Can't reach the TV". `pick` prefers a page
+  whose URL isn't about:/chrome*/devtools:. Connect: one in flight per
+  device id (`TVConnects`, a second caller awaits the first, and connects
+  afresh if the first caller cancelled); hosts are
+  lowercased (a hostname and its IP are still two ids); any error or
+  cancel after the start stops the bridge (`TVBridge.connect`), and
+  `beaverUnavailable` carries its reason and points at the connection pill.
 - **One code path:** the bridge is a WebSocket client of Beaver's own
   server on 127.0.0.1:9080 and sends the script's `register` and `event`
   frames. So the TV is the device D89 describes — its session, logs-only

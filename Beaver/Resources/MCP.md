@@ -103,10 +103,13 @@ port, notifications), Zapp (token), About (version, What's New, updates).
    "TV (DevTools)"; its console lines and exceptions stream in under subsystem
    `tv-cdp`. `beaver_status` lists it with `platform: "tv-cdp"`;
    `commands_send` to it fails with "only sends logs". Try the errors: a wrong
-   IP ("Can't reach"), a wrong port ("no DevTools on that port"), Chrome's
-   chrome://inspect attached to the TV ("page is busy"). Reload the app on
-   the TV: a `bridge` line says the page closed, then the logs carry on in
-   the same session. The sheet lists the TV under Recent next time.
+   IP or a TV that's off ("Can't reach … Is it on"), a wrong port ("no
+   DevTools on that port"), Chrome's chrome://inspect attached to the TV
+   ("page is busy"); Cancel while it connects leaves no TV behind. Reload
+   the app on the TV: a `bridge` line says the page closed, then the logs
+   carry on in the same session without repeating earlier lines. Put the TV
+   to sleep or pull its network: within ~15 s a `bridge` line says it
+   stopped answering; wake it and the logs carry on. The sheet lists the TV under Recent next time.
    Disconnect (pill menu) stops it. Agents: ask "connect the TV at
    192.168.1.40 port 9555" → `devices_connect_tv`. zapp-support's
    `node scripts/tv-bridge.mjs <tv-ip>:<port> --server ws://127.0.0.1:9080`
@@ -347,14 +350,18 @@ over the Chrome DevTools Protocol. The TV's developer mode must be on.
 1. Ask the user for the TV's IP address, and the DevTools port if it isn't
    the usual one: Vizio 9555, Vidaa 9226, others 9222.
 2. `devices_connect_tv(host: "192.168.1.40", port: 9555, name: "Living room Vizio")`
-   — returns its `deviceId`. An error says what to check: the address, the
-   port, an app open on the TV, or another DevTools window attached (close
-   it). A TV already connected returns its device.
+   — returns its `deviceId` once Beaver reads the TV's page. An error says
+   what to check: the address, "no DevTools on that port" (the TV refused
+   the port), "Can't reach the TV" (off, asleep or on another network), an
+   app open on the TV, or another DevTools window attached (close it). A TV
+   already connected, or still connecting, returns its device.
 3. `logs_query(sessionId: <deviceId>, since: "5m")` — console lines,
    exceptions (`exception`, with the stack) and log entries; `logs_wait`
    for what comes next. Lines in category `bridge` are Beaver's own: the
-   page closed (the app reloaded), the TV can't be reached. The device
-   stays connected meanwhile and picks the page up again.
+   page closed (the app reloaded), the TV stopped answering (asleep, off
+   the network; noticed within ~15 s), the TV can't
+   be reached. The device stays connected meanwhile and picks the page up
+   again; reattaching to the same page skips the lines it already sent.
 4. Commands, storage and toolboxes don't reach a TV.
    `devices_disconnect(deviceId: "<deviceId>")` stops reading it.
 

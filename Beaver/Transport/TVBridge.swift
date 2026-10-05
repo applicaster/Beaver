@@ -10,6 +10,7 @@
 //
 
 import Foundation
+import Synchronization
 
 /// Why a TV can't be read. The texts are what the Connect a TV sheet shows.
 public enum TVBridgeError: Error, Equatable, LocalizedError {
@@ -18,23 +19,29 @@ public enum TVBridgeError: Error, Equatable, LocalizedError {
     case noDevTools(target: String)
     case noPage
     case pageBusy
-    case beaverUnavailable
+    /// The page was found but didn't answer `Runtime.enable`.
+    case attachFailed(target: String, reason: String)
+    case beaverUnavailable(reason: String)
 
     public var errorDescription: String? {
         switch self {
         case .badAddress(let text):
             "\"\(text)\" isn't a TV address. Type the TV's IP address, e.g. 192.168.1.40, and its DevTools port."
         case .unreachable(let target, let reason):
-            "Can't reach the TV at \(target) (\(reason)). Check its IP address, that it's on, and on this Mac's network."
+            "Can't reach the TV at \(target) (\(reason)). Is it on, and on this Mac's network? Check its IP address too."
         case .noDevTools(let target):
-            "The TV at \(target) has no DevTools on that port. Check the port (Vizio 9555, Vidaa 9226, "
-                + "others usually 9222) and that the TV's developer mode is on."
+            "The TV at \(target) has no DevTools on that port (nothing listens there, or something else answers). "
+                + "Check the port (Vizio 9555, Vidaa 9226, others usually 9222) and that the TV's developer mode is on."
         case .noPage:
             "The TV has no app open. Launch the app on the TV, then connect again."
         case .pageBusy:
             "The app's page is busy: close any DevTools window on the TV (chrome://inspect), then connect again."
-        case .beaverUnavailable:
-            "Beaver isn't listening for devices on port 9080 (Settings… shows why), so the TV has nowhere to send its logs."
+        case .attachFailed(let target, let reason):
+            "The TV at \(target) has the app's page but didn't let Beaver read it (\(reason)). Close any DevTools "
+                + "window on the TV (chrome://inspect), relaunch the app, then connect again."
+        case .beaverUnavailable(let reason):
+            "The TV has nowhere to send its logs: \(reason). The connection pill in Beaver's toolbar (or the "
+                + "main window, with no device) says whether Beaver is taking devices on port 9080."
         }
     }
 }
@@ -51,6 +58,8 @@ public enum CDP {
         public var title: String
         /// Missing while another DevTools client is attached.
         public var socket: URL?
+        /// What the page shows: the app's address, or about:blank, chrome://…
+        public var url = ""
     }
 
     /// A log line from the TV, as `tv-bridge.mjs`'s `toEvent` builds it.
@@ -66,16 +75,53 @@ public enum CDP {
         guard let list = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return nil }
         return list.map {
             Page(type: $0["type"] as? String ?? "", title: $0["title"] as? String ?? "",
-                 socket: ($0["webSocketDebuggerUrl"] as? String).flatMap(URL.init(string:)))
+                 socket: ($0["webSocketDebuggerUrl"] as? String).flatMap(URL.init(string:)),
+                 url: $0["url"] as? String ?? "")
         }
     }
 
-    /// The app's page: the first free one. A page without a debugger URL
-    /// has another DevTools client attached (the TV takes one at a time).
+    /// The app's page: the first free one, the TV's own pages (about:blank,
+    /// chrome://…) only when there's nothing else. A page without a
+    /// debugger URL has another DevTools client attached (the TV takes one
+    /// at a time); a busy app page isn't swapped for a free system page.
+    // ponytail: URL-prefix heuristic; a TV whose launcher is an http page
+    // still needs the app listed first.
     public static func pick(_ pages: [Page]) throws -> Page {
         let candidates = pages.filter { $0.type == "page" }
-        if let free = candidates.first(where: { $0.socket != nil }) { return free }
+        let apps = candidates.filter { page in !["about:", "chrome", "devtools:"].contains { page.url.hasPrefix($0) } }
+        if let free = (apps.isEmpty ? candidates : apps).first(where: { $0.socket != nil }) { return free }
         throw candidates.isEmpty ? TVBridgeError.noPage : TVBridgeError.pageBusy
+    }
+
+    /// A reply to one of the bridge's commands: its id, and the error text when it failed.
+    static func reply(_ data: Data) -> (id: Int, error: String?)? {
+        guard let m = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let id = m["id"] as? Int
+        else { return nil }
+        return (id, (m["error"] as? [String: Any]).map { $0["message"] as? String ?? "unknown" })
+    }
+
+    /// What a failed `GET /json/list` means. Only a refused connection
+    /// (ECONNREFUSED: the TV is up, the port closed) is "no DevTools";
+    /// a TV that is off, asleep or elsewhere is unreachable.
+    public static func discoveryError(_ error: any Error, target: String) -> any Error {
+        guard let error = error as? URLError else {
+            return error is CancellationError ? error : TVBridgeError.unreachable(target: target, reason: error.localizedDescription)
+        }
+        let info = [error.userInfo, (error.userInfo[NSUnderlyingErrorKey] as? NSError)?.userInfo ?? [:]]
+        let refused = info.contains { $0["_kCFStreamErrorDomainKey"] as? Int == 1 && $0["_kCFStreamErrorCodeKey"] as? Int == Int(ECONNREFUSED) }
+        switch error.code {
+        case .cancelled:
+            return CancellationError()
+        case .cannotConnectToHost where refused:
+            return TVBridgeError.noDevTools(target: target)
+        case .notConnectedToInternet:
+            return TVBridgeError.unreachable(target: target, reason: "no network — does Beaver have Local Network "
+                + "access? System Settings → Privacy & Security → Local Network")
+        case .timedOut:
+            return TVBridgeError.unreachable(target: target, reason: "it doesn't answer")
+        default:
+            return TVBridgeError.unreachable(target: target, reason: error.localizedDescription)
+        }
     }
 
     static let levels = ["warning": "warning", "warn": "warning", "error": "error", "assert": "error",
@@ -167,16 +213,29 @@ public actor TVBridge {
     private let name: String?
     private let beaver: URL
     private let retryDelay: Duration
+    private let pingInterval: Duration
+    /// How long the TV may take to answer: `/json/list`, `Runtime.enable`, a ping.
+    private let timeout: Duration
     private let http = URLSession.shared
     private var relay: URLSessionWebSocketTask?
     private var cdp: URLSessionWebSocketTask?
     private var loop: Task<Void, Never>?
     private var lastStatus: String?
+    /// The page socket the ping gave up on: its end is "stopped answering".
+    private var stalled: URLSessionWebSocketTask?
+    /// The newest TV time sent per page (its debugger URL). `Runtime.enable`
+    /// and `Log.enable` replay what the page kept, so a reattach to the same
+    /// page drops lines at or before it.
+    private var newest: [URL: UInt64] = [:]
     public private(set) var isRunning = false
 
+    /// A host is lowercased, so "TV.local" and "tv.local" are one device id.
+    // ponytail: a hostname and its IP are still two ids; resolving the name
+    // here would block, and the script registers what it was typed too.
     public init(host: String, port: Int, name: String? = nil,
-                beaver: URL = URL(string: "ws://127.0.0.1:9080")!, retryDelay: Duration = .seconds(3)) throws {
-        let host = host.trimmingCharacters(in: .whitespaces)
+                beaver: URL = URL(string: "ws://127.0.0.1:9080")!, retryDelay: Duration = .seconds(3),
+                ping: Duration = .seconds(10), timeout: Duration = .seconds(5)) throws {
+        let host = host.trimmingCharacters(in: .whitespaces).lowercased()
         let bracketed = host.contains(":") && !host.hasPrefix("[") ? "[\(host)]" : host
         guard !host.isEmpty, (1...65_535).contains(port), !host.contains(where: { " /?#@".contains($0) }),
               let base = URL(string: "http://\(bracketed):\(port)"), base.host != nil
@@ -186,26 +245,55 @@ public actor TVBridge {
         self.name = name.flatMap { $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0 }
         self.beaver = beaver
         self.retryDelay = retryDelay
+        self.pingInterval = ping
+        self.timeout = timeout
     }
 
-    /// Finds the app's page and starts streaming it into Beaver. Throws
-    /// `TVBridgeError` when the TV can't be read; then nothing reached Beaver.
+    /// Finds the app's page, attaches to it (the TV answered
+    /// `Runtime.enable`) and starts streaming it into Beaver. Throws
+    /// `TVBridgeError` when the TV can't be read, `CancellationError` when
+    /// cancelled; then nothing reached Beaver.
     public func start() async throws {
         guard !isRunning else { return }
         let page = try await discover()
+        let (ws, early) = try await open(page)
         let relay = http.webSocketTask(with: beaver)
         relay.resume()
-        self.relay = relay
         do {
             try await relay.send(.string(registerFrame(page)))
         } catch {
             relay.cancel()
-            self.relay = nil
-            throw TVBridgeError.beaverUnavailable
+            ws.cancel()
+            if Task.isCancelled { throw CancellationError() }
+            throw TVBridgeError.beaverUnavailable(reason: "Beaver's WebSocket server didn't take the connection "
+                + "(\(error.localizedDescription))")
         }
+        self.relay = relay
         isRunning = true
         Task { await watch(relay) }
-        loop = Task { await run(page) }
+        loop = Task { await run(page, ws, early) }
+    }
+
+    /// `start()`, then waits up to `wait` for `session` to find the TV in
+    /// Beaver. Whatever goes wrong after the start — an error, a cancel, no
+    /// session in time — stops the bridge again, so a cancelled Connect
+    /// leaves no TV behind.
+    public func connect(wait: Duration = .seconds(5), session: @Sendable () async throws -> Int64?) async throws -> Int64 {
+        try await start()
+        do {
+            let deadline = ContinuousClock.now.advanced(by: wait)
+            while ContinuousClock.now < deadline {
+                if let id = try await session() {
+                    try Task.checkCancellation()
+                    return id
+                }
+                try await Task.sleep(for: .milliseconds(50))
+            }
+            throw TVBridgeError.beaverUnavailable(reason: "Beaver opened no session for it in \(wait.components.seconds) s")
+        } catch {
+            stop()
+            throw error
+        }
     }
 
     /// Stops reading the TV; Beaver ends its session.
@@ -247,65 +335,148 @@ public actor TVBridge {
 
     // MARK: - The TV's side
 
-    private func run(_ first: CDP.Page) async {
-        var page = first
+    private func run(_ first: CDP.Page, _ firstSocket: URLSessionWebSocketTask, _ firstLines: [CDP.Event]) async {
+        var page = first, ws = firstSocket, early = firstLines
+        var attached = "Attached to \"\(page.title)\""
         while !Task.isCancelled {
-            await attach(page)
+            await status(attached, level: "info")
+            let ended = await stream(ws, page: page, early: early)
             guard !Task.isCancelled else { return }
-            await status("The TV closed the app's page — reconnecting", level: "warning")
+            await status(ended, level: "warning")
+            let lastSocket = page.socket
             while true {
                 try? await Task.sleep(for: retryDelay)
                 guard !Task.isCancelled else { return }
                 do {
                     page = try await discover()
+                    (ws, early) = try await open(page)
                     break
                 } catch {
+                    guard !Task.isCancelled else { return }
                     await status("\(error.localizedDescription) Retrying every \(retryDelay.components.seconds) s.",
                                  level: "warning")
                 }
             }
+            attached = page.socket == lastSocket
+                ? "Reattached to \"\(page.title)\"; lines it already sent are skipped"
+                : "Attached to \"\(page.title)\""
             try? await relay?.send(.string(registerFrame(page)))
         }
     }
 
-    /// Streams one page until it closes.
-    private func attach(_ page: CDP.Page) async {
-        guard let url = page.socket else { return }
+    /// Opens a page and enables its domains; returns once the TV answered
+    /// `Runtime.enable`, with the lines it sent meanwhile (the replay).
+    private func open(_ page: CDP.Page) async throws -> (URLSessionWebSocketTask, [CDP.Event]) {
+        guard let url = page.socket else { throw TVBridgeError.pageBusy }
         let ws = http.webSocketTask(with: url)
         ws.maximumMessageSize = 64 << 20
-        cdp = ws
         ws.resume()
-        defer { ws.cancel() }
+        let started = ContinuousClock.now
+        let watchdog = Task { [timeout] in
+            try await Task.sleep(for: timeout)
+            ws.cancel()
+        }
+        defer { watchdog.cancel() }
         do {
-            try await ws.send(.string(#"{"id":1,"method":"Runtime.enable"}"#))
-            try await ws.send(.string(#"{"id":2,"method":"Log.enable"}"#))
-            await status("Attached to \"\(page.title)\"", level: "info")
-            while !Task.isCancelled {
-                let data: Data = switch try await ws.receive() {
-                case .string(let s): Data(s.utf8)
-                case .data(let d): d
-                @unknown default: Data()
+            return try await withTaskCancellationHandler {
+                try await ws.send(.string(#"{"id":1,"method":"Runtime.enable"}"#))
+                try await ws.send(.string(#"{"id":2,"method":"Log.enable"}"#))
+                var early: [CDP.Event] = []
+                while true {
+                    let data = Self.data(try await ws.receive())
+                    if let reply = CDP.reply(data), reply.id == 1 {
+                        if let error = reply.error { throw TVBridgeError.attachFailed(target: target, reason: error) }
+                        return (ws, early)
+                    }
+                    if let e = CDP.event(data, now: Self.now()) { early.append(e) }
                 }
-                if let e = CDP.event(data, now: Self.now()) { await send(e) }
+            } onCancel: {
+                ws.cancel()
             }
-        } catch {}
+        } catch {
+            ws.cancel()
+            if Task.isCancelled { throw CancellationError() }
+            if error is TVBridgeError { throw error }
+            let late = started.duration(to: .now) >= timeout
+            throw TVBridgeError.attachFailed(target: target, reason: late
+                ? "no answer in \(timeout.components.seconds) s" : error.localizedDescription)
+        }
+    }
+
+    /// Streams one page until it goes; returns why, for the status line.
+    private func stream(_ ws: URLSessionWebSocketTask, page: CDP.Page, early: [CDP.Event]) async -> String {
+        cdp = ws
+        defer { ws.cancel() }
+        let pinger = Task { await ping(ws) }
+        defer { pinger.cancel() }
+        // Only the replay is filtered: Chrome sends it before its replies to
+        // Runtime.enable (id 1) and Log.enable (id 2). Past that, a TV clock
+        // that stepped back must not drop new lines.
+        var cutoff = page.socket.flatMap { newest[$0] }
+        for e in early { await forward(e, page: page.socket, cutoff: cutoff) }
+        do {
+            while !Task.isCancelled {
+                let data = Self.data(try await ws.receive())
+                if CDP.reply(data)?.id == 2 { cutoff = nil }
+                if let e = CDP.event(data, now: Self.now()) { await forward(e, page: page.socket, cutoff: cutoff) }
+            }
+        } catch {
+            if stalled === ws { return "The TV stopped answering (asleep, or off the network?) — reconnecting" }
+            if ws.closeCode != .invalid { return "The TV closed the app's page — reconnecting" }
+            return "Lost the connection to the TV's page (\(error.localizedDescription)) — reconnecting"
+        }
+        return ""
+    }
+
+    /// A TV that sleeps or leaves the network sends nothing, not even a
+    /// close: a ping every `pingInterval` with no pong in `timeout` ends the
+    /// page's socket, and `run` finds the TV again.
+    private func ping(_ ws: URLSessionWebSocketTask) async {
+        while !Task.isCancelled {
+            try? await Task.sleep(for: pingInterval)
+            guard !Task.isCancelled else { return }
+            let answered = await Self.pong(ws, within: timeout)
+            guard !Task.isCancelled else { return }
+            if !answered {
+                stalled = ws
+                ws.cancel()
+                return
+            }
+        }
+    }
+
+    private static func pong(_ ws: URLSessionWebSocketTask, within timeout: Duration) async -> Bool {
+        let waiting = Mutex<CheckedContinuation<Bool, Never>?>(nil)
+        return await withCheckedContinuation { continuation in
+            waiting.withLock { $0 = continuation }
+            let answer: @Sendable (Bool) -> Void = { ok in waiting.withLock { $0.take() }?.resume(returning: ok) }
+            ws.sendPing { answer($0 == nil) }
+            Task {
+                try? await Task.sleep(for: timeout)
+                answer(false)
+            }
+        }
+    }
+
+    /// Sends a TV line, unless the page replays it on a reattach.
+    private func forward(_ e: CDP.Event, page: URL?, cutoff: UInt64?) async {
+        if e.category != "bridge", let page {
+            if let cutoff, e.timestampMillis <= cutoff { return }
+            newest[page] = max(newest[page] ?? 0, e.timestampMillis)
+        }
+        await send(e)
     }
 
     private func discover() async throws -> CDP.Page {
         for path in ["json/list", "json"] {
             var request = URLRequest(url: base.appendingPathComponent(path))
-            request.timeoutInterval = 5
+            request.timeoutInterval = Double(timeout.components.seconds) + Double(timeout.components.attoseconds) / 1e18
             request.cachePolicy = .reloadIgnoringLocalCacheData
             let data: Data, response: URLResponse
             do {
                 (data, response) = try await http.data(for: request)
-            } catch let error as URLError where error.code == .cannotConnectToHost {
-                throw TVBridgeError.noDevTools(target: target)
-            } catch let error as URLError where error.code == .notConnectedToInternet {
-                throw TVBridgeError.unreachable(target: target, reason: "no network — does Beaver have Local Network "
-                    + "access? System Settings → Privacy & Security → Local Network")
             } catch {
-                throw TVBridgeError.unreachable(target: target, reason: error.localizedDescription)
+                throw CDP.discoveryError(error, target: target)
             }
             if (response as? HTTPURLResponse)?.statusCode == 200, let pages = CDP.pages(data) {
                 return try CDP.pick(pages)
@@ -314,5 +485,38 @@ public actor TVBridge {
         throw TVBridgeError.noDevTools(target: target)
     }
 
+    private static func data(_ message: URLSessionWebSocketTask.Message) -> Data {
+        switch message {
+        case .string(let s): Data(s.utf8)
+        case .data(let d): d
+        @unknown default: Data()
+        }
+    }
+
     private static func now() -> UInt64 { UInt64(Date().timeIntervalSince1970 * 1000) }
+}
+
+/// One Connect per TV at a time (D94): a second Connect for a TV that is
+/// still connecting waits for the first one's result instead of starting a
+/// second bridge. Only the caller that started a Connect can cancel it; one
+/// cancelled under a waiting caller is started again for that caller, so a
+/// `CancellationError` reaches only whoever cancelled.
+@MainActor public final class TVConnects {
+    private var running: [String: Task<Int64, any Error>] = [:]
+
+    public init() {}
+
+    public func run(_ deviceId: String, _ connect: @escaping @MainActor () async throws -> Int64) async throws -> Int64 {
+        if let first = running[deviceId], !first.isCancelled {
+            do {
+                return try await first.value
+            } catch is CancellationError where !Task.isCancelled {
+                return try await run(deviceId, connect)
+            }
+        }
+        let task = Task { try await connect() }
+        running[deviceId] = task
+        defer { if running[deviceId] == task { running[deviceId] = nil } }
+        return try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+    }
 }
