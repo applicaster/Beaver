@@ -76,7 +76,7 @@ enum CommandTools {
     static let disconnect: MCPTool = MCPTool(
         name: "devices_disconnect",
         title: "Disconnect a device",
-        description: "Use when the user asks to drop a connected app, or a stale one is in the way: Beaver closes that app's connection and its session ends, like the Disconnect button. An app that reconnects on its own comes back in a new session. With several apps connected, pass deviceId from beaver_status: the default device doesn't count here.",
+        description: "Use when the user asks to drop a connected app, or a stale one is in the way: Beaver closes that app's connection and its session ends, like the Disconnect button. With quick-brick-xray 2.72.0 or later the app stays disconnected until it returns to the foreground or is relaunched; an older SDK reconnects within seconds, into the same session. With several apps connected, pass deviceId from beaver_status: the default device doesn't count here.",
         kind: .change,
         inputSchema: ToolSchema.object(["deviceId": ToolSchema.deviceId])
     ) { (args: ToolArguments, ctx: ToolContext) async throws -> ToolResult in
@@ -87,7 +87,7 @@ enum CommandTools {
         return ToolResult(
             summary: "Disconnected \(StatusTools.describeDevice(session.session)) (session #\(live)).",
             structured: ["disconnected": .string(String(live)), "sessionId": JSON(live)],
-            next: ["beaver_status() — an app that reconnects on its own shows up in a new session"],
+            next: ["beaver_status() — an older SDK (before quick-brick-xray 2.72.0) is back within seconds, in the same session; a newer one stays away until the app is foregrounded or relaunched"],
             sessionId: live
         )
     }

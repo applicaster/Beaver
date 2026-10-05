@@ -328,11 +328,20 @@ public actor WSServer {
         }
     }
 
-    /// Closes one client (the Disconnect button, `devices_disconnect`).
-    /// Its session ends through the usual `.cancelled` path. An SDK that
-    /// reconnects on its own comes back as a new connection.
+    /// Closes one client (the Disconnect button, `devices_disconnect`) with
+    /// close code 4000 (D98, PROTOCOL.md §3.4): an SDK that reads it stops
+    /// reconnecting until the app returns to the foreground or relaunches.
+    /// Beaver's other closes never use 4000, so those apps come back. The
+    /// client answers the close and `receive` ends the session; one that
+    /// doesn't answer is cancelled after a second.
     public func disconnect(_ connection: UUID) {
-        connections[connection]?.cancel()
+        guard let target = connections[connection] else { return }
+        let metadata = NWProtocolWebSocket.Metadata(opcode: .close)
+        metadata.closeCode = .privateCode(4000)
+        let context = NWConnection.ContentContext(identifier: "disconnect", metadata: [metadata])
+        target.send(content: Data("disconnected by Beaver".utf8), contentContext: context,
+                    isComplete: true, completion: .contentProcessed({ _ in }))
+        networkQueue.asyncAfter(deadline: .now() + 1) { target.cancel() }
     }
 
     // MARK: - Outbound

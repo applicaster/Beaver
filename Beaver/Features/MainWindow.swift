@@ -800,6 +800,7 @@ private struct DeviceSwitcher: View {
                 Button("Disconnect \(ToolbarDeviceBadge.title(viewed))") {
                     Task { await env.disconnect(viewed.id) }
                 }
+                .help(DevicePopover.disconnectHelp)
             }
             Button("Connect a TV…") { env.showingConnectTV = true }
             Button("All Sessions…") { env.selectedTab = .sessions }

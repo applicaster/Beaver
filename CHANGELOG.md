@@ -12,6 +12,17 @@ does the same for a manual release.
 
 ## [Unreleased]
 
+### Changed
+- **Disconnect keeps the app away.** Disconnect (the device menu, the device
+  details, Sessions, `devices_disconnect`) now closes the connection with
+  close code 4000. An app with quick-brick-xray 2.72.0 or later stays
+  disconnected until it returns to the foreground or is relaunched; before,
+  it reconnected within a second into the same session, so Disconnect looked
+  like it did nothing. Older apps still reconnect that way. Beaver's other
+  closes (a silent socket, restarting the server) don't use the code, so
+  apps come back after them as before. Agents: `devices_disconnect`'s
+  description and Next say so.
+
 ## [4.21.1] - 2026-10-02
 
 ### Fixed

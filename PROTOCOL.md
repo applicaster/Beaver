@@ -58,7 +58,8 @@ want to add in a future protocol revision, but not in this rewrite.)**
 
 ## 3. Direction: server → client
 
-Beaver (the desktop app) is the **server**. It sends two message types.
+Beaver (the desktop app) is the **server**. It sends three message types
+(`handshake`, `command`, `mcp`) and one close code of its own (§3.4).
 
 ### 3.1 `handshake`
 
@@ -211,6 +212,25 @@ same socket as `handshake` and `command`, through `DeviceMCPClient`.
 - Beaver sends one request at a time per app; each timeout counts from sending.
   A request waits for its turn for at most its own timeout; one that doesn't
   get it is never sent.
+
+### 3.4 Close code 4000: disconnected by Beaver (D98)
+
+When a person or an agent disconnects a device (Disconnect,
+`devices_disconnect`), Beaver sends a WebSocket close frame with close code
+**4000** and reason `disconnected by Beaver`, then closes the connection (it
+cancels it after 1 s if the client doesn't answer the close). Beaver 4.22.0
+or later.
+
+- An SDK that receives 4000 stops reconnecting ("parked"). It connects again
+  when the app returns to the foreground, when the logger URL is set or the
+  sink turned on again, or on a new app launch.
+- Any other close code, or a network error, means reconnect with backoff as
+  before (§6).
+- Beaver never uses 4000 for its other closes: the silence timeout (§6.4),
+  stopping or re-binding the server, or a dropped zombie socket. After those
+  the app comes back on its own.
+- An SDK that doesn't know 4000 reconnects as before, into the same session
+  (§6.5).
 
 ---
 
@@ -523,7 +543,8 @@ page, and after every reconnect.
    once, each in its own session.
 3. The connection remains open indefinitely. Either side may close at
    any time; Beaver closes one when the user (or an agent) disconnects
-   that device.
+   that device, with close code 4000 (§3.4) so that an SDK which knows it
+   stays away instead of reconnecting.
 4. When a connection closes (network failure, client crash, or a
    Disconnect in Beaver), Beaver stores every frame that arrived before
    the close, then sets that connection's session `ended_at`; other
@@ -544,14 +565,24 @@ page, and after every reconnect.
    `launchId`, or logs before its handshake, keeps one session per connection.
    A client may identify itself with `handshake` (§4.4, the SDK) or
    `register` (§4.6, zapp-support's TV bridge).
-6. **Reconnect behavior is not symmetric across platforms.** iOS/tvOS's
-   sink reconnects on its own, backing off from 1 s to 30 s, forever. **The
-   Android sink does not reconnect at all** (`WebSocketSink.kt`: `// todo:
-   reconnect attempts`) — after a Disconnect in Beaver, or any drop
-   (Wi-Fi hiccup, Beaver restart), the Android app is gone for good until
-   it is relaunched by hand. The Android native sink also only exists in
-   debug builds to begin with (§4.4). Don't tell a user "it'll reconnect on
-   its own" for an Android device.
+6. **Reconnects, per platform.** After any drop (Wi-Fi hiccup, Beaver
+   restart, a close other than 4000) the app comes back on its own:
+   - **iOS/tvOS** native sink: reconnects forever, backing off 1, 2, 4, 8,
+     16, 30, 30 … s (a successful connect resets it), and at once when the
+     app returns to the foreground.
+   - **Android** native sink: the same since quick-brick-xray 2.64.2
+     ([#2883](https://github.com/applicaster/Zapp-Frameworks/pull/2883)),
+     same backoff and foreground rule. Earlier versions never reconnected.
+     The native sink exists only in debug builds (§4.4).
+   - **Web** (JS sink): reconnects when it next logs.
+   - **JS sink inside a native app** (no native sink): reconnects like the
+     web, but sends no `handshake`, so each connection is a new session.
+
+   A reconnect of the same app run lands in the same session (5. above).
+   After a Disconnect in Beaver (close code 4000, §3.4), an SDK with
+   quick-brick-xray 2.72.0 or later stays disconnected until the app returns
+   to the foreground, the logger is re-enabled, or the app is relaunched;
+   an older SDK reconnects within seconds, into the same session.
 
 ---
 
