@@ -39,8 +39,8 @@ struct WSServerErrorTests {
 
     @Test("A connection that fails before the handshake leaves the listener's state alone and is recorded")
     func failedConnectionIsNotAListenerFailure() async throws {
-        let server = try await listening(port: 19_093)
-        let raw = NWConnection(host: "127.0.0.1", port: 19_093, using: .tcp)
+        let server = try await listening(port: 19_500)
+        let raw = NWConnection(host: "127.0.0.1", port: 19_500, using: .tcp)
         raw.start(queue: .global())
         raw.send(content: Data("not a websocket upgrade\r\n\r\n".utf8), completion: .idempotent)
 
@@ -48,13 +48,20 @@ struct WSServerErrorTests {
         let state = await server.currentState
         #expect(isListening(state), "\(state)")
         raw.cancel()
+
+        // A connection that gets through clears the old failures.
+        let client = URLSession.shared.webSocketTask(with: URL(string: "ws://127.0.0.1:19500")!)
+        client.resume()
+        _ = try await client.receive() // handshake
+        #expect(await eventually { await server.recentProblems.isEmpty })
+        client.cancel(with: .normalClosure, reason: nil)
         await server.stop()
     }
 
     @Test("A device leaving while the listener is down doesn't hide the failure")
     func disconnectKeepsListenerFailure() async throws {
-        let server = try await listening(port: 19_094)
-        let client = URLSession.shared.webSocketTask(with: URL(string: "ws://127.0.0.1:19094")!)
+        let server = try await listening(port: 19_501)
+        let client = URLSession.shared.webSocketTask(with: URL(string: "ws://127.0.0.1:19501")!)
         client.resume()
         _ = try await client.receive() // handshake
         _ = await race(timeout: .seconds(10)) {
@@ -80,7 +87,7 @@ struct WSServerErrorTests {
 
     @Test("A first start that can't create the listener retries instead of staying deaf")
     func failedStartRetries() async throws {
-        let server = WSServer(port: 19_095)
+        let server = WSServer(port: 19_502)
         await server.failNextBind(NWError.posix(.EADDRINUSE))
         try await server.start()
         let state = await server.currentState
@@ -89,7 +96,7 @@ struct WSServerErrorTests {
             await server.stop()
             return
         }
-        #expect(reason.contains("19095 is in use"))
+        #expect(reason.contains("19502 is in use"))
         #expect(reason.contains("retrying"))
         #expect(await eventually { await isListening(server.currentState) })
         await server.stop()
@@ -97,8 +104,8 @@ struct WSServerErrorTests {
 
     @Test("A connection that never finishes the WebSocket upgrade is closed and recorded")
     func unfinishedUpgradeIsClosed() async throws {
-        let server = try await listening(port: 19_096, handshakeTimeout: .milliseconds(300))
-        let raw = NWConnection(host: "127.0.0.1", port: 19_096, using: .tcp)
+        let server = try await listening(port: 19_503, handshakeTimeout: .milliseconds(300))
+        let raw = NWConnection(host: "127.0.0.1", port: 19_503, using: .tcp)
         raw.start(queue: .global())
         // TCP only: no upgrade request.
         #expect(await eventually {
@@ -112,10 +119,10 @@ struct WSServerErrorTests {
 
     @Test("stop() ends every connected client's session")
     func stopEndsSessions() async throws {
-        let server = try await listening(port: 19_097)
+        let server = try await listening(port: 19_504)
         var clients: [URLSessionWebSocketTask] = []
         for _ in 0..<3 {
-            let c = URLSession.shared.webSocketTask(with: URL(string: "ws://127.0.0.1:19097")!)
+            let c = URLSession.shared.webSocketTask(with: URL(string: "ws://127.0.0.1:19504")!)
             c.resume()
             _ = try await c.receive() // handshake
             clients.append(c)
@@ -150,8 +157,8 @@ struct WSServerErrorTests {
 
     @Test("A binary frame is delivered like a text one")
     func binaryFrame() async throws {
-        let server = try await listening(port: 19_098)
-        let client = URLSession.shared.webSocketTask(with: URL(string: "ws://127.0.0.1:19098")!)
+        let server = try await listening(port: 19_505)
+        let client = URLSession.shared.webSocketTask(with: URL(string: "ws://127.0.0.1:19505")!)
         client.resume()
         _ = try await client.receive() // handshake
         let payload = Data(#"{"type":"handshake"}"#.utf8)

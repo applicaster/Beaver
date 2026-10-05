@@ -53,7 +53,8 @@ struct StatusToolsTests {
         let r = try await StatusTools.status.run(ToolArguments(), makeContext(store, ui: host))
         #expect(r.body.contains("ws://192.168.1.5:9080 or ws://10.0.0.7:9080"))
         #expect(r.body.contains("192.168.1.30:50123: connected but sent nothing"))
-        #expect(r.summary.contains("Last connection attempt: 192.168.1.30:50123 connected but sent nothing"))
+        #expect(r.summary.contains("Last failed connection at "))
+        #expect(r.summary.contains(": 192.168.1.30:50123 connected but sent nothing"))
         #expect(r.structured["webSocket"]?["deviceURLs"]?.array?.count == 2)
         #expect(r.structured["webSocket"]?["connectionProblems"]?.array?.count == 1)
     }

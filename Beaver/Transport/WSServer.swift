@@ -134,7 +134,8 @@ public actor WSServer {
     }
 
     /// The last few connections that failed before the handshake, never
-    /// finished it, or were closed for sending nothing; oldest first.
+    /// finished it, or were closed for sending nothing, since the last
+    /// connection that got through; oldest first.
     public var recentProblems: [ConnectionProblem] { problems }
 
     private func publish() { stateContinuation.yield(currentState) }
@@ -146,6 +147,8 @@ public actor WSServer {
     /// fails later.
     public func start() async throws {
         running = true
+        retryTask?.cancel()
+        retryTask = nil
         do {
             try bind()
         } catch {
@@ -187,6 +190,9 @@ public actor WSServer {
         parameters.defaultProtocolStack.applicationProtocols.insert(wsOptions, at: 0)
 
         let listener = try NWListener(using: parameters, on: port)
+        // A second start() must not leave the old listener holding the port.
+        self.listener?.stateUpdateHandler = nil
+        self.listener?.cancel()
         self.listener = listener
 
         listener.newConnectionHandler = { [weak self, weak listener] connection in
@@ -249,6 +255,12 @@ public actor WSServer {
             publish()
         case .failed(let error):
             scheduleRebind(reason: describe(error))
+        case .waiting(let error):
+            // Not listening yet (e.g. no network); `.ready` clears it.
+            listening = false
+            listenerFailure = describe(error)
+            Self.log.error("listener waiting: \(error.localizedDescription, privacy: .public)")
+            publish()
         case .cancelled:
             listening = false
             publish()
@@ -347,6 +359,8 @@ public actor WSServer {
         case .ready:
             // One session and one receive loop per connection.
             guard ready.insert(id).inserted else { return }
+            // A device got through: earlier failures no longer explain anything.
+            problems = []
             if let payload = try? ProtocolEncoder.encodeHandshake(id: UUID()) {
                 send(payload, on: connection)
             }

@@ -951,7 +951,7 @@ private struct ConnectionPlaceholder: View {
                 .textSelection(.enabled)
         }
         if let problem = env.connectionProblems.last {
-            Text("Last attempt, \(problem.at.formatted(date: .omitted, time: .shortened)): \(problem.peer) \(problem.reason)")
+            Text("Last failed connection at \(problem.at.formatted(date: .omitted, time: .standard)): \(problem.peer) \(problem.reason)")
         }
         Text("Can't connect? Put the device on the same Wi-Fi as this Mac, allow Beaver in System Settings → Network → Firewall, and turn off VPN on both. Guest and office Wi-Fi often keep devices apart (client isolation).")
             .font(.caption)

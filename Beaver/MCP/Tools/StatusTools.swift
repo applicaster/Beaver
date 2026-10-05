@@ -66,7 +66,9 @@ enum StatusTools {
 
         var summary = switch devices.count {
         case 0: "No device is connected. \(sessions.isEmpty ? "No sessions are stored yet." : "Past sessions can still be read.")"
-            + (host.connectionProblems.last.map { " Last connection attempt: \($0.peer) \($0.reason)." } ?? "")
+            + (host.connectionProblems.last.map {
+                " Last failed connection at \($0.at.formatted(date: .omitted, time: .standard)): \($0.peer) \($0.reason)."
+            } ?? "")
         case 1: "A device is connected: \(described[0])."
         default: "\(devices.count) devices are connected: \(described.joined(separator: "; ")). Pass deviceId to commands and storage changes."
         }
