@@ -93,12 +93,13 @@ public actor LogStore {
 
         // A live session is ended when its device disconnects. One still
         // open now was left by a quit or a crash: no device writes to it
-        // any more, so end it at its last event (else its start). Runs
-        // before any device can connect to this store.
+        // any more, so end it at its last event (else its start; never
+        // before its start: a device clock behind the Mac's stamps events
+        // early). Runs before any device can connect to this store.
         try dbQueue.write { db in
             try db.execute(sql: """
-                UPDATE session SET ended_at = COALESCE(
-                    (SELECT MAX(timestamp_ms) FROM event WHERE event.session_id = session.id), started_at)
+                UPDATE session SET ended_at = MAX(started_at, COALESCE(
+                    (SELECT MAX(timestamp_ms) FROM event WHERE event.session_id = session.id), started_at))
                 WHERE source = 'live' AND ended_at IS NULL
             """)
         }
@@ -309,8 +310,9 @@ public actor LogStore {
     /// connection onto it and then deletes `fresh`. Nil when no such session
     /// exists, or when `fresh` already holds data (an SDK that logs before its
     /// handshake): its rows stay where they are and the launch simply gets a
-    /// second session.
-    public func reopenSession(launchId: String, deviceUID: String, replacing fresh: Int64) async throws -> Int64? {
+    /// second session. The launch id alone matches: it is a random UUID per
+    /// app process, and some SDKs send no device id or the model as one.
+    public func reopenSession(launchId: String, replacing fresh: Int64) async throws -> Int64? {
         let reopened: Session? = try await dbQueue.write { db in
             let rows = try Int.fetchOne(db, sql: """
                 SELECT (SELECT COUNT(*) FROM event WHERE session_id = ?1)
@@ -318,10 +320,10 @@ public actor LogStore {
             """, arguments: [fresh]) ?? 0
             guard rows == 0, let old = try Int64.fetchOne(db, sql: """
                 SELECT id FROM session
-                WHERE launch_id = ? AND device_uid = ? AND source = 'live'
+                WHERE launch_id = ? AND source = 'live'
                   AND ended_at IS NOT NULL AND id != ?
                 ORDER BY id DESC LIMIT 1
-            """, arguments: [launchId, deviceUID, fresh]) else { return nil }
+            """, arguments: [launchId, fresh]) else { return nil }
             try db.execute(sql: "UPDATE session SET ended_at = NULL WHERE id = ?", arguments: [old])
             return try Self.fetchSession(id: old, db: db)
         }
@@ -332,9 +334,11 @@ public actor LogStore {
 
     /// `receivedFrames: false` drops the session instead: a socket that never
     /// sent a thing (a sink retrying while its app is in the background) is
-    /// not a session worth listing.
+    /// not a session worth listing. Events still queued for it are stored
+    /// first (PROTOCOL.md §6.4).
     public func endSession(_ id: Int64, receivedFrames: Bool = true) async throws {
         guard receivedFrames else { return try await deleteSession(id: id) }
+        await flush()
         let now = Date()
         let endedSession: Session? = try await dbQueue.write { db in
             try db.execute(
@@ -368,9 +372,11 @@ public actor LogStore {
     /// `deleteSession` for many (D83's retention purge). One transaction
     /// per session, so live appends and reads get in between on a big
     /// store; one broadcast at the end, so the Sessions list reloads once.
-    /// Returns how many existed.
+    /// Returns how many existed. Queued events are stored first, so a
+    /// session deleted right after its last append doesn't fail their batch.
     @discardableResult
     public func deleteSessions(ids: [Int64]) async throws -> Int {
+        await flush()
         var deleted: Set<Int64> = []
         defer { if !deleted.isEmpty { broadcast(.sessionsDeleted(ids: deleted)) } }
         for id in ids {
@@ -412,8 +418,12 @@ public actor LogStore {
     /// Size of the database in bytes (free pages included).
     public func databaseSize() async throws -> Int64 {
         try await dbQueue.read { db in
-            try Int64.fetchOne(db, sql: "SELECT page_count * page_size FROM pragma_page_count(), pragma_page_size()") ?? 0
+            try Self.size(db)
         }
+    }
+
+    private static func size(_ db: Database) throws -> Int64 {
+        try Int64.fetchOne(db, sql: "SELECT page_count * page_size FROM pragma_page_count(), pragma_page_size()") ?? 0
     }
 
     /// Gives the pages freed by deleted sessions back to the disk (D83).
@@ -422,15 +432,16 @@ public actor LogStore {
     /// disk about the store's size, else it waits for a later purge).
     /// After that, `incremental_vacuum` (~0.6 s per 100 MB freed).
     public func reclaimSpace() async throws {
-        let size = try await databaseSize()
         // nil in memory (tests): nothing to run out of.
         let freeDisk = try? URL(fileURLWithPath: dbQueue.path)
             .resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
             .volumeAvailableCapacityForImportantUsage
+        // One write, sized inside it: a size read made after this call (a
+        // listener of the delete's broadcast) is queued behind it.
         try await dbQueue.writeWithoutTransaction { db in
             if try Int.fetchOne(db, sql: "PRAGMA auto_vacuum") == 2 {
                 try db.execute(sql: "PRAGMA incremental_vacuum")
-            } else if (freeDisk ?? .max) > size {
+            } else if try (freeDisk ?? .max) > Self.size(db) {
                 try db.execute(sql: "PRAGMA auto_vacuum = INCREMENTAL")
                 try db.execute(sql: "VACUUM")
             }
@@ -445,11 +456,13 @@ public actor LogStore {
         try await dbQueue.write { db in
             try db.execute(sql: "DELETE FROM session")
         }
+        // Broadcast first: until it lands, connected devices still write to
+        // the deleted sessions (D75 gives them fresh ones).
+        broadcast(.sessionsCleared)
         // Everything is gone, so give the file back: "Sessions on disk"
         // otherwise stayed at its old size. Cheap now that little is left.
-        // Before the broadcast, so listeners read the new size.
+        // Listeners that read the size queue behind it (`reclaimSpace`).
         try? await reclaimSpace()
-        broadcast(.sessionsCleared)
     }
 
     /// Delete every event row in a session plus any bookmarks that
@@ -527,8 +540,16 @@ public actor LogStore {
         pendingAppends.removeAll(keepingCapacity: true)
 
         do {
-            try await dbQueue.write { db in
-                for (sessionId, event) in batch {
+            // A session deleted while its events were queued would fail the
+            // foreign key, and with it every device's events in this batch:
+            // its rows are dropped instead.
+            let stored = try await dbQueue.write { db in
+                let ids = Set(batch.map(\.sessionId))
+                let existing = try Int64.fetchSet(db, sql: """
+                    SELECT id FROM session WHERE id IN (\(ids.map { _ in "?" }.joined(separator: ",")))
+                """, arguments: StatementArguments(Array(ids)))
+                let stored = batch.filter { existing.contains($0.sessionId) }
+                for (sessionId, event) in stored {
                     try db.execute(
                         sql: """
                             INSERT INTO event
@@ -548,8 +569,9 @@ public actor LogStore {
                         ]
                     )
                 }
+                return stored
             }
-            let bySession = Dictionary(grouping: batch, by: \.sessionId)
+            let bySession = Dictionary(grouping: stored, by: \.sessionId)
             for (sessionId, items) in bySession {
                 broadcast(.appended(sessionId: sessionId, count: items.count))
             }

@@ -123,18 +123,14 @@ public final class AppEnvironment {
         self.server = server
     }
 
-    /// Called when a connection opens and its session row is created.
-    public func didConnect(_ connection: UUID, session: Int64) {
-        _ = live.connect(connection, session: session, viewing: viewingSessionId)
-    }
-
-    /// Called on a connection's first frame. Shows the device over a past
-    /// or imported session the user opened, but not over another live
-    /// device (D73): that one stays, and the new one waits in the device
-    /// menu. Not at connect: an app in the background retries its socket
-    /// every ~30 s, and those silent connections would pull the view away.
+    /// Called on a connection's first frame (`SessionRouter`). Shows the
+    /// device over a past or imported session the user opened, but not over
+    /// another live device (D73): that one stays, and the new one waits in
+    /// the device menu. Not at connect: an app in the background retries its
+    /// socket every ~30 s, and those silent connections would pull the view
+    /// away. A session already viewed keeps its filter (D97: a reconnect).
     public func didSpeak(session: Int64) {
-        guard !live.isLive(viewingSessionId) else { return }
+        guard viewingSessionId != session, !live.isLive(viewingSessionId) else { return }
         viewingSessionId = session
         startFromDefaultFilter()
     }
@@ -156,17 +152,6 @@ public final class AppEnvironment {
             selectedTab = .logs
             activeFilter = saved[index].filter
         }
-    }
-
-    /// viewingSessionId stays — the user can keep reading the now-ended
-    /// session. Returns the session that ended.
-    /// A `.session` default ends with its session: an app without a
-    /// handshake reconnects in a new one (D76).
-    @discardableResult
-    public func didDisconnect(_ connection: UUID) -> Int64? {
-        let ended = live.disconnect(connection)
-        if let ended, defaultDevice == .session(ended) { defaultDevice = nil }
-        return ended
     }
 
     /// Re-query the event count for the viewing session. Called on

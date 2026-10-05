@@ -203,16 +203,15 @@ struct BeaverApp: App {
         // so the session exists before the first frame and outlives the
         // last one. Driven from `server.state` instead, frames sent right
         // after the handshake were dropped.
+        let router = await SessionRouter(store: env.store, host: env)
         Task { @MainActor in
-            var spoke: Set<UUID> = []
             for await item in env.server.inbound {
                 switch item {
                 case .connected(let connection):
                     env.mcpClients[connection] = DeviceMCPClient { [server = env.server] data in
                         await server.send(data: data, to: connection)
                     }
-                    guard let session = try? await env.store.createSession(source: .live) else { continue }
-                    env.didConnect(connection, session: session.id)
+                    await router.connected(connection)
                     // Ask the SDK for its command list so the command-bar
                     // help popover has something to show, and for its
                     // storage, whose applicaster.v2 names the device in the
@@ -220,18 +219,21 @@ struct BeaverApp: App {
                     // is viewed (D73). Brief delay so the SDK has finished
                     // registering its handlers. A `register` client (the TV
                     // bridge, D89) sent its frame by then; `send` drops both.
+                    // The session is the one the connection writes by then:
+                    // its handshake may have continued an earlier one (D97).
                     Task {
                         try? await Task.sleep(for: .milliseconds(500))
-                        await env.sendQuietCmdlist(to: session.id)
-                        await env.send(command: "storage.list", to: session.id)
+                        guard let session = env.live.session(for: connection) else { return }
+                        await env.sendQuietCmdlist(to: session)
+                        await env.send(command: "storage.list", to: session)
                     }
                 case .frame(let connection, let frame):
-                    let firstFrame = spoke.insert(connection).inserted
-                    guard let sessionId = env.live.session(for: connection) else {
+                    guard let sessionId = await router.route(frame, from: connection) else {
                         // D75: while a deleted live session is being replaced,
                         // an MCP reply still reaches its request, and a
                         // handshake is kept: the replacement reads it from
-                        // `live` (replaceDeletedLiveSessions).
+                        // `live` (SessionRouter.replaceDeleted). A connection
+                        // whose session was taken over (D97) is closing.
                         switch ProtocolDecoder.decode(frame) {
                         case .success(.mcp(let message)):
                             await env.mcpClients[connection]?.receive(message)
@@ -243,14 +245,10 @@ struct BeaverApp: App {
                         }
                         continue
                     }
-                    if firstFrame { env.didSpeak(session: sessionId) }
-                    await Self.handleInbound(frame: frame, connection: connection, sessionId: sessionId,
-                                        firstFrame: firstFrame, env: env)
+                    await Self.handleInbound(frame: frame, connection: connection, sessionId: sessionId, env: env)
                 case .disconnected(let connection):
                     await env.mcpClients.removeValue(forKey: connection)?.close()
-                    if let sessionId = env.didDisconnect(connection) {
-                        try? await env.store.endSession(sessionId, receivedFrames: spoke.remove(connection) != nil)
-                    }
+                    await router.disconnected(connection)
                 }
             }
         }
@@ -273,12 +271,16 @@ struct BeaverApp: App {
                 case .sessionsDeleted(let ids):
                     let viewed = env.viewingSessionId
                     if let viewed, ids.contains(viewed) { env.viewingSessionId = nil }
-                    await replaceDeletedLiveSessions(env: env, viewed: viewed) { ids.contains($0) }
+                    for fresh in await router.replaceDeleted(viewed: viewed, where: { ids.contains($0) }) {
+                        Task { await AppBuild.fetch(from: env, store: env.store, sessionId: fresh) }
+                    }
                     await env.refreshViewingEventCount()
                 case .sessionsCleared:
                     let viewed = env.viewingSessionId
                     env.viewingSessionId = nil
-                    await replaceDeletedLiveSessions(env: env, viewed: viewed) { _ in true }
+                    for fresh in await router.replaceDeleted(viewed: viewed, where: { _ in true }) {
+                        Task { await AppBuild.fetch(from: env, store: env.store, sessionId: fresh) }
+                    }
                     await env.refreshViewingEventCount()
                 default:
                     break
@@ -362,35 +364,7 @@ struct BeaverApp: App {
         if handshake.logsOnly { await client?.markLogsOnly() } else { await client?.markNative() }
     }
 
-    /// D97: a handshake from an app launch that already had a session (its
-    /// socket dropped and came back) carries on in that session; the empty one
-    /// this connection opened is deleted. Returns the session to write to, nil
-    /// to stay in the new one. The connection moves first, so deleting the new
-    /// session doesn't look like a deleted live session to replace (D75). Only
-    /// when the handshake is the connection's first frame: nothing was written to
-    /// the new session yet, so deleting it loses nothing.
-    @MainActor
-    private static func continueLaunch(connection: UUID, fresh: Int64, handshake: ClientHandshake,
-                                       env: AppEnvironment) async -> Int64? {
-        guard let launchId = handshake.launchId, let deviceUID = handshake.deviceId, !handshake.logsOnly,
-              let old = try? await env.store.reopenSession(launchId: launchId, deviceUID: deviceUID, replacing: fresh)
-        else { return nil }
-        env.live.rebind(connection, to: old)
-        if env.viewingSessionId == fresh { env.viewingSessionId = old }
-        try? await env.store.deleteSession(id: fresh)
-        await env.store.append(
-            .syntheticInfo(subsystem: "loggernext.session",
-                           message: "Reconnected: same app launch. Logs sent while it was disconnected are lost."),
-            to: old
-        )
-        Task {
-            await env.sendQuietCmdlist(to: old)
-            await env.send(command: "storage.list", to: old)
-        }
-        return old
-    }
-
-    private static func handleInbound(frame: Data, connection: UUID, sessionId: Int64, firstFrame: Bool,
+    private static func handleInbound(frame: Data, connection: UUID, sessionId: Int64,
                                      env: AppEnvironment) async {
         switch ProtocolDecoder.decode(frame) {
         case .success(.event(let event)):
@@ -429,12 +403,10 @@ struct BeaverApp: App {
                 return env.mcpClients[connection]
             }
             await Self.markMCP(client, for: handshake)
-            let target = firstFrame
-                ? await Self.continueLaunch(connection: connection, fresh: sessionId, handshake: handshake, env: env) ?? sessionId
-                : sessionId
-            try? await env.store.applyHandshake(handshake, to: target)
+            // D97: `SessionRouter.route` already chose the session of a continued launch.
+            try? await env.store.applyHandshake(handshake, to: sessionId)
             // D85: ask what the app was built with, once per session, in the background.
-            if !handshake.logsOnly { Task { await AppBuild.fetch(from: env, store: env.store, sessionId: target) } }
+            if !handshake.logsOnly { Task { await AppBuild.fetch(from: env, store: env.store, sessionId: sessionId) } }
         case .success(.mcp(let message)):
             // D75: an answer to Beaver's request; not a log line.
             let client = await MainActor.run { env.mcpClients[connection] }
@@ -463,32 +435,11 @@ struct BeaverApp: App {
 
 // MARK: - Helpers
 
-/// A deleted live session (e.g., right after the user deleted every
-/// session) leaves its device with nowhere to write: give each such
-/// connection a fresh live session. Without this, events from the device
-/// would be silently dropped until it reconnected.
-///
-/// Detaches first, before any await, so frames stop going to the deleted
-/// rows at once (a write there fails its whole batch). The window follows
-/// the device it showed; with none, it shows the first fresh session. A
-/// device that leaves meanwhile gets its fresh session ended.
-@MainActor
-private func replaceDeletedLiveSessions(env: AppEnvironment, viewed: Int64?,
-                                        deleted: (Int64) -> Bool) async {
-    let viewedConnection = viewed.flatMap { env.live.connection(for: $0) }
-    for connection in env.live.detach(where: deleted) {
-        guard let fresh = try? await env.store.createSession(source: .live) else { continue }
-        guard env.live.attach(connection, session: fresh.id) else {
-            try? await env.store.endSession(fresh.id)
-            continue
-        }
-        if let handshake = env.live.handshake(for: connection) {
-            try? await env.store.applyHandshake(handshake, to: fresh.id)
-            if !handshake.logsOnly { Task { await AppBuild.fetch(from: env, store: env.store, sessionId: fresh.id) } }
-        }
-        if connection == viewedConnection || (viewedConnection == nil && env.viewingSessionId == nil) {
-            env.viewingSessionId = fresh.id
-        }
+extension AppEnvironment: SessionRouterHost {
+    /// D97: another connection of the same app launch took this one's session.
+    public func closeConnection(_ connection: UUID) async {
+        await mcpClients.removeValue(forKey: connection)?.close()
+        await server.disconnect(connection)
     }
 }
 
@@ -527,33 +478,5 @@ private final class BeaverUpdaterDelegate: NSObject, SPUUpdaterDelegate {
             }
         }
         return true
-    }
-}
-
-// MARK: - Synthetic-event helpers
-
-extension DecodedEvent {
-    static func syntheticInfo(subsystem: String, message: String) -> DecodedEvent {
-        DecodedEvent(
-            timestampMillis: UInt64(Date().timeIntervalSince1970 * 1000),
-            level: .info,
-            subsystem: subsystem,
-            category: "loggernext",
-            message: message,
-            dataJSON: nil,
-            contextJSON: nil
-        )
-    }
-
-    static func syntheticWarning(subsystem: String, message: String) -> DecodedEvent {
-        DecodedEvent(
-            timestampMillis: UInt64(Date().timeIntervalSince1970 * 1000),
-            level: .warning,
-            subsystem: subsystem,
-            category: "loggernext",
-            message: message,
-            dataJSON: nil,
-            contextJSON: nil
-        )
     }
 }

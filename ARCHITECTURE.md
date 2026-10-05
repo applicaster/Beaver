@@ -377,6 +377,15 @@ closed on disconnect by `BeaverApp.bootstrap`, held in
 `WSServer.send(data:to:)`, matches replies by id, times out, initializes
 lazily. Tools reach it through `DeviceLink.mcp`.
 
+**`SessionRouter` (D97).** Which session each connection writes:
+`BeaverApp.bootstrap`'s inbound loop hands it every connect, frame and
+disconnect, in order. It opens a session per connection, continues the
+session of the same app launch on a first-frame handshake (taking it over
+from a connection that still holds it, which it closes), tells the window of
+a first frame once the session is chosen, ends sessions on disconnect, and
+replaces deleted live sessions (D75). It reaches the app through
+`SessionRouterHost` (`AppEnvironment`), so `swift test` covers it.
+
 ---
 
 ## 7. Wire protocol (consumer view)

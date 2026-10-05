@@ -205,7 +205,9 @@ launch id (Beaver 4.21.0 or later), an app that reconnected (background, a
 network blip) or reloaded in-app (iOS `app.restart`, a React Native JS
 reload) keeps its session. A wait on a given `sessionId` gives a dropped
 device 3 s to come back into it before it says `sessionEnded`; only a process
-restart is `sessionChanged`. The results of `commands_send`, `storage_set`
+restart is `sessionChanged`. From Beaver 4.22.4 that holds without a device id
+too, and an app back before Beaver noticed the drop keeps its session without
+it ending at all (Beaver closes the old connection). The results of `commands_send`, `storage_set`
 and `tools_call` give the `sessionId` to wait on: pass it on, so the wait
 reads the app the action went to. Subsystem and category values accept `*` globs, name
 fragments and any case; results say what they matched. A filter's `search`
