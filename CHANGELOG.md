@@ -12,6 +12,8 @@ does the same for a manual release.
 
 ## [Unreleased]
 
+## [4.22.2] - 2026-10-05
+
 ### Fixed
 - **A device that can't connect says why.** One phone's half-open connection
   no longer turns the whole server red ("Server error") or makes Connect a TV
@@ -945,7 +947,7 @@ end-to-end. No code-visible changes versus 1.0.0.
 
 Initial Beaver release. See `DECISIONS.md` D1–D20 for the design history.
 
-[Unreleased]: https://github.com/applicaster/Beaver/compare/4.22.1...HEAD
+[Unreleased]: https://github.com/applicaster/Beaver/compare/4.22.2...HEAD
 [2.0.1]: https://github.com/applicaster/Beaver/releases/tag/2.0.1
 [2.0.0]: https://github.com/applicaster/Beaver/releases/tag/2.0.0
 [1.0.2]: https://github.com/applicaster/Beaver/releases/tag/1.0.2
