@@ -12,6 +12,8 @@ does the same for a manual release.
 
 ## [Unreleased]
 
+## [4.22.5] - 2026-10-06
+
 ### Fixed
 - **The Subsystem and Category menus show every value on the first open.**
   The first time you opened one in a session it was one row tall, and you had
@@ -1015,7 +1017,7 @@ end-to-end. No code-visible changes versus 1.0.0.
 
 Initial Beaver release. See `DECISIONS.md` D1–D20 for the design history.
 
-[Unreleased]: https://github.com/applicaster/Beaver/compare/4.22.4...HEAD
+[Unreleased]: https://github.com/applicaster/Beaver/compare/4.22.5...HEAD
 [2.0.1]: https://github.com/applicaster/Beaver/releases/tag/2.0.1
 [2.0.0]: https://github.com/applicaster/Beaver/releases/tag/2.0.0
 [1.0.2]: https://github.com/applicaster/Beaver/releases/tag/1.0.2
