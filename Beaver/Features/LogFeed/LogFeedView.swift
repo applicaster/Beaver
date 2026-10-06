@@ -835,6 +835,7 @@ private struct FacetMenuButton: View {
     let title: String
     @State private var isPopoverShown = false
     @State private var isHovered = false
+    @State private var rowsSize = CGSize(width: 220, height: 0)
 
     private var activeCount: Int { vm.filter.chipCount(for: facet) }
 
@@ -872,9 +873,16 @@ private struct FacetMenuButton: View {
             // Always a ScrollView (capped at 420pt) rather than switching
             // to a plain stack under 14 rows: an open popover's view
             // identity would otherwise flip as live counts cross that
-            // threshold, and it visibly jumps.
-            ScrollView { rows(values) }
-                .frame(maxHeight: 420)
+            // threshold, and it visibly jumps. Sized to its rows: values
+            // load after the popover opens (`refreshFacets`), and a
+            // ScrollView doesn't pass its content's new size up, so the
+            // first open stayed one row tall.
+            ScrollView {
+                rows(values)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .onGeometryChange(for: CGSize.self) { $0.size } action: { rowsSize = $0 }
+            }
+            .frame(width: rowsSize.width, height: min(420, rowsSize.height))
                 .onAppear {
                     vm.facetPopoverOpen += 1
                     vm.refreshFacets()

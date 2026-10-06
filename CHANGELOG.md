@@ -12,6 +12,11 @@ does the same for a manual release.
 
 ## [Unreleased]
 
+### Fixed
+- **The Subsystem and Category menus show every value on the first open.**
+  The first time you opened one in a session it was one row tall, and you had
+  to close it and open it again to see the list.
+
 ## [4.22.4] - 2026-10-05
 
 ### Fixed
