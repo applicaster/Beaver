@@ -821,8 +821,8 @@ final class LogFeedViewModel {
             // pass queued; don't flash stale counts.
             if let generation, generation != facetGeneration { return }
             guard filter == self.filter else { return }
-            availableSubsystems = newSubsystems
-            availableCategories = newCategories
+            availableSubsystems = newSubsystems.alphabetical
+            availableCategories = newCategories.alphabetical
         } catch is CancellationError {
             // Expected when a newer refresh supersedes this one.
         } catch {

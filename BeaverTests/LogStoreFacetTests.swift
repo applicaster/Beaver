@@ -161,4 +161,11 @@ struct LogStoreFacetTests {
             FacetCount(value: "z", count: 1),
         ])
     }
+
+    @Test("Chip menus list values by name, ignoring case, numbers numerically")
+    func alphabeticalForMenus() {
+        let busiestFirst = ["player", "Auth", "plugin10", "plugin9", "gone"]
+            .enumerated().map { FacetCount(value: $1, count: 10 - $0) }
+        #expect(busiestFirst.alphabetical.map(\.value) == ["Auth", "gone", "player", "plugin9", "plugin10"])
+    }
 }
