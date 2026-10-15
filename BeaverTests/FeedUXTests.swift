@@ -47,6 +47,17 @@ struct FeedUXTests {
         #expect(follow.unseen == 0)
     }
 
+    @Test("Any scroll up off the tail stops following; coming back near it resumes")
+    func tailFollowScrollUp() {
+        // Following: a few points up, well inside the slack, already stops.
+        #expect(!TailFollow.atBottom(gap: 10, slack: 72, following: true, movedUp: true))
+        #expect(TailFollow.atBottom(gap: 0, slack: 72, following: true, movedUp: false))
+        // Not following: down to within the slack resumes; up doesn't.
+        #expect(TailFollow.atBottom(gap: 50, slack: 72, following: false, movedUp: false))
+        #expect(!TailFollow.atBottom(gap: 50, slack: 72, following: false, movedUp: true))
+        #expect(!TailFollow.atBottom(gap: 200, slack: 72, following: false, movedUp: false))
+    }
+
     @Test("A jump stops following; resuming clears the count")
     func tailFollowStopResume() {
         var follow = TailFollow()

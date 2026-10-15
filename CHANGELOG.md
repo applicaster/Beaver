@@ -12,6 +12,11 @@ does the same for a manual release.
 
 ## [Unreleased]
 
+### Fixed
+- **Scrolling up in a busy Log feed or Network tab stays put.** While logs
+  streamed in, a slow scroll up jumped back to the newest row. Any scroll up
+  now stops following the tail; scrolling back to the bottom resumes it.
+
 ## [4.22.5] - 2026-10-06
 
 ### Fixed

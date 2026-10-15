@@ -17,6 +17,15 @@ public struct TailFollow: Equatable, Sendable {
         atBottom ? resume() : stop()
     }
 
+    /// Whether a user scroll counts as "at the bottom". `gap` is how far
+    /// the visible area ends above the content's end. Following, any move
+    /// off the very bottom stops it: with the slack, a slow scroll up
+    /// stayed "at the bottom" and the next row snapped it back. Not
+    /// following, scrolling down to within `slack` resumes.
+    public static func atBottom(gap: Double, slack: Double, following: Bool, movedUp: Bool) -> Bool {
+        following ? gap <= 1 : gap <= slack && !movedUp
+    }
+
     public mutating func appended(_ count: Int) {
         if !isFollowing { unseen += count }
     }
