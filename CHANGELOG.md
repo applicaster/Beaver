@@ -12,6 +12,8 @@ does the same for a manual release.
 
 ## [Unreleased]
 
+## [4.22.6] - 2026-10-15
+
 ### Fixed
 - **Scrolling up in a busy Log feed or Network tab stays put.** While logs
   streamed in, a slow scroll up jumped back to the newest row. Any scroll up
@@ -1022,7 +1024,7 @@ end-to-end. No code-visible changes versus 1.0.0.
 
 Initial Beaver release. See `DECISIONS.md` D1–D20 for the design history.
 
-[Unreleased]: https://github.com/applicaster/Beaver/compare/4.22.5...HEAD
+[Unreleased]: https://github.com/applicaster/Beaver/compare/4.22.6...HEAD
 [2.0.1]: https://github.com/applicaster/Beaver/releases/tag/2.0.1
 [2.0.0]: https://github.com/applicaster/Beaver/releases/tag/2.0.0
 [1.0.2]: https://github.com/applicaster/Beaver/releases/tag/1.0.2
