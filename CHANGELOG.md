@@ -12,6 +12,11 @@ does the same for a manual release.
 
 ## [Unreleased]
 
+### Changed
+- **The Subsystem and Category menus list values alphabetically.** They were
+  ordered by event count, so a value moved around as logs came in. The
+  `logs_facets` MCP tool still lists the busiest first.
+
 ## [4.22.6] - 2026-10-15
 
 ### Fixed

@@ -220,6 +220,14 @@ public struct FacetCount: Hashable, Sendable {
     }
 }
 
+public extension Array where Element == FacetCount {
+    /// The chip menus' order: by name, case-insensitive, numbers in
+    /// numeric order. The store returns busiest first, which agents use.
+    var alphabetical: [FacetCount] {
+        sorted { $0.value.localizedStandardCompare($1.value) == .orderedAscending }
+    }
+}
+
 private extension String {
     var nonEmpty: String? { isEmpty ? nil : self }
 }
