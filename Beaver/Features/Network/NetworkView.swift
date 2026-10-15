@@ -235,7 +235,7 @@ struct NetworkView: View {
     private func table(_ rows: [NetworkEntry]) -> some View {
         ScrollViewReader { proxy in
             tableContent(rows)
-                .background { ScrollWatcher(bottomSlack: 8) { vm.userScrolled(atBottom: $0) } }
+                .background { ScrollWatcher(bottomSlack: 8, isFollowing: vm.isFollowing) { vm.userScrolled(atBottom: $0) } }
                 // Same as the Log feed's auto-scroll: instant, and deferred
                 // one runloop so the Table commits its rows before scrolling.
                 .onChange(of: rows.last?.id) { _, id in

@@ -14,11 +14,14 @@ struct ScrollWatcher: NSViewRepresentable {
     /// How close to the end, in points, still counts as the bottom.
     /// `nil` means three rows of the table (D3).
     var bottomSlack: CGFloat? = nil
+    /// The caller's follow state: following, any scroll up stops it.
+    let isFollowing: Bool
     let onUserScroll: (_ atBottom: Bool) -> Void
 
     func makeNSView(context: Context) -> NSView {
         let view = ScrollWatcherView()
         view.bottomSlack = bottomSlack
+        view.isFollowing = isFollowing
         view.onUserScroll = onUserScroll
         return view
     }
@@ -26,12 +29,15 @@ struct ScrollWatcher: NSViewRepresentable {
     func updateNSView(_ nsView: NSView, context: Context) {
         guard let view = nsView as? ScrollWatcherView else { return }
         view.bottomSlack = bottomSlack
+        view.isFollowing = isFollowing
         view.onUserScroll = onUserScroll
     }
 }
 
 private final class ScrollWatcherView: NSView {
     var bottomSlack: CGFloat?
+    var isFollowing = true
+    private var lastY: CGFloat = 0
     var onUserScroll: ((Bool) -> Void)?
     private weak var observed: NSScrollView?
 
@@ -65,7 +71,10 @@ private final class ScrollWatcherView: NSView {
         guard let scrollView = observed, let document = scrollView.documentView else { return }
         let slack = bottomSlack ?? 3 * ((document as? NSTableView)
             .map { $0.rowHeight + $0.intercellSpacing.height } ?? 24)
-        onUserScroll?(scrollView.contentView.bounds.maxY >= document.frame.height - slack)
+        let bounds = scrollView.contentView.bounds
+        defer { lastY = bounds.minY }
+        onUserScroll?(TailFollow.atBottom(gap: document.frame.height - bounds.maxY, slack: slack,
+                                          following: isFollowing, movedUp: bounds.minY < lastY))
     }
 
     /// The Table's scroll view: an ancestor, or — since it's sometimes a

@@ -1239,7 +1239,7 @@ private struct LogFeedTable: View {
             // of) the bottom follows; anywhere else stops and counts.
             // Programmatic scrolls don't report, so there's no loop.
             .background {
-                ScrollWatcher { atBottom in
+                ScrollWatcher(isFollowing: vm.follow.isFollowing) { atBottom in
                     vm.userScrolled(atBottom: atBottom)
                 }
             }
