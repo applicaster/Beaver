@@ -12,6 +12,8 @@ does the same for a manual release.
 
 ## [Unreleased]
 
+## [4.23.0] - 2026-10-15
+
 ### Changed
 - **The Subsystem and Category menus list values alphabetically.** They were
   ordered by event count, so a value moved around as logs came in. The
@@ -1029,7 +1031,7 @@ end-to-end. No code-visible changes versus 1.0.0.
 
 Initial Beaver release. See `DECISIONS.md` D1–D20 for the design history.
 
-[Unreleased]: https://github.com/applicaster/Beaver/compare/4.22.6...HEAD
+[Unreleased]: https://github.com/applicaster/Beaver/compare/4.23.0...HEAD
 [2.0.1]: https://github.com/applicaster/Beaver/releases/tag/2.0.1
 [2.0.0]: https://github.com/applicaster/Beaver/releases/tag/2.0.0
 [1.0.2]: https://github.com/applicaster/Beaver/releases/tag/1.0.2
