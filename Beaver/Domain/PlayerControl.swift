@@ -124,3 +124,104 @@ public struct SeenAdBreaks: Sendable, Equatable {
         return (reported + positions.filter { p in !reported.contains { abs($0 - p) < Self.sameBreak } }).sorted()
     }
 }
+
+/// Polls the viewed app's `player.state` and sends the block's commands.
+/// The view's `.task(id:)` runs `run()` and cancels it when the viewed
+/// session changes or stops being live.
+@MainActor @Observable
+public final class PlayerPoller {
+    /// The app has the `player` toolbox: the block shows.
+    public private(set) var available = false
+    public private(set) var state: PlayerState?
+    /// Why the last call failed, one line; nil after a good poll.
+    public private(set) var reason: String?
+    public private(set) var failures = 0
+    public private(set) var seen = SeenAdBreaks()
+
+    @ObservationIgnored public let sessionId: Int64
+    @ObservationIgnored private let device: any DeviceLink
+    @ObservationIgnored private let interval: Duration
+
+    /// Short, so a slow app never keeps an agent's tools_call waiting behind a poll for long.
+    static let pollTimeout: Duration = .seconds(3)
+    static let slowInterval: Duration = .seconds(5)
+    static let rediscoverInterval: Duration = .seconds(10)
+
+    public init(device: any DeviceLink, sessionId: Int64, interval: Duration = .seconds(1)) {
+        self.device = device
+        self.sessionId = sessionId
+        self.interval = interval
+    }
+
+    /// Until cancelled: look for the toolbox every 10 s, then poll every
+    /// second (every 5 s after three failures in a row). Never two at once.
+    public func run() async {
+        while !Task.isCancelled {
+            if !available { await discover() }
+            if available { await poll() }
+            let wait = !available ? Self.rediscoverInterval : failures >= 3 ? Self.slowInterval : interval
+            try? await Task.sleep(for: wait)
+        }
+    }
+
+    public func discover() async {
+        let tools = try? await device.mcp("tools/list", params: [:], to: sessionId,
+                                          timeout: DeviceMCPClient.listTimeout, onSent: nil)
+        available = tools.map { Toolboxes.tools(fromListResult: $0).contains { $0.name == "player.state" } } ?? false
+    }
+
+    public func poll() async {
+        let answer: AppBuild.Answer
+        do {
+            answer = AppBuild.answer(fromCallResult: try await call("player.state", [:], timeout: Self.pollTimeout))
+        } catch {
+            answer = .failed(Self.line(error))
+        }
+        switch answer {
+        case .value(let json):
+            let s = PlayerState(json: json)
+            state = s
+            seen.observe(s)
+            reason = nil
+            failures = 0
+        case .noTool:
+            available = false
+            state = nil
+        case .failed(let why):
+            reason = why
+            failures += 1
+        }
+    }
+
+    /// The command, then a poll at once; the command's error outlives the poll.
+    public func send(_ command: PlayerCommand) async {
+        var failure: String?
+        do {
+            let reply = try await call(command.tool, command.arguments(state), timeout: DeviceMCPClient.callTimeout)
+            if reply["isError"]?.bool == true {
+                let text = reply["content"]?.array?.compactMap { $0["text"]?.string }.joined() ?? ""
+                failure = text.isEmpty ? "The app refused \(command.tool)." : String(text.prefix(200))
+            }
+        } catch {
+            failure = Self.line(error)
+        }
+        await poll()
+        if let failure { reason = failure }
+    }
+
+    private func call(_ tool: String, _ arguments: JSON, timeout: Duration) async throws -> JSON {
+        try await device.mcp("tools/call", params: ["name": .string(tool), "arguments": arguments],
+                             to: sessionId, timeout: timeout, onSent: nil)
+    }
+
+    static func line(_ error: any Error) -> String {
+        switch error as? DeviceMCPError {
+        case .timeout: "The app didn't answer in time."
+        case .disconnected: "The app disconnected."
+        case .unsupported: "The app has no toolboxes."
+        case .notSent(let why): why.prefix(1).uppercased() + why.dropFirst() + "."
+        case .rpc(_, let message): message
+        case nil: error.localizedDescription
+        }
+    }
+}
