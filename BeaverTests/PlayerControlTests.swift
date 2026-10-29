@@ -184,6 +184,20 @@ struct PlayerPollerTests {
         #expect(poller.state == nil)
     }
 
+    @Test("During an ad on the ad's clock the bar keeps the content's last position")
+    func timelineFreezesDuringAd() async {
+        let ad = Mutex(false)
+        let poller = PlayerPoller(device: Self.device(calls: { _, _ in
+            ad.withLock { $0 } ? Self.result(PlayerControlTests.with(PlayerControlTests.today, ["ad": true, "position": 3, "duration": 15]))
+                               : Self.result(PlayerControlTests.today)
+        }), sessionId: 7)
+        await poller.poll()
+        ad.withLock { $0 = true }
+        await poller.poll()
+        #expect(poller.timeline?.position == 12)
+        #expect(poller.timeline?.length == 100)
+    }
+
     @Test("A command calls its tool, then polls at once")
     func sendCallsToolThenPolls() async {
         let device = Self.device()

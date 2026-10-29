@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Block shown only when the viewed session is live and its `tools/list` has `player.state`.
+- Block shown only when the viewed session is live, its `tools/list` has `player.state`, and the last `player.state` has `active: true`.
 - Poll `player.state` every 1 s, never two in flight, 3 s timeout; after 3 failures in a row, every 5 s until one succeeds. Re-fetch `tools/list` every 10 s while `player` is missing.
 - Seek sends one `player.seek` on release, never during a drag.
 - Seek controls disabled while `ad` is true, and when `seekableDuration` is reported as 0. Missing `seekableDuration` (older QuickBrick) → enabled, the device's error shows.
@@ -93,7 +93,7 @@
 **Interfaces:**
 - Consumes: `PlayerPoller`, `PlayerState`, `PlayerCommand`; `@Environment(AppEnvironment.self)`: `viewingSessionId`, `isLive(_:)`, `env` as `DeviceLink`.
 
-- [ ] **Step 1:** `PlayerControlsView` owns a `PlayerPoller?` in `@State`, rebuilt in `.task(id: "\(sessionId)|\(isLive)")` which calls `run()`; renders nothing unless `available`. Layout per spec §3.3–3.5: toggle, −10/+10, `Slider`-like bar with local drag value and `onEditingChanged(false)` → `.seek`, ticks for `seen.merged(with: state.adBreaks)`, shaded current break while `ad`; Go live for `.liveDvr`; state lines and badges; `lastError` and `reason` one line each, secondary/red. Disabled with "Nothing playing" when `!active`.
+- [ ] **Step 1:** `PlayerControlsView` owns a `PlayerPoller?` in `@State`, rebuilt in `.task(id: "\(sessionId)|\(isLive)")` which calls `run()`; renders nothing unless `available`. Layout per spec §3.3–3.5: toggle, −10/+10, `Slider`-like bar with local drag value and `onEditingChanged(false)` → `.seek`, ticks for `seen.merged(with: state.adBreaks)`, shaded current break while `ad`; Go live for `.liveDvr`; state lines and badges; `lastError` and `reason` one line each, secondary/red.
 - [ ] **Step 2:** In `DetailPaneView.body` put the existing content and `PlayerControlsView()` in a `VStack(spacing: 0)` with a `Divider` between; the block keeps its natural height.
 - [ ] **Step 3:** Hotkeys ⌘⌥P, ⌘⌥←, ⌘⌥→ via `.keyboardShortcut` on the buttons.
 - [ ] **Step 4:** `make build` → BUILD SUCCEEDED, no new warnings.

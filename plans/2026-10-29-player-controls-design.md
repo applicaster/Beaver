@@ -63,8 +63,11 @@ X-Ray logs MCP calls only on failure, so polling adds no log rows.
 - Pinned at the bottom of `DetailPaneView`, under the scroll view, in every
   state of the pane (event selected, several selected, none). It doesn't
   scroll with the payload. Divider above it.
-- Shown when the viewed session is live and its `tools/list` has
-  `player.state`. The list is fetched when the viewed session or its live
+- Shown when the viewed session is live, its `tools/list` has
+  `player.state`, and `player.state` says `active` (a player exists). Polling
+  goes on while nothing plays, so the block appears within a second of
+  playback starting and goes when the player closes. *(User's call,
+  2026-10-29.)* The list is fetched when the viewed session or its live
   state changes, and again every 10 s while `player` is missing (React
   toolboxes appear after the JS bundle loads). Once found it's not
   re-fetched until the session changes; a `tools/call` answered with
@@ -89,7 +92,6 @@ X-Ray logs MCP calls only on failure, so polling adds no log rows.
 | Progress bar, draggable | `player.seek {position}` on release | While dragging, show the target time; send one seek on release, never during the drag. |
 | Go live | `player.seek {position: <seekableDuration>}` | Only for seekable live. |
 
-- Disabled (not hidden) when `active` is false, with "Nothing playing".
 - Seek controls disabled when `seekableDuration` is reported and is 0. An
   older QuickBrick doesn't report it: the controls stay on and the device's
   own answer ("Seek is not supported") shows as the reason. *(Builder call:

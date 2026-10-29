@@ -137,6 +137,9 @@ public final class PlayerPoller {
     public private(set) var reason: String?
     public private(set) var failures = 0
     public private(set) var seen = SeenAdBreaks()
+    /// The bar's position and length on the content's clock. During an ad
+    /// on an app that doesn't report `contentPosition`, the last content values.
+    public private(set) var timeline: (position: Double, length: Double)?
 
     @ObservationIgnored public let sessionId: Int64
     @ObservationIgnored private let device: any DeviceLink
@@ -182,6 +185,7 @@ public final class PlayerPoller {
             let s = PlayerState(json: json)
             state = s
             seen.observe(s)
+            if !s.active { timeline = nil } else if !s.ad || s.contentPosition != nil { timeline = s.timeline }
             reason = nil
             failures = 0
         case .noTool:
