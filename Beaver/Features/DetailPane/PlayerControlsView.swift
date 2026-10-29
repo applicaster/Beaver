@@ -42,26 +42,29 @@ struct PlayerControlsView: View {
 
     private func panel(_ poller: PlayerPoller, _ s: PlayerState) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 4) {
-                Text("PLAYER").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                Spacer()
-                // ⌥⌘: plain Space and arrows belong to the feed; ⌃Space is macOS's input switch.
-                button(s.playing ? "pause.fill" : "play.fill", s.playing ? "Pause (⌥⌘P)" : "Play (⌥⌘P)",
-                       s.playing ? .pause : .play, poller)
-                    .keyboardShortcut("p", modifiers: [.command, .option])
-                button("gobackward.10", "Back 10 s (⌥⌘←)", .offset(-10), poller)
+            Text("PLAYER").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            // ⌥⌘: plain Space and arrows belong to the feed; ⌃Space is macOS's input switch.
+            HStack(spacing: 20) {
+                button("gobackward.10", "Back 10 s (⌥⌘←)", .offset(-10), poller, size: 20)
                     .keyboardShortcut(.leftArrow, modifiers: [.command, .option])
                     .disabled(!s.canSeek)
-                button("goforward.10", "Forward 10 s (⌥⌘→)", .offset(10), poller)
+                button(s.playing ? "pause.fill" : "play.fill", s.playing ? "Pause (⌥⌘P)" : "Play (⌥⌘P)",
+                       s.playing ? .pause : .play, poller, size: 28)
+                    .keyboardShortcut("p", modifiers: [.command, .option])
+                button("goforward.10", "Forward 10 s (⌥⌘→)", .offset(10), poller, size: 20)
                     .keyboardShortcut(.rightArrow, modifiers: [.command, .option])
                     .disabled(!s.canSeek)
+                if let next = s.nextTitle {
+                    button("forward.end.fill", "Play next: \(next) (⌥⌘N)", .next, poller, size: 20)
+                        .keyboardShortcut("n", modifiers: [.command, .option])
+                }
                 if s.streamType == .liveDvr {
                     Button("Live") { send(.goLive, poller) }
-                        .controlSize(.small)
-                        .disabled(!s.canSeek)
+                        .disabled(!s.canSeek || poller.sending)
                         .help("Jump to the live edge")
                 }
             }
+            .frame(maxWidth: .infinity)
             bar(poller, s)
                 .disabled(poller.sending)
             HStack {
@@ -84,8 +87,10 @@ struct PlayerControlsView: View {
     }
 
     private func button(_ symbol: String, _ help: String, _ command: PlayerCommand,
-                        _ poller: PlayerPoller) -> some View {
-        Button { send(command, poller) } label: { Image(systemName: symbol) }
+                        _ poller: PlayerPoller, size: CGFloat) -> some View {
+        Button { send(command, poller) } label: {
+            Image(systemName: symbol).font(.system(size: size)).frame(width: size + 12, height: size + 12)
+        }
             .buttonStyle(.borderless)
             .disabled(poller.sending)
             .help(help)

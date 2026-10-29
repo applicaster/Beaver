@@ -89,6 +89,15 @@ struct PlayerControlTests {
         let dvr = PlayerState(json: Self.with(Self.today, ["seekableDuration": 3600]))
         #expect(PlayerCommand.goLive.tool == "player.seek")
         #expect(PlayerCommand.goLive.arguments(dvr) == ["position": 3600])
+        #expect(PlayerCommand.next.tool == "player.next")
+        #expect(PlayerCommand.next.arguments(nil) == [:])
+    }
+
+    @Test("Play Next: the next item's title when the app reports one")
+    func nextItem() {
+        #expect(PlayerState(json: Self.today).nextTitle == nil)
+        #expect(PlayerState(json: Self.with(Self.today, ["next": .null])).nextTitle == nil)
+        #expect(PlayerState(json: Self.with(Self.today, ["next": ["id": "e2", "title": "Episode 2"]])).nextTitle == "Episode 2")
     }
 
     @Test("A break is the content position of the last poll before the ad")

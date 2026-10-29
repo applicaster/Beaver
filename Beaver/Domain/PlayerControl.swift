@@ -39,6 +39,8 @@ public struct PlayerState: Sendable, Equatable {
     /// The engine's own live clock ("forward" or "behindLive"). Present only
     /// when the toolbox puts live positions on one forward clock for us.
     public var liveClock: String?
+    /// What Play Next would play now; nil when there's nothing next (or an older QuickBrick).
+    public var nextTitle: String?
 
     public init(json: JSON) {
         active = json["active"]?.bool ?? false
@@ -62,6 +64,7 @@ public struct PlayerState: Sendable, Equatable {
         adBreaks = json["adBreaks"]?.array?.compactMap(\.double).sorted()
         lastError = json["lastError"]?["message"]?.string ?? json["lastError"]?.string
         liveClock = json["liveClock"]?.string
+        nextTitle = json["next"].flatMap { $0["title"]?.string ?? $0["id"]?.string }
     }
 
     /// Where the bar's thumb is and how long the bar is, on the content's clock.
@@ -82,7 +85,7 @@ public struct PlayerState: Sendable, Equatable {
 }
 
 public enum PlayerCommand: Sendable, Equatable {
-    case play, pause, offset(Double), seek(Double), goLive
+    case play, pause, offset(Double), seek(Double), goLive, next
 
     public var tool: String {
         switch self {
@@ -90,13 +93,14 @@ public enum PlayerCommand: Sendable, Equatable {
         case .pause: "player.pause"
         case .offset: "player.offset"
         case .seek, .goLive: "player.seek"
+        case .next: "player.next"
         }
     }
 
     /// Go live seeks to the end of the DVR window; the app clamps it.
     public func arguments(_ state: PlayerState?) -> JSON {
         switch self {
-        case .play, .pause: [:]
+        case .play, .pause, .next: [:]
         case .offset(let s): ["seconds": .number(s)]
         case .seek(let p): ["position": .number(p)]
         case .goLive: ["position": .number(state?.seekableDuration ?? .greatestFiniteMagnitude)]
@@ -228,7 +232,7 @@ public final class PlayerPoller {
         defer { sending = false }
         switch command {
         case .seek, .offset, .goLive: seen.forgetPosition()
-        case .play, .pause: break
+        case .play, .pause, .next: break
         }
         var failure: String?
         do {
