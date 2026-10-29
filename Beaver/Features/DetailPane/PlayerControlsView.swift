@@ -70,19 +70,24 @@ struct PlayerControlsView: View {
                 Text(badges(s)).foregroundStyle(s.ad ? .orange : .secondary)
             }
             .font(.caption)
-            if let player = s.playerName {
-                Text(player).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+            // Labelled like the event's metadata above, so title, next and player don't run together.
+            Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 4) {
+                if let player = s.playerName { row("Player", player) }
+                if let title = s.title ?? s.entryId { row("Title", s.entryId.map { "\(title) · \($0)" } ?? title) }
+                if let next = s.nextTitle { row("Next video", next) }
+                if let error = s.lastError { row("Last error", error, color: .red) }
             }
-            if let title = s.title ?? s.entryId {
-                Text(s.entryId.map { "\(title) · \($0)" } ?? title)
-                    .font(.caption).lineLimit(2).textSelection(.enabled)
-            }
-            if let error = s.lastError {
-                Text("Last error: \(error)").font(.caption).foregroundStyle(.red).lineLimit(2).textSelection(.enabled)
-            }
+            .font(.caption)
             if let reason = poller.reason {
                 Text(reason).font(.caption).foregroundStyle(.orange).lineLimit(2)
             }
+        }
+    }
+
+    private func row(_ label: String, _ value: String, color: Color = .primary) -> some View {
+        GridRow {
+            Text(label).foregroundStyle(.secondary).frame(minWidth: 70, alignment: .leading)
+            Text(value).foregroundStyle(color).lineLimit(2).textSelection(.enabled)
         }
     }
 
