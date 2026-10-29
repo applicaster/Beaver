@@ -36,6 +36,9 @@ public struct PlayerState: Sendable, Equatable {
     public var drm: [String]?
     public var adBreaks: [Double]?
     public var lastError: String?
+    /// The engine's own live clock ("forward" or "behindLive"). Present only
+    /// when the toolbox puts live positions on one forward clock for us.
+    public var liveClock: String?
 
     public init(json: JSON) {
         active = json["active"]?.bool ?? false
@@ -58,6 +61,7 @@ public struct PlayerState: Sendable, Equatable {
         drm = json["drm"]?.array?.compactMap(\.string)
         adBreaks = json["adBreaks"]?.array?.compactMap(\.double).sorted()
         lastError = json["lastError"]?["message"]?.string ?? json["lastError"]?.string
+        liveClock = json["liveClock"]?.string
     }
 
     /// Where the bar's thumb is and how long the bar is, on the content's clock.
@@ -68,8 +72,13 @@ public struct PlayerState: Sendable, Equatable {
         return (position, length)
     }
 
-    /// A missing `seekableDuration` (older QuickBrick) leaves it to the app to refuse.
-    public var canSeek: Bool { active && !ad && seekableDuration != 0 }
+    /// A missing `seekableDuration` (older QuickBrick) leaves it to the app to
+    /// refuse. On live, engines count either forward or back from the live
+    /// edge; only a toolbox that reports `liveClock` normalised it for us.
+    public var canSeek: Bool {
+        let isLive = streamType == .live || streamType == .liveDvr
+        return active && !ad && seekableDuration != 0 && (!isLive || liveClock != nil)
+    }
 }
 
 public enum PlayerCommand: Sendable, Equatable {

@@ -42,7 +42,9 @@ struct PlayerControlTests {
         let s = PlayerState(json: Self.with(Self.today, [
             "live": true, "streamType": "liveDvr", "seekableDuration": 3600, "contentPosition": 3500,
             "drm": ["widevine"], "adBreaks": [0, 600], "lastError": ["message": "403", "detail": "Response code: 403"],
+            "liveClock": "behindLive",
         ]))
+        #expect(s.canSeek)
         #expect(s.streamType == .liveDvr)
         #expect(s.timeline?.position == 3500)
         #expect(s.timeline?.length == 3600)
@@ -54,6 +56,13 @@ struct PlayerControlTests {
     @Test("Live without streamType is plain live")
     func liveWithoutType() {
         #expect(PlayerState(json: Self.with(Self.today, ["live": true])).streamType == .live)
+    }
+
+    @Test("Live without liveClock (older QuickBrick, or an engine whose clock is unknown): no seeking")
+    func liveNeedsNormalisedClock() {
+        #expect(!PlayerState(json: Self.with(Self.today, ["live": true])).canSeek)
+        #expect(!PlayerState(json: Self.with(Self.today, ["live": true, "streamType": "liveDvr", "seekableDuration": 60])).canSeek)
+        #expect(PlayerState(json: Self.with(Self.today, ["live": true, "seekableDuration": 60, "liveClock": "forward"])).canSeek)
     }
 
     @Test("Nothing playing: inactive, no seek, no timeline")

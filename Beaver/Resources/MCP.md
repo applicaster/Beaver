@@ -416,7 +416,7 @@ over the Chrome DevTools Protocol. The TV's developer mode must be on.
 The same tools the Log feed's Player block uses (D99); apps on QuickBrick v16.0.0-rc.108 or later.
 
 1. `toolboxes_list(toolbox: "player")` — `state`, `play`, `pause`, `seek`, `offset`. No `player` toolbox: the app's QuickBrick is older.
-2. `tools_call(name: "player.state")` — `active`, entry, `position`/`duration` in seconds, `playing`, `ad`, `live`; newer builds add `streamType`, `seekableDuration`, `contentPosition`, `drm`, `adBreaks`, `lastError`.
+2. `tools_call(name: "player.state")` — `active`, entry, `position`/`duration` in seconds, `playing`, `ad`, `live`; newer builds add `streamType`, `seekableDuration`, `contentPosition`, `drm`, `adBreaks`, `lastError`, `liveClock`. On live, positions are on one forward clock (0 = oldest point of the DVR window) only when `liveClock` is present; without it the engine may count back from the live edge, so don't seek a live stream.
 3. `tools_call(name: "player.pause")`, then `tools_call(name: "player.seek", arguments: {position: 600})` (negative counts from the end) or `tools_call(name: "player.offset", arguments: {seconds: -10})`. Read `player.state` again: SSAI may snap a seek back to the break before it.
 4. `logs_wait(sessionId: <from the result>, afterId: <its latestEventId>, filter: {subsystems: ["*player*"]})` — what the player logged about it.
 

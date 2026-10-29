@@ -96,6 +96,8 @@ X-Ray logs MCP calls only on failure, so polling adds no log rows.
   older QuickBrick doesn't report it: the controls stay on and the device's
   own answer ("Seek is not supported") shows as the reason. *(Builder call:
   Beaver doesn't wait for the QuickBrick PR.)*
+- On live, seek controls only when `player.state` has `liveClock` (the
+  toolbox normalised the engine's clock, §4); else play/pause only.
 - During an ad (`ad` true) seek controls are disabled; play/pause stays.
   *(Builder call: `seekTo` mid-ad may be ignored or break the ad.)*
 - Polls use a short timeout (3 s), so a slow app never holds an agent's
@@ -160,6 +162,7 @@ All additive; Beaver reads every new field as optional.
 | `drm` | key systems, e.g. `["widevine"]`, or null | `Object.keys(entry.extensions.drm)` |
 | `adBreaks` | seconds, sorted, or null when unknown | see below |
 | `lastError` | `{message, detail?}` or null | see below |
+| `liveClock` | `"forward"`, `"behindLive"` or null | the engine's own live clock; `state`, `seek` and `offset` are normalised to forward (0 = oldest DVR point) |
 | `geoBlocked` | true / false / null when unknown | see below |
 
 - **Ad breaks:** a new `onAdCuePoints({cuePoints:[sec]})` player event,

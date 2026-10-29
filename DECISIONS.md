@@ -3432,10 +3432,17 @@ toolboxes" (D75–D77); D91 (Beaver #57) stays rejected.
   position.
 - **Richer state:** a QuickBrick PR adds `seekableDuration`,
   `contentPosition`/`contentDuration`, `streamType` (vod, live, liveDvr),
-  `drm` (key systems from `entry.extensions.drm`), `adBreaks` and
-  `lastError`. Every field is optional in Beaver: an older app shows less,
-  and without `seekableDuration` the seek controls stay on and the app's
-  refusal shows. Brightcove's DRM and cue points need a Zapp-Frameworks
+  `drm` (key systems from `entry.extensions.drm`), `adBreaks`, `lastError`
+  and `liveClock`. Every field is optional in Beaver: an older app shows
+  less, and on VOD without `seekableDuration` the seek controls stay on and
+  the app's refusal shows.
+- **Live clock:** on live, native players and video.js count seconds back
+  from the live edge, hls.js, dash.js and Shaka forward. The QuickBrick
+  toolbox puts `player.state`, `seek` and `offset` on one forward clock
+  (0 = oldest point of the DVR window) and says which clock the engine uses
+  in `liveClock`. Beaver seeks on live only when `liveClock` is there; an
+  older QuickBrick, or an engine whose clock it can't tell, gets play/pause
+  only on live. Brightcove's DRM and cue points need a Zapp-Frameworks
   follow-up.
 - **No geo-block badge:** no engine reports a geo block, only error text (a
   403, Brightcove's `CLIENT_GEO` subcode in its log). Guessing would flag the
