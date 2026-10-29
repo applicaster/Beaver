@@ -36,9 +36,6 @@ public struct PlayerState: Sendable, Equatable {
     public var drm: [String]?
     public var adBreaks: [Double]?
     public var lastError: String?
-    /// The engine's own live clock ("forward" or "behindLive"). Present only
-    /// when the toolbox puts live positions on one forward clock for us.
-    public var liveClock: String?
     /// What Play Next would play now; nil when there's nothing next (or an older QuickBrick).
     public var nextTitle: String?
 
@@ -58,52 +55,48 @@ public struct PlayerState: Sendable, Equatable {
         ad = json["ad"]?.bool ?? false
         muted = json["muted"]?.bool ?? false
         role = json["role"]?.string
-        streamType = json["streamType"]?.string.flatMap(StreamType.init)
-            ?? json["live"]?.bool.map { $0 ? .live : .vod }
+        streamType = json["live"]?.bool.map { live in
+            live ? ((seekableDuration ?? 0) > 0 ? .liveDvr : .live) : .vod
+        }
         drm = json["drm"]?.array?.compactMap(\.string)
         adBreaks = json["adBreaks"]?.array?.compactMap(\.double).sorted()
         lastError = json["lastError"]?["message"]?.string ?? json["lastError"]?.string
-        liveClock = json["liveClock"]?.string
         nextTitle = json["next"].flatMap { $0["title"]?.string ?? $0["id"]?.string }
     }
 
+    public var isLive: Bool { streamType == .live || streamType == .liveDvr }
+
     /// Where the bar's thumb is and how long the bar is, on the content's clock.
+    /// None on live: engines count live positions differently, so the bar would lie.
     public var timeline: (position: Double, length: Double)? {
-        guard let position = contentPosition ?? position,
-              let length = streamType == .liveDvr ? seekableDuration : (contentDuration ?? duration),
-              length > 0 else { return nil }
+        guard !isLive, let position = contentPosition ?? position,
+              let length = contentDuration ?? duration, length > 0 else { return nil }
         return (position, length)
     }
 
-    /// A missing `seekableDuration` (older QuickBrick) leaves it to the app to
-    /// refuse. On live, engines count either forward or back from the live
-    /// edge; only a toolbox that reports `liveClock` normalised it for us.
-    public var canSeek: Bool {
-        let isLive = streamType == .live || streamType == .liveDvr
-        return active && !ad && seekableDuration != 0 && (!isLive || liveClock != nil)
-    }
+    /// No seeking on live (v1): the app's own controls seek live by offset,
+    /// and engines disagree on which way a live position counts.
+    public var canSeek: Bool { active && !ad && !isLive && seekableDuration != 0 }
 }
 
 public enum PlayerCommand: Sendable, Equatable {
-    case play, pause, offset(Double), seek(Double), goLive, next
+    case play, pause, offset(Double), seek(Double), next
 
     public var tool: String {
         switch self {
         case .play: "player.play"
         case .pause: "player.pause"
         case .offset: "player.offset"
-        case .seek, .goLive: "player.seek"
+        case .seek: "player.seek"
         case .next: "player.next"
         }
     }
 
-    /// Go live seeks to the end of the DVR window; the app clamps it.
     public func arguments(_ state: PlayerState?) -> JSON {
         switch self {
         case .play, .pause, .next: [:]
         case .offset(let s): ["seconds": .number(s)]
         case .seek(let p): ["position": .number(p)]
-        case .goLive: ["position": .number(state?.seekableDuration ?? .greatestFiniteMagnitude)]
         }
     }
 }
@@ -123,7 +116,7 @@ public struct SeenAdBreaks: Sendable, Equatable {
     public init() {}
 
     public mutating func observe(_ state: PlayerState) {
-        guard state.active, state.streamType != .live, state.streamType != .liveDvr else { return }
+        guard state.active, !state.isLive else { return }
         if state.entryId != entryId { self = SeenAdBreaks(); entryId = state.entryId }
         if state.ad, !wasAd, let at = state.contentPosition ?? lastContent,
            !positions.contains(where: { abs($0 - at) < Self.sameBreak }) {
@@ -231,7 +224,7 @@ public final class PlayerPoller {
         sending = true
         defer { sending = false }
         switch command {
-        case .seek, .offset, .goLive: seen.forgetPosition()
+        case .seek, .offset: seen.forgetPosition()
         case .play, .pause, .next: break
         }
         var failure: String?

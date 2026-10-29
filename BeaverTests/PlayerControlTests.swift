@@ -37,32 +37,27 @@ struct PlayerControlTests {
         #expect(s.canSeek)
     }
 
-    @Test("The richer shape: DVR timeline, DRM, reported breaks, last error")
+    @Test("The richer shape: content clock, DRM, reported breaks, last error")
     func stateParsesRich() {
         let s = PlayerState(json: Self.with(Self.today, [
-            "live": true, "streamType": "liveDvr", "seekableDuration": 3600, "contentPosition": 3500,
-            "drm": ["widevine"], "adBreaks": [0, 600], "lastError": ["message": "403", "detail": "Response code: 403"],
-            "liveClock": "behindLive",
+            "seekableDuration": 100, "contentPosition": 40, "contentDuration": 90, "position": 3, "duration": 15, "ad": true,
+            "drm": ["widevine"], "adBreaks": [0, 600], "lastError": ["message": "403"],
         ]))
-        #expect(s.canSeek)
-        #expect(s.streamType == .liveDvr)
-        #expect(s.timeline?.position == 3500)
-        #expect(s.timeline?.length == 3600)
+        #expect(s.timeline?.position == 40)
+        #expect(s.timeline?.length == 90)
         #expect(s.drm == ["widevine"])
         #expect(s.adBreaks == [0, 600])
         #expect(s.lastError == "403")
     }
 
-    @Test("Live without streamType is plain live")
-    func liveWithoutType() {
-        #expect(PlayerState(json: Self.with(Self.today, ["live": true])).streamType == .live)
-    }
-
-    @Test("Live without liveClock (older QuickBrick, or an engine whose clock is unknown): no seeking")
-    func liveNeedsNormalisedClock() {
-        #expect(!PlayerState(json: Self.with(Self.today, ["live": true])).canSeek)
-        #expect(!PlayerState(json: Self.with(Self.today, ["live": true, "streamType": "liveDvr", "seekableDuration": 60])).canSeek)
-        #expect(PlayerState(json: Self.with(Self.today, ["live": true, "seekableDuration": 60, "liveClock": "forward"])).canSeek)
+    @Test("Live: DVR when there's a seekable range, plain otherwise; no bar and no seeking either way")
+    func live() {
+        let plain = PlayerState(json: Self.with(Self.today, ["live": true]))
+        let dvr = PlayerState(json: Self.with(Self.today, ["live": true, "seekableDuration": 3600]))
+        #expect(plain.streamType == .live)
+        #expect(dvr.streamType == .liveDvr)
+        #expect(!plain.canSeek && !dvr.canSeek)
+        #expect(plain.timeline == nil && dvr.timeline == nil)
     }
 
     @Test("Nothing playing: inactive, no seek, no timeline")
@@ -86,9 +81,6 @@ struct PlayerControlTests {
         #expect(PlayerCommand.offset(-10).tool == "player.offset")
         #expect(PlayerCommand.offset(-10).arguments(nil) == ["seconds": -10])
         #expect(PlayerCommand.seek(42).arguments(nil) == ["position": 42])
-        let dvr = PlayerState(json: Self.with(Self.today, ["seekableDuration": 3600]))
-        #expect(PlayerCommand.goLive.tool == "player.seek")
-        #expect(PlayerCommand.goLive.arguments(dvr) == ["position": 3600])
         #expect(PlayerCommand.next.tool == "player.next")
         #expect(PlayerCommand.next.arguments(nil) == [:])
     }

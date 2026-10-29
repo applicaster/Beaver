@@ -3409,8 +3409,8 @@ toolboxes" (D75–D77); D91 (Beaver #57) stays rejected.
 - **Decision:** while the viewed session is live, its app has the X-Ray
   `player` toolbox (QuickBrick v16.0.0-rc.108 or later) and `player.state`
   says `active`, a Player block is pinned under the Log feed's detail pane:
-  play/pause, −10 s / +10 s, a bar dragged to seek (one `player.seek` on
-  release), Live on a seekable live stream, Next when `player.state` reports
+  play/pause, −10 s / +10 s and a bar dragged to seek (one `player.seek` on
+  release) on VOD, Next when `player.state` reports
   `next` (`player.next` runs the Play Next overlay's own action, so its
   analytics fire once), and the state. Beaver polls
   `player.state` every second while the Log feed shows a live session (3 s
@@ -3426,7 +3426,7 @@ toolboxes" (D75–D77); D91 (Beaver #57) stays rejected.
 - **Not D91:** #57 ran any tool of any toolbox from a form built from its
   schema, with confirmations, history and log lines, so a person could wipe
   storage, log out or restart the app from Beaver. This is a fixed set of
-  six calls on one toolbox, none destructive, built for one job. Running
+  five calls on one toolbox, none destructive, built for one job. Running
   arbitrary app tools from the UI stays out.
 - **Ad breaks:** on VOD Beaver marks the breaks it saw (the content position
   under the ad when the app reports it, else that of the last poll before
@@ -3436,19 +3436,18 @@ toolboxes" (D75–D77); D91 (Beaver #57) stays rejected.
   that doesn't report `contentPosition`, the bar keeps the content's last
   position.
 - **Richer state:** a QuickBrick PR adds `seekableDuration`,
-  `contentPosition`/`contentDuration`, `streamType` (vod, live, liveDvr),
-  `drm` (key systems from `entry.extensions.drm`), `adBreaks`, `lastError`
-  and `liveClock`. Every field is optional in Beaver: an older app shows
-  less, and on VOD without `seekableDuration` the seek controls stay on and
-  the app's refusal shows.
-- **Live clock:** on live, native players and video.js count seconds back
-  from the live edge, hls.js, dash.js and Shaka forward. The QuickBrick
-  toolbox puts `player.state`, `seek` and `offset` on one forward clock
-  (0 = oldest point of the DVR window) and says which clock the engine uses
-  in `liveClock`. Beaver seeks on live only when `liveClock` is there; an
-  older QuickBrick, or an engine whose clock it can't tell, gets play/pause
-  only on live. Brightcove's DRM and cue points need a Zapp-Frameworks
-  follow-up.
+  `contentPosition`/`contentDuration`, `drm` (key systems from
+  `entry.extensions.drm`), `adBreaks` (the entry's `video_ads` offsets),
+  `lastError` and `next`. Every field is optional in Beaver: an older app
+  shows less, and on VOD without `seekableDuration` the seek controls stay
+  on and the app's refusal shows. Beaver derives the stream type: VOD, LIVE,
+  or LIVE · DVR when `live` has a seekable range.
+- **No seeking on live:** engines count live positions differently (native
+  players back from the live edge, hls.js/dash.js/Shaka forward) and the
+  apps' own controls seek live by offset, so on live the block has
+  play/pause and Next only, no bar. A live-clock normalisation in the
+  toolbox was tried and dropped (review, 2026-10-29). Brightcove's DRM needs
+  a Zapp-Frameworks follow-up.
 - **No geo-block badge:** no engine reports a geo block, only error text (a
   403, Brightcove's `CLIENT_GEO` subcode in its log). Guessing would flag the
   wrong thing, so the block shows `lastError` and a badge waits for an

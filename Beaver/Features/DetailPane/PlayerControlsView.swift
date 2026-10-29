@@ -58,15 +58,12 @@ struct PlayerControlsView: View {
                     button("forward.end.fill", "Play next: \(next) (⌥⌘N)", .next, poller, size: 20)
                         .keyboardShortcut("n", modifiers: [.command, .option])
                 }
-                if s.streamType == .liveDvr {
-                    Button("Live") { send(.goLive, poller) }
-                        .disabled(!s.canSeek || poller.sending)
-                        .help("Jump to the live edge")
-                }
             }
             .frame(maxWidth: .infinity)
-            bar(poller, s)
-                .disabled(poller.sending)
+            if poller.timeline != nil {
+                bar(poller, s)
+                    .disabled(poller.sending)
+            }
             HStack {
                 Text(time(poller, s)).monospacedDigit()
                 Spacer()
@@ -133,7 +130,7 @@ struct PlayerControlsView: View {
     // MARK: - Text
 
     private func time(_ poller: PlayerPoller, _ s: PlayerState) -> String {
-        guard let t = poller.timeline else { return s.streamType == .live ? "LIVE" : "—" }
+        guard let t = poller.timeline else { return s.isLive ? "LIVE" : "—" }
         return "\(Self.clock(dragTo ?? t.position)) / \(Self.clock(t.length))"
     }
 

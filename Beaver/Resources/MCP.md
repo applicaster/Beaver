@@ -90,8 +90,7 @@ port, notifications), Zapp (token), About (version, What's New, updates).
 13. Player controls (D99): connect an app on QuickBrick v16.0.0-rc.108 or
    later the same way, open the Log feed and start a video. A **Player** block
    appears at the bottom of the right-hand pane within a second: play/pause,
-   −10 s / +10 s (⌥⌘P, ⌥⌘←, ⌥⌘→), a bar to drag, **Live** on a live stream
-   with DVR, **Next** (⌥⌘N) when the app has a next item, and the state (VOD / LIVE / LIVE · DVR, DRM, ad breaks as orange
+   −10 s / +10 s (⌥⌘P, ⌥⌘←, ⌥⌘→), a bar to drag (VOD only), **Next** (⌥⌘N) when the app has a next item, and the state (VOD / LIVE / LIVE · DVR, DRM, ad breaks as orange
    ticks, the last playback error). It goes when the player closes. A TV added
    with Connect a TV… has no toolboxes, so no block. Agents do the same with
    `tools_call(name: "player.pause")`.
@@ -416,7 +415,7 @@ over the Chrome DevTools Protocol. The TV's developer mode must be on.
 The same tools the Log feed's Player block uses (D99); apps on QuickBrick v16.0.0-rc.108 or later.
 
 1. `toolboxes_list(toolbox: "player")` — `state`, `play`, `pause`, `seek`, `offset`, and on newer builds `next`. No `player` toolbox: the app's QuickBrick is older.
-2. `tools_call(name: "player.state")` — `active`, entry, `position`/`duration` in seconds, `playing`, `ad`, `live`; newer builds add `streamType`, `seekableDuration`, `contentPosition`, `drm`, `adBreaks`, `lastError`, `liveClock`, `next` (what Play Next would play, or null). On live, positions are on one forward clock (0 = oldest point of the DVR window) only when `liveClock` is present; without it the engine may count back from the live edge, so don't seek a live stream.
+2. `tools_call(name: "player.state")` — `active`, entry, `position`/`duration` in seconds, `playing`, `ad`, `live`; newer builds add `seekableDuration`, `contentPosition`/`contentDuration`, `drm`, `adBreaks`, `lastError`, `next` (what Play Next would play, or null). Live with `seekableDuration` > 0 is DVR. Don't seek a live stream with `seek`: engines count live positions differently (native players back from the live edge); use `offset`, as the app's own controls do.
 3. `tools_call(name: "player.pause")`, then `tools_call(name: "player.seek", arguments: {position: 600})` (negative counts from the end) or `tools_call(name: "player.offset", arguments: {seconds: -10})`. Read `player.state` again: SSAI may snap a seek back to the break before it. `tools_call(name: "player.next")` plays `next` the way the Play Next overlay does.
 4. `logs_wait(sessionId: <from the result>, afterId: <its latestEventId>, filter: {subsystems: ["*player*"]})` — what the player logged about it.
 

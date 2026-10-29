@@ -197,3 +197,16 @@ with an existing shortcut.
 ## 6. Open
 
 - Whether the reviewer of Beaver #57 accepts D99 (§1).
+
+## 7. Changed after review (2026-10-29)
+
+- **No seeking on live, no `liveClock`, no Go live.** QuickBrick's reviewer:
+  the apps seek live by offset, and the web players don't seek live at all;
+  a ponytail review agreed the live-clock normalisation wasn't worth its 70
+  lines. On live the block has play/pause and Next, no bar.
+- **Dropped from the QuickBrick PR:** `liveClock`, `streamType` (Beaver
+  derives it from `live` + `seekableDuration`), the engines' `onAdCuePoints`
+  (`adBreaks` = the entry's `video_ads` offsets; Beaver adds the breaks it
+  saw), the error-shape mapping (`lastError` is `{message}`).
+- **Added:** Play Next — `state.next` and `player.next` (the overlay's own
+  action), a Next button (⌥⌘N). Buttons are larger, in a centred row.
