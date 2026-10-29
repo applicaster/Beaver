@@ -31,7 +31,6 @@ struct PlayerControlTests {
         #expect(s.role == "Primary")
         #expect(s.streamType == .vod)
         #expect(s.drm == nil)
-        #expect(s.adBreaks == nil)
         #expect(s.timeline?.position == 12)
         #expect(s.timeline?.length == 100)
         #expect(s.canSeek)
@@ -41,12 +40,11 @@ struct PlayerControlTests {
     func stateParsesRich() {
         let s = PlayerState(json: Self.with(Self.today, [
             "seekableDuration": 100, "contentPosition": 40, "contentDuration": 90, "position": 3, "duration": 15, "ad": true,
-            "drm": ["widevine"], "adBreaks": [0, 600], "lastError": ["message": "403"],
+            "drm": ["widevine"], "lastError": ["message": "403"],
         ]))
         #expect(s.timeline?.position == 40)
         #expect(s.timeline?.length == 90)
         #expect(s.drm == ["widevine"])
-        #expect(s.adBreaks == [0, 600])
         #expect(s.lastError == "403")
     }
 
@@ -139,16 +137,6 @@ struct PlayerControlTests {
         seen.observe(PlayerState(json: Self.with(Self.today, ["live": true, "position": 100])))
         seen.observe(PlayerState(json: Self.with(Self.today, ["live": true, "position": 101, "ad": true])))
         #expect(seen.positions == [])
-    }
-
-    @Test("Reported breaks win; a seen one within 2 s of a reported one is the same break")
-    func mergeWithin2s() {
-        var seen = SeenAdBreaks()
-        seen.observe(Self.state(position: 100, ad: false))
-        seen.observe(Self.state(position: 100, ad: true))
-        #expect(seen.merged(with: [99, 600]) == [99, 600])
-        #expect(seen.merged(with: nil) == [100])
-        #expect(seen.merged(with: [600]) == [100, 600])
     }
 }
 

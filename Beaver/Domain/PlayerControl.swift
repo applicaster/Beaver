@@ -34,7 +34,6 @@ public struct PlayerState: Sendable, Equatable {
     public var streamType: StreamType?
     /// Key systems, e.g. ["widevine"].
     public var drm: [String]?
-    public var adBreaks: [Double]?
     public var lastError: String?
     /// What Play Next would play now; nil when there's nothing next (or an older QuickBrick).
     public var nextTitle: String?
@@ -59,7 +58,6 @@ public struct PlayerState: Sendable, Equatable {
             live ? ((seekableDuration ?? 0) > 0 ? .liveDvr : .live) : .vod
         }
         drm = json["drm"]?.array?.compactMap(\.string)
-        adBreaks = json["adBreaks"]?.array?.compactMap(\.double).sorted()
         lastError = json["lastError"]?["message"]?.string ?? json["lastError"]?.string
         nextTitle = json["next"].flatMap { $0["title"]?.string ?? $0["id"]?.string }
     }
@@ -129,12 +127,6 @@ public struct SeenAdBreaks: Sendable, Equatable {
 
     /// A seek moved the playhead: the last position no longer says where an ad starts.
     public mutating func forgetPosition() { lastContent = nil }
-
-    /// Reported breaks, plus the seen ones no reported break is near.
-    public func merged(with reported: [Double]?) -> [Double] {
-        let reported = reported ?? []
-        return (reported + positions.filter { p in !reported.contains { abs($0 - p) < Self.sameBreak } }).sorted()
-    }
 }
 
 /// Polls the viewed app's `player.state` and sends the block's commands.

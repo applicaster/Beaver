@@ -206,7 +206,7 @@ with an existing shortcut.
   lines. On live the block has play/pause and Next, no bar.
 - **Dropped from the QuickBrick PR:** `liveClock`, `streamType` (Beaver
   derives it from `live` + `seekableDuration`), the engines' `onAdCuePoints`
-  (`adBreaks` = the entry's `video_ads` offsets; Beaver adds the breaks it
-  saw), the error-shape mapping (`lastError` is `{message}`).
+  and `adBreaks` itself (`video_ads` covers client-side schedules only, SSAI
+  breaks come in the stream; Beaver marks the breaks it sees), the error-shape mapping (`lastError` is `{message}`).
 - **Added:** Play Next — `state.next` and `player.next` (the overlay's own
   action), a Next button (⌥⌘N). Buttons are larger, in a centred row.

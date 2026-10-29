@@ -103,7 +103,7 @@ struct PlayerControlsView: View {
     private func bar(_ poller: PlayerPoller, _ s: PlayerState) -> some View {
         let length = poller.timeline?.length ?? 0
         let position = dragTo ?? poller.timeline?.position ?? 0
-        let breaks = poller.seen.merged(with: s.adBreaks)
+        let breaks = poller.seen.positions
         return GeometryReader { g in
             let x = { (t: Double) in length > 0 ? CGFloat(min(max(t / length, 0), 1)) * g.size.width : 0 }
             let at = { (px: CGFloat) in Double(min(max(px / max(g.size.width, 1), 0), 1)) * length }

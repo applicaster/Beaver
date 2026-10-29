@@ -3431,14 +3431,14 @@ toolboxes" (D75–D77); D91 (Beaver #57) stays rejected.
 - **Ad breaks:** on VOD Beaver marks the breaks it saw (the content position
   under the ad when the app reports it, else that of the last poll before
   `ad` turned true, up to a poll early; forgotten after a seek; per entry, in
-  memory). Not on live, where the DVR window slides under fixed ticks. When `player.state` reports `adBreaks` they are drawn too; a seen
-  break within 2 s of a reported one is the same. During an ad on an app
+  memory). Not on live, where the DVR window slides under fixed ticks.
+  QuickBrick has no list of breaks up front: the entry's `video_ads` covers
+  client-side schedules only, SSAI breaks come in the stream. During an ad on an app
   that doesn't report `contentPosition`, the bar keeps the content's last
   position.
 - **Richer state:** a QuickBrick PR adds `seekableDuration`,
   `contentPosition`/`contentDuration`, `drm` (key systems from
-  `entry.extensions.drm`), `adBreaks` (the entry's `video_ads` offsets),
-  `lastError` and `next`. Every field is optional in Beaver: an older app
+  `entry.extensions.drm`), `lastError` and `next`. Every field is optional in Beaver: an older app
   shows less, and on VOD without `seekableDuration` the seek controls stay
   on and the app's refusal shows. Beaver derives the stream type: VOD, LIVE,
   or LIVE · DVR when `live` has a seekable range.
