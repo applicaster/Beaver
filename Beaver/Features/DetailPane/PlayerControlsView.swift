@@ -21,13 +21,13 @@ struct PlayerControlsView: View {
     }
 
     var body: some View {
-        Group {
+        // A VStack, not a Group: while hidden a Group is an EmptyView, whose
+        // .task never runs, so the poller that would show the block never starts.
+        VStack(spacing: 0) {
             if let poller, poller.available, poller.sessionId == liveSessionId,
                let state = poller.state, state.active {
-                VStack(spacing: 0) {
-                    Divider()
-                    panel(poller, state).padding(12)
-                }
+                Divider()
+                panel(poller, state).padding(12)
             }
         }
         .task(id: liveSessionId) {
