@@ -12,6 +12,17 @@ does the same for a manual release.
 
 ## [Unreleased]
 
+### Added
+- **Player controls in the Log feed.** While the viewed app plays a video, a
+  Player block at the bottom of the right-hand pane pauses and plays it,
+  jumps ±10 s (⌥⌘P, ⌥⌘←, ⌥⌘→), seeks by dragging the bar, and jumps to the
+  live edge on a live stream with DVR. Under it: what plays, position, and
+  badges for paused/buffering/ad, VOD/live/live with DVR, DRM and mute; ad
+  breaks show as ticks on the bar, and the last playback error as a line.
+  Needs QuickBrick v16.0.0-rc.108 or later (its `player` toolbox), on phones,
+  Apple TV, Android TV and web TVs connected through X-Ray. Agents get a
+  `player` recipe in `beaver_guide`.
+
 ## [4.23.0] - 2026-10-15
 
 ### Changed

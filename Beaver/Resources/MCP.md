@@ -83,9 +83,18 @@ port, notifications), Zapp (token), About (version, What's New, updates).
    another. A sheet lists what differs; click a line to open it. Ask the agent
    "compare session <a> with <b>" → `sessions_compare`.
 13. Toolboxes: connect an app built with quick-brick-xray's **native** WebSocket
-   sink (the JS-only sink has none), then Sessions → select its live session —
+   sink, or a web app on quick-brick-xray 2.70.0 or later (an older JS-only
+   sink has none), then Sessions → select its live session —
    the details list its toolboxes (the device badge's popover links there with
    **Toolboxes in Sessions**). Nothing to turn on in Beaver.
+13. Player controls (D99): connect an app on QuickBrick v16.0.0-rc.108 or
+   later the same way, open the Log feed and start a video. A **Player** block
+   appears at the bottom of the right-hand pane within a second: play/pause,
+   −10 s / +10 s (⌥⌘P, ⌥⌘←, ⌥⌘→), a bar to drag, **Live** on a live stream
+   with DVR, and the state (VOD / LIVE / LIVE · DVR, DRM, ad breaks as orange
+   ticks, the last playback error). It goes when the player closes. A TV added
+   with Connect a TV… has no toolboxes, so no block. Agents do the same with
+   `tools_call(name: "player.pause")`.
 13. Session retention: Settings → General → **Delete sessions older than**
    shows 30 Days, and "Database on disk" fills in a few seconds after
    launch. `beaver_status` reports `retentionDays: 30` and `storeBytes`.
@@ -401,6 +410,15 @@ over the Chrome DevTools Protocol. The TV's developer mode must be on.
 4. `tools_call(name: "storage.get", arguments: {key: "volume"})` — the app's answer. The summary names the app (`(default)` when the default picked it); Next's `logs_wait(sessionId: …)` reads that app's logs. `tools_call` is marked destructive, so clients that honor destructiveHint ask the user to confirm: app tools can delete data or restart the app.
 5. `tools_call(name: "app.restart")` may time out or report a disconnect: the app drops the connection first, so it may still have run. `beaver_status()` shows it back in a new session; the default follows it. The Agent panel notes the drop. An error that says the call didn't reach the app is different: nothing ran, so the same call can be sent again.
 6. `toolboxes_list(deviceId: "beaver")` and `tools_call(deviceId: "beaver", name: "logs.query", arguments: {since: "5m"})` — Beaver's own tools the same way (`"beaver"` in any case). Beaver's destructive tools aren't listed there: call them directly. A Beaver tool reached through `tools_call` is marked destructive too (the hint is `tools_call`'s), so call Beaver's tools directly to avoid a confirmation.
+
+### player — drive the app's player
+
+The same tools the Log feed's Player block uses (D99); apps on QuickBrick v16.0.0-rc.108 or later.
+
+1. `toolboxes_list(toolbox: "player")` — `state`, `play`, `pause`, `seek`, `offset`. No `player` toolbox: the app's QuickBrick is older.
+2. `tools_call(name: "player.state")` — `active`, entry, `position`/`duration` in seconds, `playing`, `ad`, `live`; newer builds add `streamType`, `seekableDuration`, `contentPosition`, `drm`, `adBreaks`, `lastError`.
+3. `tools_call(name: "player.pause")`, then `tools_call(name: "player.seek", arguments: {position: 600})` (negative counts from the end) or `tools_call(name: "player.offset", arguments: {seconds: -10})`. Read `player.state` again: SSAI may snap a seek back to the break before it.
+4. `logs_wait(sessionId: <from the result>, afterId: <its latestEventId>, filter: {subsystems: ["*player*"]})` — what the player logged about it.
 
 ### organise — bookmarks, saved filters, a clean screen
 

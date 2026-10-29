@@ -3400,3 +3400,47 @@ the step order of D90.
   refuses the device's reconnects (the app keeps retrying and logs warnings);
   4000 on every close (a timeout or Beaver restart would strand the app
   until it is foregrounded).
+
+## D99. Player controls in the Log feed's detail pane
+
+**Status:** Accepted (2026-10-29). A narrow exception to "the UI only shows
+toolboxes" (D75–D77); D91 (Beaver #57) stays rejected.
+
+- **Decision:** while the viewed session is live, its app has the X-Ray
+  `player` toolbox (QuickBrick v16.0.0-rc.108 or later) and `player.state`
+  says `active`, a Player block is pinned under the Log feed's detail pane:
+  play/pause, −10 s / +10 s, a bar dragged to seek (one `player.seek` on
+  release), Live on a seekable live stream, and the state. Beaver polls
+  `player.state` every second (3 s timeout, never two at once, every 5 s
+  after three failures) and looks for the toolbox every 10 s while it's
+  missing. Errors are a line in the block, never a toast; nothing activates
+  Beaver or the device. Hotkeys are ⌥⌘P, ⌥⌘←, ⌥⌘→: plain Space and arrows
+  are the feed's, ⌃Space is macOS's input switch.
+- **Why:** testers drive TVs from Beaver while reading the logs; a remote is
+  slow for "pause, jump, look, go on". The toolbox already existed for agents
+  (`tools_call player.*`), so no new wire frame or MCP tool is needed.
+- **Not D91:** #57 ran any tool of any toolbox from a form built from its
+  schema, with confirmations, history and log lines, so a person could wipe
+  storage, log out or restart the app from Beaver. This is a fixed set of
+  five calls on one toolbox, none destructive, built for one job. Running
+  arbitrary app tools from the UI stays out.
+- **Ad breaks:** Beaver marks the breaks it saw (the content position of the
+  last poll before `ad` turned true; up to a poll early; per entry, in
+  memory). When `player.state` reports `adBreaks` they are drawn too; a seen
+  break within 2 s of a reported one is the same. During an ad on an app
+  that doesn't report `contentPosition`, the bar keeps the content's last
+  position.
+- **Richer state:** a QuickBrick PR adds `seekableDuration`,
+  `contentPosition`/`contentDuration`, `streamType` (vod, live, liveDvr),
+  `drm` (key systems from `entry.extensions.drm`), `adBreaks` and
+  `lastError`. Every field is optional in Beaver: an older app shows less,
+  and without `seekableDuration` the seek controls stay on and the app's
+  refusal shows. Brightcove's DRM and cue points need a Zapp-Frameworks
+  follow-up.
+- **No geo-block badge:** no engine reports a geo block, only error text (a
+  403, Brightcove's `CLIENT_GEO` subcode in its log). Guessing would flag the
+  wrong thing, so the block shows `lastError` and a badge waits for an
+  engine to say so.
+- **Alternatives:** a generic tool runner (D91, rejected); a separate player
+  window (another place to look, away from the logs); always showing the
+  block with "Nothing playing" (space taken from the payload for nothing).
