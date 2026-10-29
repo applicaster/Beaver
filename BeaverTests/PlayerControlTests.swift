@@ -83,6 +83,16 @@ struct PlayerControlTests {
         #expect(PlayerCommand.next.arguments(nil) == [:])
     }
 
+    @Test("Which player: plugin, and the web default player's engine")
+    func playerName() {
+        #expect(PlayerState(json: Self.today).playerName == nil)
+        #expect(PlayerState(json: Self.with(Self.today, ["plugin": "QuickBrickPlayerPlugin"])).playerName == "Default player")
+        #expect(PlayerState(json: Self.with(Self.today, ["plugin": "QuickBrickPlayerPlugin", "engine": "hls.js"])).playerName
+                == "Default player · hls.js")
+        #expect(PlayerState(json: Self.with(Self.today, ["plugin": "quick-brick-player-brightcove"])).playerName == "Brightcove")
+        #expect(PlayerState(json: Self.with(Self.today, ["plugin": "some-player"])).playerName == "some-player")
+    }
+
     @Test("Play Next: the next item's title when the app reports one")
     func nextItem() {
         #expect(PlayerState(json: Self.today).nextTitle == nil)

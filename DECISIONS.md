@@ -3438,7 +3438,9 @@ toolboxes" (D75–D77); D91 (Beaver #57) stays rejected.
   position.
 - **Richer state:** a QuickBrick PR adds `seekableDuration`,
   `contentPosition`/`contentDuration`, `drm` (key systems from
-  `entry.extensions.drm`), `lastError` and `next`. Every field is optional in Beaver: an older app
+  `entry.extensions.drm`), `lastError`, `next`, and which player plays:
+  `plugin` (its id: the default player, Brightcove, Kaltura…) and, for the
+  default player on the web, `engine` (hls.js, dash.js, Shaka, video.js). Every field is optional in Beaver: an older app
   shows less, and on VOD without `seekableDuration` the seek controls stay
   on and the app's refusal shows. Beaver derives the stream type: VOD, LIVE,
   or LIVE · DVR when `live` has a seekable range.

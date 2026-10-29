@@ -16,7 +16,8 @@ does the same for a manual release.
 - **Player controls in the Log feed.** While the viewed app plays a video, a
   Player block at the bottom of the right-hand pane pauses and plays it,
   jumps ±10 s (⌥⌘P, ⌥⌘←, ⌥⌘→) and seeks by dragging the bar (VOD), and plays
-  the next item when there is one (⌥⌘N, as the Play Next overlay does). Under it: what plays, position, and
+  the next item when there is one (⌥⌘N, as the Play Next overlay does). Under it: what plays and on which
+  player (Brightcove, the default player and its web engine…), position, and
   badges for paused/buffering/ad, VOD/live/live with DVR, DRM and mute; ad
   breaks show as ticks on the bar, and the last playback error as a line.
   Needs QuickBrick v16.0.0-rc.108 or later (its `player` toolbox), on phones,

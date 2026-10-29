@@ -70,6 +70,9 @@ struct PlayerControlsView: View {
                 Text(badges(s)).foregroundStyle(s.ad ? .orange : .secondary)
             }
             .font(.caption)
+            if let player = s.playerName {
+                Text(player).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+            }
             if let title = s.title ?? s.entryId {
                 Text(s.entryId.map { "\(title) · \($0)" } ?? title)
                     .font(.caption).lineLimit(2).textSelection(.enabled)

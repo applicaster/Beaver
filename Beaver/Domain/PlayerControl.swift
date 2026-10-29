@@ -37,6 +37,24 @@ public struct PlayerState: Sendable, Equatable {
     public var lastError: String?
     /// What Play Next would play now; nil when there's nothing next (or an older QuickBrick).
     public var nextTitle: String?
+    /// Which player: the plugin, and on the web the default player's engine.
+    public var plugin: String?
+    public var engine: String?
+
+    /// "Brightcove", "Default · hls.js", "Default (native)": for the state line.
+    public var playerName: String? {
+        guard let plugin else { return engine }
+        let name = Self.pluginNames[plugin] ?? plugin
+        return engine.map { "\(name) · \($0)" } ?? name
+    }
+
+    /// The default player reports its plugin id; the rest show their own id as is.
+    static let pluginNames = [
+        "QuickBrickPlayerPlugin": "Default player",
+        "quick-brick-player-brightcove": "Brightcove",
+        "KalturaPlayerPlugin": "Kaltura",
+        "zapp-react-native-theo-player": "THEOplayer",
+    ]
 
     public init(json: JSON) {
         active = json["active"]?.bool ?? false
@@ -60,6 +78,8 @@ public struct PlayerState: Sendable, Equatable {
         drm = json["drm"]?.array?.compactMap(\.string)
         lastError = json["lastError"]?["message"]?.string ?? json["lastError"]?.string
         nextTitle = json["next"].flatMap { $0["title"]?.string ?? $0["id"]?.string }
+        plugin = json["plugin"]?.string
+        engine = json["engine"]?.string
     }
 
     public var isLive: Bool { streamType == .live || streamType == .liveDvr }
