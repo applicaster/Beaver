@@ -75,8 +75,9 @@ X-Ray logs MCP calls only on failure, so polling adds no log rows.
 
 ### 3.2 Polling
 
-- `player.state` every 1 s while the block is shown and the window is
-  visible (not minimised, Log feed tab selected). Never two in flight: the
+- `player.state` every 1 s while the Log feed shows a live session with
+  the toolbox (a minimised window keeps polling: one small call a second).
+  Clicks while a command is on its way are dropped. Never two in flight: the
   next poll starts 1 s after the previous answer.
 - After any action, poll at once.
 - A failed poll keeps the last state greyed with a one-line reason ("The app
@@ -123,9 +124,10 @@ Under the controls:
 
 ### 3.5 Ad markers
 
-- **Seen breaks (step 1):** while polling, when `ad` turns true Beaver
-  records the content position of the last poll before it as a break; it
-  draws a tick there. Kept in memory per session and entry id; a new entry
+- **Seen breaks (step 1, VOD only):** while polling, when `ad` turns true
+  Beaver records the content position under the ad if reported, else that
+  of the last poll before it (forgotten after a seek); it draws a tick
+  there. Kept in memory per session and entry id; a new entry
   clears them. With 1 s polling a marker can be up to ~1 s early.
 - **Reported breaks (step 2):** when `player.state` has `adBreaks`, those are
   drawn (seen ones that match within 2 s are merged).

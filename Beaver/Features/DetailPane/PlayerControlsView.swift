@@ -13,7 +13,8 @@ struct PlayerControlsView: View {
     @Environment(AppEnvironment.self) private var env
     @State private var poller: PlayerPoller?
     /// Where the thumb is while the user drags it; the seek goes on release.
-    @State private var dragTo: Double?
+    /// Gesture state, so a drag the panel's removal cancels leaves nothing behind.
+    @GestureState private var dragTo: Double?
 
     private var liveSessionId: Int64? {
         env.viewingSessionId.flatMap { env.isLive($0) ? $0 : nil }
@@ -62,6 +63,7 @@ struct PlayerControlsView: View {
                 }
             }
             bar(poller, s)
+                .disabled(poller.sending)
             HStack {
                 Text(time(poller, s)).monospacedDigit()
                 Spacer()
@@ -85,6 +87,7 @@ struct PlayerControlsView: View {
                         _ poller: PlayerPoller) -> some View {
         Button { send(command, poller) } label: { Image(systemName: symbol) }
             .buttonStyle(.borderless)
+            .disabled(poller.sending)
             .help(help)
             .accessibilityLabel(help)
     }
@@ -101,6 +104,7 @@ struct PlayerControlsView: View {
         let breaks = poller.seen.merged(with: s.adBreaks)
         return GeometryReader { g in
             let x = { (t: Double) in length > 0 ? CGFloat(min(max(t / length, 0), 1)) * g.size.width : 0 }
+            let at = { (px: CGFloat) in Double(min(max(px / max(g.size.width, 1), 0), 1)) * length }
             ZStack(alignment: .leading) {
                 Capsule().fill(.quaternary).frame(height: 4)
                 Capsule().fill(s.ad ? Color.orange : .accentColor).frame(width: x(position), height: 4)
@@ -112,14 +116,8 @@ struct PlayerControlsView: View {
             .frame(maxHeight: .infinity)
             .contentShape(Rectangle())
             .gesture(DragGesture(minimumDistance: 0)
-                .onChanged { v in
-                    guard length > 0 else { return }
-                    dragTo = Double(min(max(v.location.x / g.size.width, 0), 1)) * length
-                }
-                .onEnded { _ in
-                    if let target = dragTo { send(.seek(target), poller) }
-                    dragTo = nil
-                })
+                .updating($dragTo) { v, target, _ in target = at(v.location.x) }
+                .onEnded { v in if length > 0 { send(.seek(at(v.location.x)), poller) } })
         }
         .frame(height: 14)
         .disabled(!s.canSeek || length == 0)

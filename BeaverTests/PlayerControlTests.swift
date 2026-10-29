@@ -115,6 +115,31 @@ struct PlayerControlTests {
         #expect(seen.positions == [])
     }
 
+    @Test("An app that reports contentPosition under the ad places the break exactly")
+    func seenBreakAtContentPosition() {
+        var seen = SeenAdBreaks()
+        seen.observe(Self.state(position: 100, ad: false))
+        seen.observe(PlayerState(json: Self.with(Self.today, ["position": 2, "ad": true, "contentPosition": 300])))
+        #expect(seen.positions == [300])
+    }
+
+    @Test("After a seek the old position doesn't mark the break the seek ran into")
+    func seenBreakForgetsAfterSeek() {
+        var seen = SeenAdBreaks()
+        seen.observe(Self.state(position: 100, ad: false))
+        seen.forgetPosition()
+        seen.observe(Self.state(position: 2, ad: true))
+        #expect(seen.positions == [])
+    }
+
+    @Test("Live: no seen breaks (the DVR window slides under them)")
+    func seenBreaksVodOnly() {
+        var seen = SeenAdBreaks()
+        seen.observe(PlayerState(json: Self.with(Self.today, ["live": true, "position": 100])))
+        seen.observe(PlayerState(json: Self.with(Self.today, ["live": true, "position": 101, "ad": true])))
+        #expect(seen.positions == [])
+    }
+
     @Test("Reported breaks win; a seen one within 2 s of a reported one is the same break")
     func mergeWithin2s() {
         var seen = SeenAdBreaks()
@@ -205,6 +230,20 @@ struct PlayerPollerTests {
         await poller.poll()
         #expect(poller.timeline?.position == 12)
         #expect(poller.timeline?.length == 100)
+    }
+
+    @Test("A new entry starting on an ad doesn't show the last entry's bar")
+    func timelineResetsOnNewEntry() async {
+        let next = Mutex(false)
+        let poller = PlayerPoller(device: Self.device(calls: { _, _ in
+            next.withLock { $0 }
+                ? Self.result(PlayerControlTests.with(PlayerControlTests.today, ["entry": ["id": "e2"], "ad": true, "position": 3]))
+                : Self.result(PlayerControlTests.today)
+        }), sessionId: 7)
+        await poller.poll()
+        next.withLock { $0 = true }
+        await poller.poll()
+        #expect(poller.timeline == nil)
     }
 
     @Test("A command calls its tool, then polls at once")

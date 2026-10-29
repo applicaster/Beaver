@@ -3411,8 +3411,10 @@ toolboxes" (D75–D77); D91 (Beaver #57) stays rejected.
   says `active`, a Player block is pinned under the Log feed's detail pane:
   play/pause, −10 s / +10 s, a bar dragged to seek (one `player.seek` on
   release), Live on a seekable live stream, and the state. Beaver polls
-  `player.state` every second (3 s timeout, never two at once, every 5 s
-  after three failures) and looks for the toolbox every 10 s while it's
+  `player.state` every second while the Log feed shows a live session (3 s
+  timeout, never two at once, every 5 s after three failures); clicks while
+  a command is on its way are dropped, so they never pile up on the
+  device's one-at-a-time line ahead of agents' calls and looks for the toolbox every 10 s while it's
   missing. Errors are a line in the block, never a toast; nothing activates
   Beaver or the device. Hotkeys are ⌥⌘P, ⌥⌘←, ⌥⌘→: plain Space and arrows
   are the feed's, ⌃Space is macOS's input switch.
@@ -3424,9 +3426,10 @@ toolboxes" (D75–D77); D91 (Beaver #57) stays rejected.
   storage, log out or restart the app from Beaver. This is a fixed set of
   five calls on one toolbox, none destructive, built for one job. Running
   arbitrary app tools from the UI stays out.
-- **Ad breaks:** Beaver marks the breaks it saw (the content position of the
-  last poll before `ad` turned true; up to a poll early; per entry, in
-  memory). When `player.state` reports `adBreaks` they are drawn too; a seen
+- **Ad breaks:** on VOD Beaver marks the breaks it saw (the content position
+  under the ad when the app reports it, else that of the last poll before
+  `ad` turned true, up to a poll early; forgotten after a seek; per entry, in
+  memory). Not on live, where the DVR window slides under fixed ticks. When `player.state` reports `adBreaks` they are drawn too; a seen
   break within 2 s of a reported one is the same. During an ad on an app
   that doesn't report `contentPosition`, the bar keeps the content's last
   position.

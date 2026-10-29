@@ -104,8 +104,10 @@ public enum PlayerCommand: Sendable, Equatable {
     }
 }
 
-/// Ad breaks Beaver saw while polling: the content position of the last
-/// poll before `ad` turned true. Up to one poll early. A new entry clears them.
+/// Ad breaks Beaver saw while polling: the content position under the ad when
+/// the app reports it, else that of the last poll before `ad` turned true (up
+/// to one poll early). VOD only: a live DVR window slides under fixed ticks.
+/// A new entry clears them.
 public struct SeenAdBreaks: Sendable, Equatable {
     static let sameBreak = 2.0
 
@@ -117,15 +119,19 @@ public struct SeenAdBreaks: Sendable, Equatable {
     public init() {}
 
     public mutating func observe(_ state: PlayerState) {
-        guard state.active else { return }
+        guard state.active, state.streamType != .live, state.streamType != .liveDvr else { return }
         if state.entryId != entryId { self = SeenAdBreaks(); entryId = state.entryId }
-        if state.ad, !wasAd, let at = lastContent, !positions.contains(where: { abs($0 - at) < Self.sameBreak }) {
+        if state.ad, !wasAd, let at = state.contentPosition ?? lastContent,
+           !positions.contains(where: { abs($0 - at) < Self.sameBreak }) {
             positions.append(at)
             positions.sort()
         }
         wasAd = state.ad
         if !state.ad { lastContent = state.contentPosition ?? state.position }
     }
+
+    /// A seek moved the playhead: the last position no longer says where an ad starts.
+    public mutating func forgetPosition() { lastContent = nil }
 
     /// Reported breaks, plus the seen ones no reported break is near.
     public func merged(with reported: [Double]?) -> [Double] {
@@ -153,6 +159,10 @@ public final class PlayerPoller {
     @ObservationIgnored public let sessionId: Int64
     @ObservationIgnored private let device: any DeviceLink
     @ObservationIgnored private let interval: Duration
+    @ObservationIgnored private var polling = false
+    /// A command is on its way: further clicks are dropped, so they don't
+    /// queue on the device's one-at-a-time line ahead of agents' calls.
+    public private(set) var sending = false
 
     /// Short, so a slow app never keeps an agent's tools_call waiting behind a poll for long.
     static let pollTimeout: Duration = .seconds(3)
@@ -166,7 +176,7 @@ public final class PlayerPoller {
     }
 
     /// Until cancelled: look for the toolbox every 10 s, then poll every
-    /// second (every 5 s after three failures in a row). Never two at once.
+    /// second (every 5 s after three failures in a row).
     public func run() async {
         while !Task.isCancelled {
             if !available { await discover() }
@@ -182,7 +192,11 @@ public final class PlayerPoller {
         available = tools.map { Toolboxes.tools(fromListResult: $0).contains { $0.name == "player.state" } } ?? false
     }
 
+    /// One at a time: a poll already on its way answers for this one too.
     public func poll() async {
+        guard !polling else { return }
+        polling = true
+        defer { polling = false }
         let answer: AppBuild.Answer
         do {
             answer = AppBuild.answer(fromCallResult: try await call("player.state", [:], timeout: Self.pollTimeout))
@@ -192,6 +206,7 @@ public final class PlayerPoller {
         switch answer {
         case .value(let json):
             let s = PlayerState(json: json)
+            if s.entryId != state?.entryId { timeline = nil }
             state = s
             seen.observe(s)
             if !s.active { timeline = nil } else if !s.ad || s.contentPosition != nil { timeline = s.timeline }
@@ -208,6 +223,13 @@ public final class PlayerPoller {
 
     /// The command, then a poll at once; the command's error outlives the poll.
     public func send(_ command: PlayerCommand) async {
+        guard !sending else { return }
+        sending = true
+        defer { sending = false }
+        switch command {
+        case .seek, .offset, .goLive: seen.forgetPosition()
+        case .play, .pause: break
+        }
         var failure: String?
         do {
             let reply = try await call(command.tool, command.arguments(state), timeout: DeviceMCPClient.callTimeout)
