@@ -20,7 +20,9 @@ does the same for a manual release.
   player (Brightcove, the default player and its web engine…), position, and
   badges for paused/buffering/ad, VOD/live/live with DVR, DRM and mute; ad
   breaks show as ticks on the bar, and the last playback error as a line.
-  Needs QuickBrick v16.0.0-rc.108 or later (its `player` toolbox), on phones,
+  Needs QuickBrick v16.0.0-rc.108 or later (its `player` toolbox); the
+  player name, Next and the fuller state need v16.0.0-rc.122 or later (v15:
+  the first release after 15.1.21), on phones,
   Apple TV, Android TV and web TVs connected through X-Ray. Agents get a
   `player` recipe in `beaver_guide`.
 

@@ -3436,7 +3436,8 @@ toolboxes" (D75–D77); D91 (Beaver #57) stays rejected.
   client-side schedules only, SSAI breaks come in the stream. During an ad on an app
   that doesn't report `contentPosition`, the bar keeps the content's last
   position.
-- **Richer state:** a QuickBrick PR adds `seekableDuration`,
+- **Richer state:** QuickBrick v16.0.0-rc.122 (v15: the first release after
+  15.1.21; applicaster/QuickBrick#8976, #8977) adds `seekableDuration`,
   `contentPosition`/`contentDuration`, `drm` (key systems from
   `entry.extensions.drm`), `lastError`, `next`, and which player plays:
   `plugin` (its id: the default player, Brightcove, Kaltura…) and, for the
