@@ -433,9 +433,10 @@ handshake's fields when it arrives.
   `session.launch_id`. Beaver 4.21.0 or later only.
 - `device_uid` identifies the device across a restart (D77); D73's
   fingerprint heuristic is the fallback for a connection without one.
-- Sent by iOS and Android's native WebSocket sink (#2848). The JS-only sink
-  (`src/sinks/socket.ts`) doesn't send it, so such apps have no device id
-  and no toolboxes (§4.5) in Beaver.
+- Sent by iOS and Android's native WebSocket sink (#2848), and by the web's
+  socket sink (`src/sinks/socket.ts`) since quick-brick-xray 2.70.0
+  (Zapp-Frameworks #2886), which also answers MCP (§4.5). An older JS-only
+  sink doesn't send it, so such apps have no device id and no toolboxes.
 - Android's actual values: `deviceId` is `UUIDUtil.getUUID() ?: Build.MODEL`
   (the same UUID-or-model fallback as iOS), `platform` is `"Android
   <RELEASE>"`, e.g. `"Android 15"` — splits the same way as iOS's `"iOS

@@ -83,9 +83,17 @@ port, notifications), Zapp (token), About (version, What's New, updates).
    another. A sheet lists what differs; click a line to open it. Ask the agent
    "compare session <a> with <b>" → `sessions_compare`.
 13. Toolboxes: connect an app built with quick-brick-xray's **native** WebSocket
-   sink (the JS-only sink has none), then Sessions → select its live session —
+   sink, or a web app on quick-brick-xray 2.70.0 or later (an older JS-only
+   sink has none), then Sessions → select its live session —
    the details list its toolboxes (the device badge's popover links there with
    **Toolboxes in Sessions**). Nothing to turn on in Beaver.
+13. Player controls (D99): connect an app on QuickBrick v16.0.0-rc.108 or
+   later the same way, open the Log feed and start a video. A **Player** block
+   appears at the bottom of the right-hand pane within a second: play/pause,
+   −10 s / +10 s (⌥⌘P, ⌥⌘←, ⌥⌘→), a bar to drag (VOD only), **Next** (⌥⌘N) when the app has a next item, and the state (VOD / LIVE / LIVE · DVR, DRM, ad breaks as orange
+   ticks, the last playback error). It goes when the player closes. A TV added
+   with Connect a TV… has no toolboxes, so no block. Agents do the same with
+   `tools_call(name: "player.pause")`.
 13. Session retention: Settings → General → **Delete sessions older than**
    shows 30 Days, and "Database on disk" fills in a few seconds after
    launch. `beaver_status` reports `retentionDays: 30` and `storeBytes`.
@@ -401,6 +409,16 @@ over the Chrome DevTools Protocol. The TV's developer mode must be on.
 4. `tools_call(name: "storage.get", arguments: {key: "volume"})` — the app's answer. The summary names the app (`(default)` when the default picked it); Next's `logs_wait(sessionId: …)` reads that app's logs. `tools_call` is marked destructive, so clients that honor destructiveHint ask the user to confirm: app tools can delete data or restart the app.
 5. `tools_call(name: "app.restart")` may time out or report a disconnect: the app drops the connection first, so it may still have run. `beaver_status()` shows it back in a new session; the default follows it. The Agent panel notes the drop. An error that says the call didn't reach the app is different: nothing ran, so the same call can be sent again.
 6. `toolboxes_list(deviceId: "beaver")` and `tools_call(deviceId: "beaver", name: "logs.query", arguments: {since: "5m"})` — Beaver's own tools the same way (`"beaver"` in any case). Beaver's destructive tools aren't listed there: call them directly. A Beaver tool reached through `tools_call` is marked destructive too (the hint is `tools_call`'s), so call Beaver's tools directly to avoid a confirmation.
+
+### player — drive the app's player
+
+The same tools the Log feed's Player block uses (D99); apps on QuickBrick v16.0.0-rc.108 or later.
+
+1. `toolboxes_list(toolbox: "player")` — `state`, `play`, `pause`, `seek`, `offset`, and from QuickBrick v16.0.0-rc.122 (v15: after 15.1.21) `next`. No `player` toolbox: the app's QuickBrick is older.
+2. `tools_call(name: "player.state")` — `active`, entry, `position`/`duration` in seconds, `playing`, `ad`, `live`; QuickBrick v16.0.0-rc.122 or later (v15: after 15.1.21) adds `seekableDuration`, `contentPosition`/`contentDuration`, `drm`, `lastError`, `plugin` (the player plugin's id, e.g. `QuickBrickPlayerPlugin`, `quick-brick-player-brightcove`) and `engine` (the default player's web engine: hls.js, dash.js, shaka, video.js), `next` (what Play Next would play, or null when the item has no play-next feed; it is there from the start of the item). Live with `seekableDuration` > 0 is DVR. Don't seek a live stream with `seek`: engines count live positions differently (native players back from the live edge); use `offset`, as the app's own controls do.
+3. `tools_call(name: "player.pause")`, then `tools_call(name: "player.seek", arguments: {position: 600})` (negative counts from the end) or `tools_call(name: "player.offset", arguments: {seconds: -10})`. Read `player.state` again: SSAI may snap a seek back to the break before it. `tools_call(name: "player.next")` plays `next` the way the Play Next overlay does.
+4. `logs_wait(sessionId: <from the result>, afterId: <its latestEventId>, filter: {subsystems: ["*player*"]})` — what the player logged about it.
+5. "No JS handler is registered for 'player.state'" while `toolboxes_list` lists it: the app bundles two copies of quick-brick-xray (often one under quick-brick-iterable) and the wrong one answers. Every React toolbox is affected; tell the user it's the app's build: quick-brick-iterable 0.5.1 or later stops pulling the second copy, and quick-brick-xray 2.76.5 or later shares one handler registry between copies (all copies must be that new).
 
 ### organise — bookmarks, saved filters, a clean screen
 

@@ -462,7 +462,8 @@ Beaver/
 │   │   │   ├── CommandBarView.swift
 │   │   │   └── CommandBarViewModel.swift
 │   │   ├── DetailPane/
-│   │   │   └── DetailPaneView.swift
+│   │   │   ├── DetailPaneView.swift
+│   │   │   └── PlayerControlsView.swift  # D99: player block, pinned under the pane
 │   │   └── Shared/
 │   │       ├── JSONSyntaxText.swift   (D18 colour palette + row builder)
 │   │       └── Toast.swift            (D33 ToastCenter + ToastPresenter)

@@ -37,6 +37,15 @@ struct DetailPaneView: View {
     }
 
     var body: some View {
+        // The player block (D99) stays under whatever the pane shows.
+        VStack(spacing: 0) {
+            content.frame(maxHeight: .infinity)
+            PlayerControlsView()
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
         if let event {
             VStack(spacing: 0) {
                 if isFinding {
