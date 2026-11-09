@@ -6,18 +6,20 @@ import Foundation
 /// Terms are ANDed; `OR` joins its neighbours into one group (it binds
 /// tighter than AND, as in Google). Per term: `-x` excludes, `+x` requires
 /// (the same as plain), `"a phrase"`, `/regex/`, and the field prefixes
-/// `level:` `cat:` `sub:` `msg:`. Unknown prefixes (`foo:bar`) stay text.
+/// `level:` `cat:` `sub:` `msg:`, and Beaver's own `ctx:` (the context
+/// payload; `ctx:key=value` for one key). Unknown prefixes (`foo:bar`) stay text.
 /// `LogStore` compiles the parsed query to SQL.
 public enum LogQuery {
 
     public enum Field: String, Sendable {
-        case any, level, cat, sub, msg
+        case any, level, cat, sub, msg, ctx
     }
 
     public struct Term: Equatable, Sendable {
         public var field: Field
         public var negated: Bool
-        /// Lower-cased. For a regex term, the whole `/…/` token — which is
+        /// Lower-cased, except for `ctx:` (JSON keys are case-sensitive;
+        /// `LIKE` ignores case anyway). For a regex term, the whole `/…/` token — which is
         /// what `level:` compares against, so `level:/x/` matches nothing,
         /// as in zapp-support.
         public var text: String
@@ -47,8 +49,9 @@ public enum LogQuery {
                 text = String(text.dropFirst().dropLast())
             }
             if text.isEmpty { continue }
-            let term = Term(field: token.prefix.flatMap { Field(rawValue: $0.lowercased()) } ?? .any,
-                            negated: token.sign == "-", text: text.lowercased(), regex: regex)
+            let field = token.prefix.flatMap { Field(rawValue: $0.lowercased()) } ?? .any
+            let term = Term(field: field, negated: token.sign == "-",
+                            text: field == .ctx ? text : text.lowercased(), regex: regex)
             if orNext { groups[groups.count - 1].append(term) } else { groups.append([term]) }
             orNext = false
         }
@@ -78,11 +81,11 @@ public enum LogQuery {
         return l == "warn" ? "warning" : l
     }
 
-    /// zapp-support's `TOKEN`, unchanged: sign, field prefix, then a
+    /// zapp-support's `TOKEN`, plus `ctx:`: sign, field prefix, then a
     /// `"phrase"`, a `/regex/` ending at whitespace (so `/var/log` is a
     /// path), or a run of non-space.
     private static let token = try! NSRegularExpression(
-        pattern: #"([-+])?(?:(level|cat|sub|msg):)?("[^"]*"|/(?:\\.|[^/\\])+/(?=\s|$)|\S+)"#,
+        pattern: #"([-+])?(?:(level|cat|sub|msg|ctx):)?("[^"]*"|/(?:\\.|[^/\\])+/(?=\s|$)|\S+)"#,
         options: [.caseInsensitive]
     )
 

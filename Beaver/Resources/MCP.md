@@ -258,7 +258,8 @@ takes focus, unless you pass `reveal: true`.
 and in zapp-support's web logger (Beaver 4.14.0 or later). Case never matters.
 
 - `timeout player` — both words; a word is found in message, subsystem or
-  category (and the data payload with `searchPayloads: true`).
+  category (and the data and context payloads with `searchPayloads: true`;
+  context since Beaver 4.25.0).
 - `timeout OR stall` — either; OR binds tighter than the space:
   `a OR b c` is (a or b) and c.
 - `-heartbeat` excludes; `+word` is the same as `word`.
@@ -268,13 +269,20 @@ and in zapp-support's web logger (Beaver 4.14.0 or later). Case never matters.
   "this and above".
 - `sub:auth`, `cat:net`, `msg:401` — in that field only; `*` globs in `sub:`
   and `cat:`. Other `word:` prefixes are plain text.
+- `ctx:payment_session_id=<id>` — the value at that key of the event's
+  context contains `<id>` (a dotted path for nested keys); `ctx:text` — the
+  context contains text; `ctx:/re/` — a regex over it. Searched with or
+  without `searchPayloads` (Beaver 4.25.0 or later).
 
 1. `logs_query(filter: {search: "level:error sub:*auth* -heartbeat"}, since: "15m")`
    — auth errors without the heartbeat noise.
 2. `logs_facets(filter: {search: "timeout OR stall"})` — who logs either.
-3. `ui_show(filter: {search: "level:error sub:*auth* -heartbeat"})` — the
+3. `logs_query(filter: {search: "ctx:payment_session_id=<id>"}, includeData: true)`
+   — one purchase flow: every event whose context carries that id, with the
+   data and context of each row.
+4. `ui_show(filter: {search: "level:error sub:*auth* -heartbeat"})` — the
    user sees the same query in the Filter field.
-4. An unclosed quote or a regex that doesn't compile is an error; fix the
+5. An unclosed quote or a regex that doesn't compile is an error; fix the
    query, or pass `searchIsRegex: true` to take the text as one regular
    expression.
 

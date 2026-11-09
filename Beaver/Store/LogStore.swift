@@ -1781,7 +1781,7 @@ public actor LogStore {
     /// Translate a `Filter` into a SQL WHERE clause + bound arguments.
     ///
     /// Substring search uses `LIKE '%x%'` across message/subsystem/
-    /// category, plus `data_json` when `searchPayloads` is on. Regex uses the custom `REGEXP` function registered in
+    /// category, plus `data_json` and `context_json` when `searchPayloads` is on. Regex uses the custom `REGEXP` function registered in
     /// `init`. FTS5 was tried first but its prefix-match semantics
     /// (`'l*'` returns every word starting with `l`) produced huge
     /// candidate sets for short terms, making `NOT IN` exclude queries
@@ -1866,16 +1866,16 @@ public actor LogStore {
         return ("WHERE " + clauses.joined(separator: " AND "), args)
     }
 
-    /// `(message … OR subsystem … OR category … [OR data …])` for one
-    /// term, or `nil` for a regex that doesn't compile.
+    /// `(message … OR subsystem … OR category … [OR data … OR context …])`
+    /// for one term, or `nil` for a regex that doesn't compile.
     ///
-    /// `data_json` is coalesced: a NULL would make the whole OR NULL
+    /// The payloads are coalesced: a NULL would make the whole OR NULL
     /// when nothing else matched, and `NOT NULL` drops the row from an
     /// exclude it has nothing to do with.
     static func textMatch(_ term: String, isRegex: Bool, payloads: Bool)
         -> (String, [any DatabaseValueConvertible])? {
         var columns = ["message", "subsystem", "category"]
-        if payloads { columns.append("COALESCE(data_json, '')") }
+        if payloads { columns += ["COALESCE(data_json, '')", "COALESCE(context_json, '')"] }
         if isRegex {
             guard Filter.isValidRegex(term) else { return nil }
             return anyColumn(columns, "REGEXP ?", Filter.caseInsensitive(term))
@@ -1916,12 +1916,35 @@ public actor LogStore {
         case .msg: column = "message"
         case .sub: column = "subsystem"
         case .cat: column = "category"
+        case .ctx: return contextMatch(t)
         }
         if let regex = t.regex { return anyColumn([column], "REGEXP ?", Filter.caseInsensitive(regex)) }
         var pattern = likeEscaped(t.text)
         // `*` globs names, like the MCP subsystem/category filters.
         if t.field != .msg { pattern = pattern.replacingOccurrences(of: "*", with: "%") }
         return anyColumn([column], #"LIKE ? ESCAPE '\'"#, "%" + pattern + "%")
+    }
+
+    /// `ctx:text` — the context payload contains text; `ctx:key=value` (a
+    /// dotted path for nested keys) — the value at that key contains value;
+    /// `ctx:/re/` — a regex over the context JSON.
+    ///
+    /// The plain `LIKE` runs first so `json_extract` only parses rows that
+    /// already contain the value: contexts reach 80 KB. `json_valid` keeps a
+    /// malformed payload from failing the whole query; the `COALESCE` keeps
+    /// `-ctx:key=value` from dropping events without that key.
+    private static func contextMatch(_ t: LogQuery.Term) -> (String, [any DatabaseValueConvertible]) {
+        let context = "COALESCE(context_json, '')"
+        if let regex = t.regex { return anyColumn([context], "REGEXP ?", Filter.caseInsensitive(regex)) }
+        let like = #"LIKE ? ESCAPE '\'"#
+        let parts = t.text.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+        guard parts.count == 2, !parts[0].isEmpty, !parts[1].isEmpty, !parts[0].contains("\"") else {
+            return anyColumn([context], like, "%" + likeEscaped(t.text) + "%")
+        }
+        let path = "$" + parts[0].split(separator: ".").map { #"."\#($0)""# }.joined()
+        let value = "%" + likeEscaped(String(parts[1])) + "%"
+        return ("(\(context) \(like) AND COALESCE(CASE WHEN json_valid(context_json) "
+                + "THEN CAST(json_extract(context_json, ?) AS TEXT) END, '') \(like))", [value, path, value])
     }
 
     /// `%` and `_` are wildcards to LIKE; a user typing `100%` means the

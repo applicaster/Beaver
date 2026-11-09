@@ -3458,3 +3458,27 @@ toolboxes" (D75–D77); D91 (Beaver #57) stays rejected.
 - **Alternatives:** a generic tool runner (D91, rejected); a separate player
   window (another place to look, away from the logs); always showing the
   block with "Nothing playing" (space taken from the payload for nothing).
+
+## D100. Search reaches the context payload; `ctx:` names a key of it
+
+**Status:** Accepted (2026-11-09). Amends D40 and D88.
+
+- **Decision:** the `{}` payload toggle (`Filter.searchPayloads`) searches
+  `context_json` as well as `data_json`, in Search and Exclude, for the Log
+  feed and every filter-taking MCP tool. The query syntax gains `ctx:`:
+  `ctx:text` (the context contains text), `ctx:key=value` (the value at that
+  key — a dotted path for nested keys, case-sensitive — contains value) and
+  `ctx:/re/`. `ctx:` is searched with the toggle off, as `msg:` is.
+  `logs_query` with `includeData` shows each row's context next to its data,
+  each cut at 2 KB.
+- **Why:** X-Ray puts flow ids (`payment_session_id`) in the event's
+  context, not its data; one filter should show a whole purchase flow.
+- **Cost:** contexts reach 80 KB (hooksManager), so plain words still touch
+  context only with `{}` on (D40). `ctx:key=value` runs a `LIKE '%value%'`
+  first and `json_extract` only on rows that pass it; `json_valid` keeps a
+  malformed payload from failing the query.
+- **Differences from zapp-support:** `ctx:` is Beaver's; there it is plain
+  text until zapp-support adopts it.
+- **Alternatives:** searching context with the toggle off (every query pays
+  for 80 KB rows); `ctx:` as `json_each` over every key (parses every
+  context on every query).

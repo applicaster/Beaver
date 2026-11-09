@@ -167,11 +167,11 @@ public enum ToolSchema {
 
     public static let filter: JSON = object([
         "minLevel": string("Lowest level: verbose, debug, info, warning, error. Aliases: warn, err, e, 0–4."),
-        "search": string("A query in the Log feed's syntax, the same as zapp-support's web logger; case-insensitive. Words are ANDed and each is found in message, subsystem or category (plus data with searchPayloads); OR joins alternatives, -word excludes, \"a phrase\", /regex/, and level:error (exactly that level; warn = warning), sub:, cat: (* globs), msg:. Example: \"level:error sub:*auth* -heartbeat\"."),
+        "search": string("A query in the Log feed's syntax, the same as zapp-support's web logger; case-insensitive. Words are ANDed and each is found in message, subsystem or category (plus the data and context payloads with searchPayloads); OR joins alternatives, -word excludes, \"a phrase\", /regex/, and level:error (exactly that level; warn = warning), sub:, cat: (* globs), msg:, and ctx: for the context payload (ctx:payment_session_id=<id> matches one key; always searched, no searchPayloads needed). Example: \"level:error sub:*auth* -heartbeat\"."),
         "searchIsRegex": boolean("Treat the whole search as one regular expression, without the query syntax."),
         "exclude": string("Hide events containing this text."),
         "excludeIsRegex": boolean("Treat exclude as a regular expression."),
-        "searchPayloads": boolean("Also search the data payload. Slower on big sessions."),
+        "searchPayloads": boolean("Also search the data and context payloads. Slower on big sessions."),
         "subsystems": strings("Only these subsystems. * globs, name fragments and any case work; the result says what they matched."),
         "excludeSubsystems": strings("Hide these subsystems; same matching as subsystems."),
         "categories": strings("Only these categories; same matching as subsystems."),

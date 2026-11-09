@@ -12,6 +12,14 @@ does the same for a manual release.
 
 ## [Unreleased]
 
+### Added
+- **Search finds values in an event's context.** With `{}` on, Filter and
+  Exclude also search the context payload (where X-Ray puts ids such as
+  `payment_session_id`). New in the query syntax: `ctx:payment_session_id=<id>`
+  matches that key of the context, `ctx:text` anywhere in it — both with `{}`
+  off too. Agents: the same in `filter.search` and `searchPayloads`, and
+  `logs_query` with `includeData` now shows each row's context.
+
 ## [4.24.0] - 2026-10-30
 
 ### Added
