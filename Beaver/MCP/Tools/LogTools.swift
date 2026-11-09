@@ -67,7 +67,7 @@ enum LogTools {
             "filter": ToolSchema.filter,
             "limit": ToolSchema.integer("Rows per page. Default 100, max 500."),
             "order": ToolSchema.string("newest (default) or oldest first.", oneOf: ["newest", "oldest"]),
-            "includeData": ToolSchema.boolean("Add each event's data payload, cut at 2 KB. Default false; logs_get gives it in full."),
+            "includeData": ToolSchema.boolean("Add each event's data and context payloads, each cut at 2 KB. Default false; logs_get gives them in full."),
         ].merging(ToolSchema.range) { first, _ in first })
     ) { (args: ToolArguments, ctx: ToolContext) async throws -> ToolResult in
         let s = try await ctx.resolveSession(args)
@@ -101,11 +101,12 @@ enum LogTools {
                 "subsystem": .string(e.subsystem), "category": .string(e.category),
                 "message": .string(String(e.message.prefix(ToolText.messageCap))),
             ]
-            if includeData, let data = e.dataJSON {
-                let capped = ToolText.capped(data, maxBytes: 2048)
-                line += "\n    data: " + capped.text + (capped.truncated ? " … (logs_get for all)" : "")
-                row["data"] = .string(capped.text)
-                row["dataTruncated"] = .bool(capped.truncated)
+            for (key, payload) in [("data", e.dataJSON), ("context", e.contextJSON)] where includeData {
+                guard let payload else { continue }
+                let capped = ToolText.capped(payload, maxBytes: 2048)
+                line += "\n    \(key): " + capped.text + (capped.truncated ? " … (logs_get for all)" : "")
+                row[key] = .string(capped.text)
+                row[key + "Truncated"] = .bool(capped.truncated)
             }
             lines.append(line)
             rows.append(.object(row))

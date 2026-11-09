@@ -11,12 +11,13 @@ struct LogQueryTests {
     /// Does one event match `query`, filtered by `LogStore`'s SQL?
     private func hit(_ query: String, _ message: String, category: String = "App",
                      subsystem: String = "Core", level: LogLevel = .info,
-                     data: String? = nil, payloads: Bool = false, regex: Bool = false) async throws -> Bool {
+                     data: String? = nil, context: String? = nil,
+                     payloads: Bool = false, regex: Bool = false) async throws -> Bool {
         let store = try LogStore(source: .inMemory)
         let session = try await store.createSession(source: .live)
         try await store.appendBulk([DecodedEvent(timestampMillis: 1_000, level: level, subsystem: subsystem,
                                                  category: category, message: message,
-                                                 dataJSON: data, contextJSON: nil)], to: session.id)
+                                                 dataJSON: data, contextJSON: context)], to: session.id)
         let filter = Filter(search: query, searchIsRegex: regex, searchPayloads: payloads)
         return try await store.feedSnapshot(sessionId: session.id, filter: filter, limit: 10).events.count == 1
     }
@@ -48,6 +49,25 @@ struct LogQueryTests {
         #expect(try await hit("foo:bar", "see foo:bar"))                     // unknown prefix = plain
         #expect(try await hit("/var/log", "/var/log/x"))                     // path, not regex
         #expect(try await hit("cat:", "has cat: here"))
+    }
+
+    @Test("ctx: searches the context payload; ctx:key=value one key of it")
+    func contextField() async throws {
+        let ctx = #"{"payment_session_id":"69ab12da-4099","Flow":{"step":2},"other":"b56a"}"#
+        #expect(try await hit("ctx:payment_session_id=69AB12DA", "x", context: ctx))
+        #expect(try await !hit("ctx:payment_session_id=b56a", "x", context: ctx))       // in context, other key
+        #expect(try await !hit("ctx:payment_session_id=69ab", "x"))                    // no context
+        #expect(try await hit("ctx:Flow.step=2", "x", context: ctx))                   // nested, key keeps case
+        #expect(try await !hit("ctx:flow.step=2", "x", context: ctx))
+        #expect(try await hit("ctx:b56a", "x", context: ctx))                          // anywhere in context
+        #expect(try await hit("CTX:/69ab\\d*12/", "x", context: ctx))                 // regex
+        #expect(try await hit("-ctx:payment_session_id=69ab", "x"))                    // no context survives
+        #expect(try await hit("-ctx:payment_session_id=b56a", "x", context: ctx))      // value under another key
+        #expect(try await !hit("-ctx:payment_session_id=69ab", "x", context: ctx))
+        #expect(try await !hit("ctx:k=v", "x", context: "k=v not json"))               // malformed JSON: no error
+        #expect(try await !hit("69ab12da", "x", context: ctx))                         // plain words: {} off
+        #expect(try await hit("69ab12da", "x", context: ctx, payloads: true))          // {} on
+        #expect(try await hit("-69ab12da", "x", payloads: true))                       // NULL context survives
     }
 
     @Test("Parsing: AND of OR-groups, lower-cased, prefixes any case")

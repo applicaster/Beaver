@@ -369,13 +369,14 @@ enum LogQueryHelp {
     static let text: AttributedString = (try? AttributedString(markdown: #"""
         **Filter syntax** — the same as the web logger (zapp-support).
 
-        `timeout player` — both words, anywhere in message, subsystem or category (and data with `{}`)
+        `timeout player` — both words, anywhere in message, subsystem or category (and data and context with `{}`)
         `timeout OR stall` — either one
         `-heartbeat` — without it
         `"token refresh"` — the exact phrase
         `/^err\d+/` — a regular expression
         `level:error` — exactly that level (`warn` = `warning`)
         `sub:auth`  `cat:net`  `msg:401` — in that field only; `*` globs in `sub:` and `cat:`
+        `ctx:payment_session_id=b56a…` — that key of the context; `ctx:abc` — anywhere in it
 
         Example: `level:error sub:*auth* -heartbeat`
         With `.*` on, the whole text is one regular expression instead.
